@@ -2,8 +2,8 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 import pytest
+import xarray as xr
 from credit.datasets.gen_2.local import LocalDataset
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader

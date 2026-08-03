@@ -1,9 +1,9 @@
-import os
 import inspect
 import logging
-
+import os
 from collections import defaultdict
 from dataclasses import dataclass
+
 import netCDF4 as nc
 import numpy as np
 

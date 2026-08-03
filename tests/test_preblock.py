@@ -5,25 +5,24 @@ import copy
 import numpy as np
 import pytest
 import torch
-import torch.nn as nn
 import xarray as xr
-
-from bridgescaler.distributed_tensor import DStandardScalerTensor
 from bridgescaler import save_scaler_dict, scale_var_dict
+from bridgescaler.distributed_tensor import DStandardScalerTensor
+from credit.datasets.gen_2.channel_utils import ChannelSchema
+from credit.postblock import build_postblocks
 from credit.preblock import apply_preblocks, build_preblocks
+from credit.preblock._utils import (
+    _flatten_spatial_tensors,
+    _parse_variable_selection,
+    _unflatten_spatial_tensors,
+)
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.log import LogTransform
 from credit.preblock.regrid import Regridder
 from credit.preblock.rename import RenameVariables
 from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
-from credit.preblock._utils import (
-    _parse_variable_selection,
-    _flatten_spatial_tensors,
-    _unflatten_spatial_tensors,
-)
-from credit.postblock import build_postblocks
-from credit.datasets.gen_2.channel_utils import ChannelSchema
+from torch import nn
 
 
 def create_synthetic_data() -> dict:

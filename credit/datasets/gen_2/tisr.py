@@ -26,8 +26,8 @@ Note that Total Incident Solar Radiation (TISR) and Total Solar Irradiance (TSI)
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 import logging
+from collections.abc import Sequence
 from typing import Any
 
 import pandas as pd
@@ -949,7 +949,7 @@ class TISRDataset(BaseDataset):
 
     def _get_file_source(self, field_config: dict[str, Any]) -> None:
         """Returns None since TISR dataset is not loading any data from local or remote files."""
-        return None
+        return
 
     def _extract_field(
         self,

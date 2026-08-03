@@ -1,8 +1,9 @@
-import xarray as xr
 import argparse
-import numpy as np
-from os.path import join, exists
 from os import makedirs
+from os.path import exists, join
+
+import numpy as np
+import xarray as xr
 from sklearn.neighbors import BallTree
 
 

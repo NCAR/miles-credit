@@ -7,12 +7,11 @@ Content
 """
 
 import logging
-from typing import Dict
 
 import numpy as np
+import torch
 import xarray as xr
 
-import torch
 from credit.data import Sample, device_compatible_to
 
 logger = logging.getLogger(__name__)
@@ -213,7 +212,7 @@ class Normalize_ERA5_and_Forcing:
 
         return device_compatible_to(transformed_x, device)
 
-    def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def transform(self, sample: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Transform training batches.
 
         Transform handles forcing & static as follows:

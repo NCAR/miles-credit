@@ -1,5 +1,5 @@
-import torch.nn as nn
 import torch
+from torch import nn
 
 
 class StochasticDecompositionLayer(nn.Module):

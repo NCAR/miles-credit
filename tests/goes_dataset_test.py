@@ -13,13 +13,11 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-from torch.utils.data import DataLoader
-
 from credit.datasets.gen_2.goes import (
-    GOESDataset,
     _FILE_NOT_FOUND,
     _FILE_QC_MASKED,
     _FILE_SKIP,
+    GOESDataset,
     _build_spatial_slices,
     _extent_covers,
     _extent_to_bbox,
@@ -29,6 +27,7 @@ from credit.datasets.gen_2.goes import (
 )
 from credit.datasets.gen_2.grid_utils import GridSchema
 from credit.samplers import DistributedMultiStepBatchSampler
+from torch.utils.data import DataLoader
 
 # Captured at import time, before any test's patch_goes_io fixture monkeypatches
 # xr.open_dataset — used to read back a real written file (e.g. GridSchema.load)

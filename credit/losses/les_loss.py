@@ -1,11 +1,11 @@
-import numpy as np
-
-import torch
-import torch.nn as nn
-from weighted_loss import latitude_weights
-from spectral import SpectralLoss2D
-from power import PSDLoss
 import logging
+
+import numpy as np
+import torch
+from power import PSDLoss
+from spectral import SpectralLoss2D
+from torch import nn
+from weighted_loss import latitude_weights
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class LESLoss2D(torch.nn.Module):
     """
 
     def __init__(self, conf, validation=False):
-        super(LESLoss2D, self).__init__()
+        super().__init__()
 
         self.conf = conf
         # self.training_loss = conf["loss"]["training_loss"]

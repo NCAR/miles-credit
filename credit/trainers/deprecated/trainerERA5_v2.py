@@ -8,27 +8,25 @@ Content:
         - fit
 """
 
-import os
 import gc
-import tqdm
 import logging
+import os
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import pandas as pd
-
 import torch
 import torch.distributed as dist
-from torch.cuda.amp import autocast
-from torch.utils.data import IterableDataset
-
-import optuna
+import tqdm
 from credit.data import concat_and_reshape, reshape_only
 from credit.models.checkpoint import TorchFSDPCheckpointIO
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
 from credit.scheduler import update_on_batch, update_on_epoch
-from credit.trainers.utils import cleanup, accum_log, cycle
 from credit.trainers.base_trainer import BaseTrainer
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.trainers.utils import accum_log, cleanup, cycle
+from torch.cuda.amp import autocast
+from torch.utils.data import IterableDataset
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,6 @@
 
 import pandas as pd
 import pytest
-
 from credit.datasets.gen_2._utils import _extract_time_fmt, _find_file, _map_files
 
 

@@ -2,7 +2,6 @@ import os
 
 import numpy as np
 import xarray as xr
-
 from credit.verification.ensemble import spread_error
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])

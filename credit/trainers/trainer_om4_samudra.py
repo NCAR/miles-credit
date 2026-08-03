@@ -3,17 +3,17 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import torch
 import torch.distributed as dist
 import tqdm
 from torch.utils.data import IterableDataset
-from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log
-from credit.trainers.base_trainer import BaseTrainer
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from credit.postblock.wet_mask_samudra import WetMaskBlock
-import optuna
 
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.postblock.wet_mask_samudra import WetMaskBlock
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cycle
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +97,7 @@ class TrainerSamudra(BaseTrainer):
             backprop_on_timestep = self.conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, self.conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(self.conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"
@@ -608,7 +608,7 @@ class TrainerSamudra(BaseTrainer):
                     else:
                         # multi-step input
                         ### This is not quite right for general use. Its essentially two-in one-out assumption
-                        length = output_length if output_length > input_length else input_length
+                        length = max(input_length, output_length)
                         x_detach = x[:, :, length:, ...].detach()  # drop first timestep
                         if "y_diag" in batch:
                             x = torch.cat([x_detach, y_pred[:, :-varnum_diag, ...].detach()], dim=2)

@@ -16,11 +16,11 @@ Contact: mcginnis@ucar.edu
 
 """
 
-import xarray
-import os.path
 import glob
+import os.path
 from argparse import ArgumentParser
 
+import xarray
 
 parser = ArgumentParser(description="converts a directory of netcdf files into a zarr store")
 parser.add_argument("indir", help="directory containing one or more .nc files")

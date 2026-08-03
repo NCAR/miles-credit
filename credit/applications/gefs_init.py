@@ -1,10 +1,12 @@
 import argparse
-from multiprocessing import Pool
-from credit.gefs import download_gefs_run, process_member
-from functools import partial
-from os.path import join, exists
-import pandas as pd
 import os
+from functools import partial
+from multiprocessing import Pool
+from os.path import exists, join
+
+import pandas as pd
+
+from credit.gefs import download_gefs_run, process_member
 
 
 def main():
@@ -102,7 +104,6 @@ def main():
             ),
             member_names,
         )
-    return
 
 
 if __name__ == "__main__":

@@ -7,9 +7,9 @@ Layers that are purely local (1x1 convolutions, channel-wise normalization,
 activations, etc.) do not need wrappers and are left unchanged.
 """
 
-import torch.nn as nn
-import torch.nn.functional as F
 import torch.distributed as dist
+import torch.nn.functional as F
+from torch import nn
 
 from credit.domain_parallel.halo_exchange import HaloExchange
 from credit.domain_parallel.manager import get_domain_parallel_manager

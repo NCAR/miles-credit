@@ -1,13 +1,15 @@
-import xarray as xr
-import numpy as np
-import gcsfs
-from tqdm import tqdm
-import pandas as pd
-from os.path import join, exists, getsize
-import os
-from scipy.sparse import csr_matrix
 import logging
+import os
+from os.path import exists, getsize, join
+
+import gcsfs
+import numpy as np
+import pandas as pd
+import xarray as xr
 import yaml
+from scipy.sparse import csr_matrix
+from tqdm import tqdm
+
 from credit.interp import create_pressure_grid, interp_hybrid_to_hybrid_levels
 
 
@@ -46,7 +48,6 @@ def download_gefs_run(init_date_str: str, out_path: str, n_pert_members: int = 3
                 elif fs.du(member_file) != getsize(out_file):
                     os.remove(out_file)
                     fs.get(member_file, out_file)
-    return
 
 
 def load_member_tiles(path: str, init_date_str: str, member: str, variables: str):
@@ -405,4 +406,3 @@ def process_member(
     out_file = f"gefs_cam_grid_{member}.nc"
     print(member + ": Save to netcdf")
     interp_ds.to_netcdf(join(out_path, out_file))
-    return

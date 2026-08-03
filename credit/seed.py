@@ -1,7 +1,8 @@
 import os
-import torch
 import random
+
 import numpy as np
+import torch
 
 
 def seed_everything(seed=1234):

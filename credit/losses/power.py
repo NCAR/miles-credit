@@ -13,7 +13,7 @@ class PSDLoss(torch.nn.Module):
     """
 
     def __init__(self, wavenum_init=20):
-        super(PSDLoss, self).__init__()
+        super().__init__()
         self.wavenum_init = wavenum_init
 
     def forward(self, target, pred, weights=None):

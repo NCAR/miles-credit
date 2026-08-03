@@ -15,7 +15,6 @@ import pytest
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-
 from credit.losses.crps import RingCRPSLoss, ring_crps_loss
 
 

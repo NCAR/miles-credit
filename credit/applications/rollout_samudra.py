@@ -1,40 +1,40 @@
+import logging
+import multiprocessing as mp
 import os
 import sys
-import yaml
-import logging
-import warnings
-from pathlib import Path
-from argparse import ArgumentParser
-import multiprocessing as mp
 import traceback
+import warnings
+from argparse import ArgumentParser
 
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta
-import xarray as xr
+from pathlib import Path
+
 import numpy as np
 
 # ---------- #
 import torch
+import xarray as xr
+import yaml
+from torch.utils.data import DataLoader
+
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenSamplerSamudra, collate_fn
+from credit.datasets.gen_1.om4_multistep_batcher import Predict_Ocean_Batcher
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.forecast import load_forecasts
 
 # ---------- #
 # credit
 from credit.models import load_model
-from credit.seed import seed_everything
-from credit.distributed import get_rank_info
-from credit.datasets.gen_1.om4_multistep_batcher import Predict_Ocean_Batcher
-from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenSamplerSamudra, collate_fn
-from torch.utils.data import DataLoader
-from credit.postblock.wet_mask_samudra import WetMaskBlock
-from credit.pbs import launch_script, launch_script_mpi
-from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser
-
+from credit.pbs import launch_script, launch_script_mpi
+from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.postblock.wet_mask_samudra import WetMaskBlock
+from credit.seed import seed_everything
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -363,7 +363,7 @@ def predict(rank, world_size, conf, p):
             # multi-step in
             else:
                 if static_dim_size == 0:
-                    length = output_length if output_length > input_length else input_length
+                    length = max(input_length, output_length)
                     x_detach = x[:, :, length:, ...].detach()
                 else:
                     x_detach = x[:, :-static_dim_size, 1:, ...].detach()
@@ -492,7 +492,7 @@ def main():
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
-    logging.info("Save roll-outs to {}".format(forecast_save_loc))
+    logging.info(f"Save roll-outs to {forecast_save_loc}")
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:

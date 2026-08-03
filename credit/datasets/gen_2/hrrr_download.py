@@ -43,10 +43,10 @@ Config section used (``data.source``)::
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import os
-from typing import NamedTuple, Any
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, NamedTuple
 
 import pandas as pd
 
@@ -163,7 +163,7 @@ def download_hrrr(
     product = _validate_product_request(product_request)
 
     try:
-        import obstore  # noqa: PLC0415  # pyright: ignore[reportMissingTypeStubs]
+        import obstore  # pyright: ignore[reportMissingTypeStubs]
 
         del obstore
     except ImportError as exc:

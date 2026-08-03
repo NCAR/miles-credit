@@ -1,13 +1,14 @@
-import os
-import numpy as np
-import xarray as xr
-import pandas as pd
-import yaml
 import argparse
+import os
 from glob import glob
-from bridgescaler.distributed import DQuantileScaler, DStandardScaler
-from bridgescaler import print_scaler, read_scaler
 from os.path import exists, join
+
+import numpy as np
+import pandas as pd
+import xarray as xr
+import yaml
+from bridgescaler import print_scaler, read_scaler
+from bridgescaler.distributed import DQuantileScaler, DStandardScaler
 from mpi4py import MPI
 
 scalers = dict(standard=DStandardScaler, quantile=DQuantileScaler)
@@ -144,7 +145,6 @@ def main():
                 os.makedirs(args.out)
             now = pd.Timestamp.utcnow().strftime("%Y-%m-%d_%H:%M")
             all_scalers_df.to_parquet(join(args.out, f"era5_dt_{scaler_type}_scalers_{now}.parquet"))
-    return
 
 
 def fit_era5_scaler_times(
@@ -279,7 +279,6 @@ def transform_era5_times(
             encoding={"levels": var_encoding, "surface": var_encoding},
         )
     eds.close()
-    return
 
 
 def fit_scaled_era5_time_residuals(times, rank, era5_file_dir=None, dt=1, scaler_type="standard", scaler_config=None):

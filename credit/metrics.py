@@ -1,6 +1,8 @@
-import torch
-import numpy as np
 from datetime import datetime
+
+import numpy as np
+import torch
+
 from credit.losses.weighted_loss import latitude_weights
 from credit.parallel.domain import shard_lat_weights
 
@@ -100,12 +102,12 @@ class LatWeightedMetrics:
                     )
 
         # Calculate metrics averages
-        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k])
-        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k])
-        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mse_" in k and "rmse_" not in k])
-        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k])
+        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "acc_" in k])
+        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "rmse_" in k])
+        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "mse_" in k and "rmse_" not in k])
+        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "mae_" in k])
         if self.ensemble_size > 1:
-            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k])
+            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "std_" in k])
 
         return loss_dict
 
@@ -314,9 +316,11 @@ class LatWeightedMetricsEnsemble:
 
 
 if __name__ == "__main__":
-    import yaml
     import logging
+
     import xarray as xr
+    import yaml
+
     from credit.parser import credit_main_parser
 
     logging.basicConfig(

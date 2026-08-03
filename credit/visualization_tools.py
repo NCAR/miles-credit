@@ -22,26 +22,25 @@ Functions:
 
 # ---------- #
 # System
-from os.path import join
 import logging
+from os.path import join
+
+# cartopy
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import matplotlib.colors as mcolors
+
+# ---------- #
+# matplotlib
+import matplotlib.pyplot as plt
+import netCDF4 as nc
 
 # ---------- #
 # Numerics
 import numpy as np
 import xarray as xr
-import netCDF4 as nc
-
-# ---------- #
-# matplotlib
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.gridspec as gridspec
 from matplotlib import colormaps as plt_cmaps
-
-# cartopy
-import cartopy.crs as ccrs
-import cartopy.feature as cfeature
-
+from matplotlib import gridspec
 
 logger = logging.getLogger(__name__)
 
@@ -399,7 +398,7 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
     var_range = conf["visualization"][visualization_key]["variable_range"]
 
     ## number of variables to plot
-    var_num = int(len(vars))
+    var_num = len(vars)
 
     ## levels to plot
     levels = conf["visualization"][visualization_key]["visualize_levels"]
@@ -463,9 +462,9 @@ def draw_variables(pred, level, step, visualization_key, conf=None, save_locatio
 
     # different file names for upper air vs. single levels
     if levels[0] == "none":
-        save_name = "{}_{}.png".format(save_name_head, dt_str)
+        save_name = f"{save_name_head}_{dt_str}.png"
     else:
-        save_name = "{}_level{:02d}_{}.png".format(save_name_head, level_num, dt_str)
+        save_name = f"{save_name_head}_level{level_num:02d}_{dt_str}.png"
 
     filename = join(save_location, save_name)
     plt.savefig(filename, **save_options)

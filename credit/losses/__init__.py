@@ -1,6 +1,7 @@
 import importlib
 import logging
-import torch.nn as nn
+
+from torch import nn
 
 logger = logging.getLogger(__name__)
 
@@ -204,11 +205,11 @@ def load_loss(conf, reduction="none", validation=False):
     Raises:
         ValueError: If the requested loss type is not recognized in the registry.
     """
+    from credit.losses.downscaling_loss import DownscalingLoss
+    from credit.losses.weighted_loss import VariableTotalLoss2D
     from credit.registry import (
         load_custom_objects,
     )  # imported here so that importing credit.losses does not automatically load credit.registry
-    from credit.losses.weighted_loss import VariableTotalLoss2D
-    from credit.losses.downscaling_loss import DownscalingLoss
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
 

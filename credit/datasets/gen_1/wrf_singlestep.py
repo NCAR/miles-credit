@@ -1,28 +1,27 @@
 import datetime
-import numpy as np
-import xarray as xr
 
+import numpy as np
 import torch
 import torch.utils.data
+import xarray as xr
 from torch.utils.data import get_worker_info
 from torch.utils.data.distributed import DistributedSampler
 
-from credit.data import Sample_WRF
-
 from credit.data import (
-    ensure_numpy_datetime,
+    Sample_WRF,
     drop_var_from_dataset,
+    encode_datetime64,
+    ensure_numpy_datetime,
     extract_month_day_hour,
+    filter_ds,
     find_common_indices,
-    get_forward_data,
+    find_key_for_number,
     generate_datetime,
+    get_forward_data,
     hour_to_nanoseconds,
     nanoseconds_to_year,
-    find_key_for_number,
     next_n_hour,
     previous_hourly_steps,
-    encode_datetime64,
-    filter_ds,
 )
 
 
@@ -195,8 +194,7 @@ class WRFDataset(torch.utils.data.Dataset):
 
         # handle out-of-bounds
         ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension

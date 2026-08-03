@@ -1,9 +1,10 @@
-from credit.transforms import BridgescalerScaleState
-from credit.data import Sample
-import numpy as np
-import xarray as xr
 import os
+
+import numpy as np
 import torch
+import xarray as xr
+from credit.data import Sample
+from credit.transforms import BridgescalerScaleState
 
 
 def test_BridgescalerScaleState():
@@ -63,8 +64,6 @@ def test_BridgescalerScaleState():
     assert reverse_tensor.shape == (1, 67, 8, 16)
     assert np.abs((trans_tensor - test_tensor).numpy()).max() > 0
     assert np.abs((reverse_tensor - test_trans_tensor).numpy()).max() > 0
-
-    return
 
 
 # ---------------------------------------------------------------------------

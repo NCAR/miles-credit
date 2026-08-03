@@ -7,12 +7,10 @@ Content
 """
 
 import logging
-from typing import Dict
 
 import numpy as np
-import xarray as xr
-
 import torch
+import xarray as xr
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +177,7 @@ class NormalizeLES:
 
         return transformed_x.to(device)
 
-    def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def transform(self, sample: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """
         This function transforms training batches, it handles forcing & static as follows:
             - forcing & static don't need to be transformed; users should transform them and save them to the file

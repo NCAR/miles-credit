@@ -2,19 +2,19 @@ import logging
 import os
 
 import torch
+import torch.distributed as dist
 from torch.amp import GradScaler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.utils.data import DataLoader
-import torch.distributed as dist
 
-from credit.scheduler import load_scheduler
-from credit.samplers import DistributedMultiStepBatchSampler
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO,
     load_state_dict_error_handler,
 )
+from credit.samplers import DistributedMultiStepBatchSampler
+from credit.scheduler import load_scheduler
 
 
 def cleanup():
@@ -665,7 +665,7 @@ def load_model_states_and_optimizer(conf, model, device):
             if load_optimizer_conf:
                 checkpoint_io.load_unsharded_optimizer(optimizer, os.path.join(save_loc, "optimizer_checkpoint.pt"))
         elif mode == "fsdp2":
-            from credit.parallel.fsdp2 import fsdp2_load_state_dict, fsdp2_load_optimizer_state_dict
+            from credit.parallel.fsdp2 import fsdp2_load_optimizer_state_dict, fsdp2_load_state_dict
 
             fsdp2_load_state_dict(model, checkpoint["model_state_dict"])
             optimizer = _make_optimizer(model)

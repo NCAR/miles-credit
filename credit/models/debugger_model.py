@@ -1,6 +1,7 @@
 import logging
 
 import torch
+
 from credit.models.base_model import BaseModel
 from credit.postblock.gen1 import PostBlock
 

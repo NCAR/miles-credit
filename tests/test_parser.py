@@ -1,6 +1,6 @@
-import yaml
 import os
 
+import yaml
 from credit.parser import credit_main_parser
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])

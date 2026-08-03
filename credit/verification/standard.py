@@ -1,7 +1,7 @@
+import logging
+
 import torch
 from torch_harmonics import RealSHT, RealVectorSHT
-
-import logging
 
 logger = logging.getLogger(__name__)
 

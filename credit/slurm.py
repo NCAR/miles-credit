@@ -29,12 +29,13 @@ from ``NERSC_HOST``, a ``constraint`` config key, or ``cluster: perlmutter``, an
 the correct directives are emitted automatically.
 """
 
-import re
-import os
-import yaml
-import shutil
 import logging
+import os
+import re
+import shutil
 import subprocess
+
+import yaml
 
 from credit.cli._common import _PERLMUTTER_ENV_SETUP
 

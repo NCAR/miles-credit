@@ -1,17 +1,17 @@
 # system tools
-from typing import Dict, TypedDict, Union
+import warnings
 from dataclasses import dataclass, field
 from inspect import signature
-import warnings
+from typing import TypedDict, Union
 
 # data utils
 import numpy as np
-import xarray as xr
 import pandas as pd
 
 # Pytorch utils
 import torch
 import torch.utils.data
+import xarray as xr
 
 from credit.datasets.gen_1.datamap import DataMap
 from credit.transforms_downscaling import DataTransforms, Identity
@@ -129,7 +129,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
     valid_forecast_len: int = 1
     first_date: str = None
     last_date: str = None
-    datasets: Dict = field(default_factory=dict)
+    datasets: dict = field(default_factory=dict)
     image_width: int = None
     image_height: int = None
     transform: bool = True

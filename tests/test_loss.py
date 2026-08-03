@@ -1,10 +1,9 @@
 import os
 
-import torch
-
 import credit.domain_parallel.manager as domain_manager_mod
-from credit.losses.kcrps import KCRPSLoss
+import torch
 from credit.losses.covariance import CovarianceWeightedMSELoss
+from credit.losses.kcrps import KCRPSLoss
 from credit.losses.weighted_loss import VariableTotalLoss2D
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])

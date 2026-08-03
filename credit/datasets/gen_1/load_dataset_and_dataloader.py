@@ -1,27 +1,29 @@
+import logging
+import re
+import sys
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
+
+from credit.datasets import setup_data_loading
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 from credit.datasets.gen_1.era5_multistep import (
     ERA5_and_Forcing_MultiStep,
     RepeatingIndexSampler,
 )
-from credit.datasets.gen_1.era5_singlestep import ERA5_and_Forcing_SingleStep
 from credit.datasets.gen_1.era5_multistep_batcher import (
     ERA5_MultiStep_Batcher,
     MultiprocessingBatcher,
     MultiprocessingBatcherPrefetch,
 )
+from credit.datasets.gen_1.era5_singlestep import ERA5_and_Forcing_SingleStep
 from credit.datasets.gen_1.om4_multistep_batcher import (
     Ocean_MultiStep_Batcher,
     Ocean_Tensor_Batcher,
 )
-from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
-from credit.datasets import setup_data_loading
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
 from credit.transforms import load_transforms
-import numpy as np
-import logging
-import torch
-import sys
-import re
 
 
 class BatchForecastLenSampler:
@@ -544,9 +546,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             prefetch_factor=prefetch_factor,
             sampler=sampler,  # Ensure len is correct
         )
-    elif type(dataset) is MultiprocessingBatcher:
-        dataloader = BatchForecastLenDataLoader(dataset)
-    elif type(dataset) is MultiprocessingBatcherPrefetch:
+    elif type(dataset) is MultiprocessingBatcher or type(dataset) is MultiprocessingBatcherPrefetch:
         dataloader = BatchForecastLenDataLoader(dataset)
     else:
         raise ValueError(f"Unsupported dataset type: {type(dataset)}")
@@ -564,7 +564,9 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
 
 if __name__ == "__main__":
     import time
+
     import yaml
+
     from credit.parser import credit_main_parser, training_data_check
 
     if len(sys.argv) != 2:

@@ -12,9 +12,9 @@ Reference:
 """
 
 import torch
-import torch.nn as nn
-from typing import Dict
-from credit.physics_constants import RAD_EARTH, RDGAS, EPSGAS, GRAVITY
+from torch import nn
+
+from credit.physics_constants import EPSGAS, GRAVITY, RAD_EARTH, RDGAS
 
 
 def compute_density(pressure, temperature, specific_humidity):
@@ -262,7 +262,7 @@ class physics_pressure_level:
 
         return q_trapz
 
-    def weighted_sum(self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
+    def weighted_sum(self, q: torch.Tensor, axis: dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
         """
         Compute the weighted sum of a given quantity for PyTorch tensors.
 
@@ -481,7 +481,7 @@ class physics_hybrid_sigma_level:
 
         return q_trapz
 
-    def weighted_sum(self, q: torch.Tensor, axis: Dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
+    def weighted_sum(self, q: torch.Tensor, axis: dict[tuple, None] = None, keepdims: bool = False) -> torch.Tensor:
         """
         Compute the weighted sum of a given quantity for PyTorch tensors.
 

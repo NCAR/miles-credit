@@ -7,12 +7,13 @@ Verifies that a simple model produces the same output when run with
 domain parallelism (sharded across 2 GPUs) vs single-GPU baseline.
 """
 
-import pytest
-import torch
-import torch.nn as nn
-import torch.distributed as dist
 import os
 import sys
+
+import pytest
+import torch
+import torch.distributed as dist
+from torch import nn
 
 
 def setup_distributed():
@@ -76,9 +77,9 @@ def test_halo_exchange():
 )
 def test_domain_parallel_conv2d():
     """Test that DomainParallelConv2d matches single-GPU Conv2d."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelConv2d
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -123,9 +124,9 @@ def test_domain_parallel_conv2d():
 )
 def test_domain_parallel_groupnorm():
     """Test that DomainParallelGroupNorm matches single-GPU GroupNorm."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelGroupNorm
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -168,9 +169,9 @@ def test_domain_parallel_groupnorm():
 )
 def test_model_conversion_forward():
     """Test that a converted model produces the same output as the original."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.convert import convert_to_domain_parallel
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -257,9 +258,9 @@ def test_model_conversion_forward():
 )
 def test_backward_gradients():
     """Test that gradients flow correctly through domain-parallel layers."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.convert import convert_to_domain_parallel
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()

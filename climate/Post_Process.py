@@ -1,19 +1,17 @@
-import os
-import shutil
-import xarray as xr
 import glob
+import os
 import re
+import shutil
+from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
-import numpy as np
-import yaml
-import pandas as pd
+from functools import partial
+from multiprocessing import Pool, cpu_count
 from pathlib import Path
 
-from multiprocessing import Pool, cpu_count
-from functools import partial
-
-from concurrent.futures import ProcessPoolExecutor
-
+import numpy as np
+import pandas as pd
+import xarray as xr
+import yaml
 
 # example:
 # python Post_Process.py /glade/derecho/scratch/wchapman/CREDIT_runs/wxformer_1dg_cesm_data_nopost_bigbig_SSTforced_DryWaterEnergy/model_00191/model_multi_WxFormer.yml 1D --variables U V T Qtot PS PRECT TREFHT --reset_times False --dask_do False --name_string UVTQtotPSPRECTTREFHT
@@ -96,7 +94,7 @@ def rescale_file(fn, mean_, std_):
         print(f"File {fn} successfully rescaled and saved.\n")
 
     except Exception as e:
-        print(f"Error processing file {fn}: {str(e)}")
+        print(f"Error processing file {fn}: {e!s}")
 
 
 def str2bool(v):

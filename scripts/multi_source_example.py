@@ -1,12 +1,13 @@
-import yaml
 import pathlib
+
+import numpy as np
+import torch
+import yaml
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
+from credit.postblock import apply_postblocks, build_postblocks
+from credit.preblock import apply_preblocks, build_preblocks
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
-from credit.preblock import build_preblocks, apply_preblocks
-from credit.postblock import build_postblocks, apply_postblocks
-import torch
-import numpy as np
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent
 config_path = BASE_DIR.parent / "config" / "gen_2" / "examples" / "multi_source_data.yml"

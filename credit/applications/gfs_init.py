@@ -1,12 +1,14 @@
-from credit.nwp import build_GFS_init
-import yaml
 import argparse
-import xarray as xr
 import os
-import numpy as np
-from os.path import join, expandvars
 from importlib.resources import files
+from os.path import expandvars, join
+
+import numpy as np
 import pandas as pd
+import xarray as xr
+import yaml
+
+from credit.nwp import build_GFS_init
 
 
 def main():

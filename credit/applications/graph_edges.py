@@ -1,11 +1,12 @@
-from haversine import haversine_vector, Unit
-import xarray as xr
 import argparse
-import numpy as np
-from multiprocessing import Pool
 from functools import partial
-from os.path import join, exists
+from multiprocessing import Pool
 from os import makedirs
+from os.path import exists, join
+
+import numpy as np
+import xarray as xr
+from haversine import Unit, haversine_vector
 
 
 def main():
@@ -49,7 +50,6 @@ def main():
         makedirs(args.out)
     print("Saving to " + args.out)
     output_ds.to_netcdf(join(args.out, f"grid_edge_pairs_{args.dist:0.0f}_{resolution}.nc"))
-    return
 
 
 def calc_edges(coord, all_coords=None, max_dist=25.0):

@@ -1,9 +1,10 @@
 """Tests interp.py."""
 
-from credit.interp import full_state_pressure_interpolation, interp_pressure_to_hybrid_levels
-import xarray as xr
 import os
+
 import numpy as np
+import xarray as xr
+from credit.interp import full_state_pressure_interpolation, interp_pressure_to_hybrid_levels
 
 
 def test_full_state_pressure_interpolation():
@@ -24,7 +25,6 @@ def test_full_state_pressure_interpolation():
     for var in ["U", "V", "T", "Q"]:
         assert interp_ds[f"{var}_PRES"].shape[1] == pressure_levels.size, "Pressure level mismatch"
         assert ~np.any(np.isnan(interp_ds[f"{var}_PRES"])), "NaN found"
-    return
 
 
 def test_interp_pressure_to_hybrid_levels():

@@ -22,15 +22,14 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-import xarray as xr
 import pytest
 import torch
-from torch.utils.data import DataLoader
-
-from credit.datasets.gen_2.local import LocalDataset
+import xarray as xr
 from credit.datasets.gen_2.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
 from credit.datasets.gen_2.grid_utils import GridSchema
+from credit.datasets.gen_2.local import LocalDataset
 from credit.samplers import DistributedMultiStepBatchSampler
+from torch.utils.data import DataLoader
 
 # Captured at import time, before any test monkeypatches xr.open_dataset — used
 # to read back real files (e.g. GridSchema.load) from within a test that also
@@ -555,7 +554,7 @@ def test_refactor_dataloader_default_collate(
     Dataset + DistributedMultiStepBatchSampler + DataLoader should work
     without a custom collate_fn.
     Validates that tensors for the same key are stacked correctly under input/target.
-    """  # noqa: E501
+    """
     ds = LocalDataset(minimal_config, return_target=True)
     sampler = DistributedMultiStepBatchSampler(
         ds,

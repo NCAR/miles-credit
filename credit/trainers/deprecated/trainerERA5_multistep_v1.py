@@ -1,25 +1,21 @@
 import gc
 import logging
+import os
 from collections import defaultdict
 
 import numpy as np
+import optuna
+import pandas as pd
 import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm
+from credit.models.checkpoint import TorchFSDPCheckpointIO
+from credit.scheduler import update_on_batch, update_on_epoch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cleanup, cycle
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
-from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log
-from credit.trainers.base_trainer import BaseTrainer
-import optuna
-
-import os
-import pandas as pd
-import torch
-from credit.models.checkpoint import TorchFSDPCheckpointIO
-from credit.scheduler import update_on_epoch
-from credit.trainers.utils import cleanup
 
 
 class Trainer(BaseTrainer):

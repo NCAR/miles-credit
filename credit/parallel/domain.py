@@ -1,6 +1,7 @@
 """Domain-parallel utility functions shared across all trainers."""
 
 import logging
+
 import torch.distributed as dist
 
 logger = logging.getLogger(__name__)

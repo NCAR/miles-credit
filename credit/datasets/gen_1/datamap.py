@@ -37,21 +37,22 @@ Content:
 """
 
 import os
-from typing import List, TypedDict
 from dataclasses import dataclass, field
 from glob import glob
-import netCDF4 as nc
+from typing import TypedDict
+
 import cftime as cf
+import netCDF4 as nc
 import numpy as np
 
 
 class VarDict(TypedDict, total=False):
     """a dictionary of the variables that could be in a dataset"""
 
-    boundary: List
-    prognostic: List
-    diagnostic: List
-    unused: List
+    boundary: list
+    prognostic: list
+    diagnostic: list
+    unused: list
 
 
 def rescale_minmax(x):
@@ -213,7 +214,7 @@ class DataMap:
     dim: str = "2D"
     normalize: bool = False
     zstride: int = 1
-    variables: VarDict[str, List] = field(default_factory=list)
+    variables: VarDict[str, list] = field(default_factory=list)
     history_len: int = 2
     forecast_len: int = 1
     first_date: str = None

@@ -126,22 +126,21 @@ Example YAML (wrfsubh, remote mode — 15-min output)::
 
 from __future__ import annotations
 
-from typing import Any, Callable, Literal, get_args
-
 import logging
 import os
 import time
 from collections import defaultdict
-
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Literal, get_args
 
 import numpy as np
 import pandas as pd
 import torch
 
-from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
-from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
 from credit.datasets.gen_2._utils import _start_s3_obstore
+from credit.datasets.gen_2.base_dataset import VALID_FIELD_TYPES, BaseDataset
+from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -973,7 +972,7 @@ class HRRRDataset(BaseDataset):
                 used when ``self.product == "wrfsubh"``.
         """
         try:
-            import pygrib  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs]
+            import pygrib  # pyright: ignore[reportMissingTypeStubs]
         except ImportError as exc:
             raise ImportError("pygrib is required: pip install pygrib") from exc
 

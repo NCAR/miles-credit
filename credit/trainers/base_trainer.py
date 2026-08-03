@@ -16,16 +16,17 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, Optional, Callable
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
-from tqdm import tqdm
 import pandas as pd
 import torch
 from torch.amp import GradScaler
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
@@ -215,7 +216,7 @@ class EMATracker:
 
 
 class BaseTrainer(ABC):
-    def __init__(self, model: torch.nn.Module, rank: int, conf: Dict[str, Any]):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict[str, Any]):
         """
         Abstract base class for training and validating machine learning models.
 
@@ -291,7 +292,7 @@ class BaseTrainer(ABC):
         use_ema = trainer_conf.get("use_ema", False)
         if use_ema:
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
-            self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
+            self.ema: EMATracker | None = EMATracker(self.model, decay=ema_decay)
             ema_path = os.path.join(self.save_loc, "checkpoint_ema.pt")
             if self.load_weights and os.path.exists(ema_path):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
@@ -350,8 +351,8 @@ class BaseTrainer(ABC):
         criterion: torch.nn.Module,
         scaler: GradScaler,
         scheduler: LRScheduler,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         raise NotImplementedError
 
     @abstractmethod
@@ -360,8 +361,8 @@ class BaseTrainer(ABC):
         epoch: int,
         valid_loader: DataLoader,
         criterion: torch.nn.Module,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -372,7 +373,7 @@ class BaseTrainer(ABC):
         self,
         epoch: int,
         results_dict: dict,
-        optimizer: Optional[Optimizer],
+        optimizer: Optimizer | None,
         pbar,
         phase: str = "train",
     ) -> None:
@@ -424,7 +425,7 @@ class BaseTrainer(ABC):
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
         if self.mode == "fsdp2":
-            from credit.parallel.fsdp2 import fsdp2_state_dict, fsdp2_optimizer_state_dict
+            from credit.parallel.fsdp2 import fsdp2_optimizer_state_dict, fsdp2_state_dict
 
             # FSDP2: all ranks gather full (unsharded) state dicts, rank 0 saves.
             # The optimizer state must also be gathered — a raw
@@ -502,7 +503,7 @@ class BaseTrainer(ABC):
 
     def fit(
         self,
-        conf: Dict[str, Any],
+        conf: dict[str, Any],
         train_loader: DataLoader,
         valid_loader: DataLoader,
         optimizer: Optimizer,
@@ -510,10 +511,10 @@ class BaseTrainer(ABC):
         valid_criterion: torch.nn.Module,
         scaler: GradScaler,
         scheduler: LRScheduler,
-        metrics: Dict[str, Any],
-        rollout_scheduler: Optional[Callable] = None,
+        metrics: dict[str, Any],
+        rollout_scheduler: Callable | None = None,
         trial: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run the full training loop.
 
@@ -535,7 +536,7 @@ class BaseTrainer(ABC):
         epochs = self.epochs
 
         # Reload results log if resuming from a checkpoint
-        results_dict: Dict[str, list] = defaultdict(list)
+        results_dict: dict[str, list] = defaultdict(list)
         log_path = os.path.join(self.save_loc, "training_log.csv")
         if start_epoch > 0 and self.load_weights and os.path.exists(log_path):
             saved = pd.read_csv(log_path)
@@ -749,7 +750,7 @@ class BaseTrainer(ABC):
             self.tb_writer.close()
 
         # Return best epoch results
-        if self.training_metric in results_dict and results_dict[self.training_metric]:
+        if results_dict.get(self.training_metric):
             metric_history = results_dict[self.training_metric]
             best_idx = metric_history.index(self.direction(metric_history))
             result = {k: v[best_idx] for k, v in results_dict.items() if len(v) > best_idx}

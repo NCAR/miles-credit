@@ -1,21 +1,20 @@
 import math
+
 import torch
-from torch import nn, Tensor
 import xarray as xr
+from torch import Tensor, nn
 from torch.nn import functional as F
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.nn.inits import ones, zeros
 from torch_geometric.nn.dense.linear import Linear
-from torch_geometric.utils import softmax
-
-from typing import Optional, Tuple, Union
+from torch_geometric.nn.inits import ones, zeros
 from torch_geometric.typing import (
     Adj,
     OptTensor,
     PairTensor,
     SparseTensor,
 )
-from torch_geometric.utils import to_undirected
+from torch_geometric.utils import softmax, to_undirected
+
 from credit.models.base_model import BaseModel
 
 
@@ -229,13 +228,13 @@ class TransformerConv(MessagePassing):
 
     def __init__(
         self,
-        in_channels: Union[int, Tuple[int, int]],
+        in_channels: int | tuple[int, int],
         out_channels: int,
         heads: int = 1,
         concat: bool = True,
         beta: bool = False,
         dropout: float = 0.0,
-        edge_dim: Optional[int] = None,
+        edge_dim: int | None = None,
         bias: bool = True,
         root_weight: bool = True,
         **kwargs,
@@ -290,17 +289,13 @@ class TransformerConv(MessagePassing):
         if self.beta:
             self.lin_beta.reset_parameters()
 
-    def forward(  # noqa: F811
+    def forward(
         self,
-        x: Union[Tensor, PairTensor],
+        x: Tensor | PairTensor,
         edge_index: Adj,
         edge_attr: OptTensor = None,
-        return_attention_weights: Optional[bool] = None,
-    ) -> Union[
-        Tensor,
-        Tuple[Tensor, Tuple[Tensor, Tensor]],
-        Tuple[Tensor, SparseTensor],
-    ]:
+        return_attention_weights: bool | None = None,
+    ) -> Tensor | tuple[Tensor, tuple[Tensor, Tensor]] | tuple[Tensor, SparseTensor]:
         H, C = self.heads, self.out_channels
         batch_size = x.shape[1]
         if isinstance(x, Tensor):
@@ -346,7 +341,7 @@ class TransformerConv(MessagePassing):
         edge_attr: OptTensor,
         index: Tensor,
         ptr: OptTensor,
-        size_i: Optional[int],
+        size_i: int | None,
     ) -> Tensor:
         if self.lin_edge is not None:
             assert edge_attr is not None

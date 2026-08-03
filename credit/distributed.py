@@ -1,30 +1,31 @@
-import torch.distributed as dist
-import torch.nn as nn
-import numpy as np
-import socket
-import torch
-import sys
-import os
-
-from torch.distributed.fsdp.fully_sharded_data_parallel import (
-    MixedPrecision,
-    CPUOffload,
-)
-from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
-    size_based_auto_wrap_policy,
-)
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
-    apply_activation_checkpointing,
-)
-from credit.models.checkpoint import TorchFSDPModel
-from credit.models import load_fsdp_or_checkpoint_policy
-from torch.nn.parallel import DistributedDataParallel as DDP
-from credit.mixed_precision import parse_dtype
 import functools
 import logging
+import os
+import socket
+import sys
+
+import numpy as np
+import torch
+import torch.distributed as dist
+from torch import nn
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    CheckpointImpl,
+    apply_activation_checkpointing,
+    checkpoint_wrapper,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    CPUOffload,
+    MixedPrecision,
+)
+from torch.distributed.fsdp.wrap import (
+    size_based_auto_wrap_policy,
+    transformer_auto_wrap_policy,
+)
+from torch.nn.parallel import DistributedDataParallel as DDP
+
+from credit.mixed_precision import parse_dtype
+from credit.models import load_fsdp_or_checkpoint_policy
+from credit.models.checkpoint import TorchFSDPModel
 
 logger = logging.getLogger(__name__)
 
@@ -310,8 +311,8 @@ def distributed_model_wrapper(conf, neural_network, device):
 
     if use_domain_parallel and domain_parallel_size > 1:
         from credit.domain_parallel import (
-            initialize_domain_parallel,
             convert_to_domain_parallel,
+            initialize_domain_parallel,
         )
 
         world_size = dist.get_world_size()
@@ -494,7 +495,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
     # ── 1. Domain parallelism ─────────────────────────────────────────────
     domain_manager = None
     if domain_size > 1:
-        from credit.domain_parallel import initialize_domain_parallel, convert_to_domain_parallel
+        from credit.domain_parallel import convert_to_domain_parallel, initialize_domain_parallel
 
         world_size = dist.get_world_size()
         domain_manager = initialize_domain_parallel(

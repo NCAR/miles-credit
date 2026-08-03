@@ -1,15 +1,15 @@
-import torch
 import logging
-import torch.nn.functional as F
 
-from torch import nn, einsum
+import torch
+import torch.nn.functional as F
 from einops import rearrange
 from einops.layers.torch import Rearrange
+from torch import einsum, nn
 
-from credit.models.base_model import BaseModel
-from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
+from credit.models.base_model import BaseModel
 from credit.models.unet_attention_modules import load_unet_attention
+from credit.postblock.gen1 import PostBlock
 
 logger = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ class CrossEmbedLayer(nn.Module):
 
 class DynamicPositionBias(nn.Module):
     def __init__(self, dim):
-        super(DynamicPositionBias, self).__init__()
+        super().__init__()
         self.layers = nn.Sequential(
             nn.Linear(2, dim),
             nn.LayerNorm(dim),
@@ -233,7 +233,7 @@ class LayerNorm(nn.Module):
 
 class FeedForward(nn.Module):
     def __init__(self, dim, mult=4, dropout=0.0, tp_col="layers.1", tp_row="layers.4"):
-        super(FeedForward, self).__init__()
+        super().__init__()
         # Tensor-parallel opt-in: dotted paths to the column-parallel layer
         # (Conv2d dim → dim*mult, output channels sharded) and the row-parallel
         # layer (Conv2d dim*mult → dim, input channels sharded + all_reduce).

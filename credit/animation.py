@@ -1,11 +1,13 @@
+import os
+
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
-import xarray as xr
 import matplotlib.pyplot as plt
-import matplotlib.animation as animation
-import os
-import pandas as pd
 import numpy as np
+import pandas as pd
+import xarray as xr
+from matplotlib import animation
+
 from .physics_constants import GRAVITY
 
 projections = {
@@ -169,7 +171,7 @@ def plot_global_animation(
             level = None
             if "level" in contourf_config.keys():
                 level = contourf_config["level"]
-            if c_var in variable_transforms.keys():
+            if c_var in variable_transforms:
                 if level is not None:
                     data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date, level])
                 else:
@@ -193,7 +195,7 @@ def plot_global_animation(
                 level = None
                 if "level" in c_var_config.keys():
                     level = c_var_config["level"]
-                if c_var_name in variable_transforms.keys():
+                if c_var_name in variable_transforms:
                     if level is not None:
                         data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date, level])
                     else:
@@ -208,11 +210,9 @@ def plot_global_animation(
                 )
                 ax.clabel(reg_cont)
                 # plt.colorbar(filled_cont, ax=ax, **colorbar_kwargs)
-            return
 
         ani = animation.FuncAnimation(fig, plot_step, frames=f_dates.size)
         ani.save(output_video_file, **save_kwargs)
-    return
 
 
 def plot_regional_animation(
@@ -288,7 +288,7 @@ def plot_regional_animation(
             level = None
             if "level" in contourf_config.keys():
                 level = contourf_config["level"]
-            if c_var in variable_transforms.keys():
+            if c_var in variable_transforms:
                 if level is not None:
                     data_var = variable_transforms[c_var](f_ds[c_var].loc[f_date, level])
                 else:
@@ -312,7 +312,7 @@ def plot_regional_animation(
                 level = None
                 if "level" in c_var_config.keys():
                     level = c_var_config["level"]
-                if c_var_name in variable_transforms.keys():
+                if c_var_name in variable_transforms:
                     if level is not None:
                         data_var = variable_transforms[c_var_name](f_ds[c_var_name].loc[f_date, level])
                     else:
@@ -327,8 +327,6 @@ def plot_regional_animation(
                 )
                 ax.clabel(reg_cont)
                 # plt.colorbar(filled_cont, ax=ax, **colorbar_kwargs)
-            return
 
         ani = animation.FuncAnimation(fig, plot_step, frames=f_dates.size)
         ani.save(output_video_file, **save_kwargs)
-    return

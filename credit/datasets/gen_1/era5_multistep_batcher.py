@@ -10,20 +10,20 @@ from queue import Queue
 from threading import Thread
 
 import numpy as np
-import xarray as xr
 import torch
+import xarray as xr
 from torch.utils.data import DistributedSampler
 
 from credit.data import (
     drop_var_from_dataset,
-    keep_dataset_vars,
+    ensure_numpy_datetime,
     extract_month_day_hour,
     find_common_indices,
     generate_datetime,
     get_forward_data,
     hour_to_nanoseconds,
+    keep_dataset_vars,
     nanoseconds_to_year,
-    ensure_numpy_datetime,
 )
 from credit.datasets.gen_1.era5_multistep import worker
 
@@ -1152,7 +1152,7 @@ class Predict_Dataset_Batcher(torch.utils.data.Dataset):
             for i_file, ds in enumerate(self.all_files):
                 # get the year of the current file
                 # looks messy because extra code needed to handle cftime
-                ds_year = int((np.datetime_as_string(ds["time"][0].astype("datetime64[ns]").values, unit="Y")))
+                ds_year = int(np.datetime_as_string(ds["time"][0].astype("datetime64[ns]").values, unit="Y"))
 
                 # get the first and last years of init times
                 init_year0 = nanoseconds_to_year(init_time)

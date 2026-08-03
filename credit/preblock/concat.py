@@ -15,8 +15,9 @@ Channel concat order is fully determined by the variable key structure
 
 import pandas as pd
 import torch
-from credit.preblock.base import BasePreblock
+
 from credit.datasets.gen_2.channel_utils import FIELD_TYPE_RANK as _FIELD_TYPE_RANK
+from credit.preblock.base import BasePreblock
 
 # Field types the model predicts (used to build the "output" channel map).
 _PREDICTABLE_FIELD_TYPES = {"prognostic", "diagnostic"}

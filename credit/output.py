@@ -7,17 +7,19 @@ Content:
     - save_netcdf_increment()
 """
 
-import os
-import yaml
 import logging
+import os
 import traceback
+from importlib.resources import files
+from inspect import signature
+from os.path import expandvars
+
 import xarray as xr
+import yaml
+
 from credit.data import drop_var_from_dataset
 from credit.interp import full_state_pressure_interpolation
-from inspect import signature
 from credit.transforms import Normalize_ERA5_and_Forcing
-from importlib.resources import files
-from os.path import expandvars
 
 logger = logging.getLogger(__name__)
 
@@ -267,7 +269,7 @@ def save_netcdf_increment(
                 )
 
             # Do ptype here before merging!
-            if "use_ptype" in conf.keys() and conf["use_ptype"]:
+            if conf.get("use_ptype"):
                 from credit.credit_ptype import CreditPostProcessor
 
                 credit_processor = CreditPostProcessor()
@@ -321,7 +323,7 @@ def save_netcdf_increment(
         if meta_data is not False:
             # Add metadata attributes to every model variable if available
             for var in ds_merged.variables.keys():
-                if var in meta_data.keys():
+                if var in meta_data:
                     if var != "time":
                         # use attrs.update for non-datetime variables
                         ds_merged[var].attrs.update(meta_data[var])
@@ -332,12 +334,12 @@ def save_netcdf_increment(
                 if "interp_pressure" in conf["predict"].keys():
                     if pres_end in var:
                         var_short = var.strip(pres_end)
-                        if var_short in meta_data.keys():
+                        if var_short in meta_data:
                             ds_merged[var].attrs.update(meta_data[var_short])
                             ds_merged[var].attrs["long_name"] += " (interpolated to isobaric levels)"
                     elif height_end in var:
                         var_short = var.strip(height_end)
-                        if var_short in meta_data.keys():
+                        if var_short in meta_data:
                             ds_merged[var].attrs.update(meta_data[var_short])
                             ds_merged[var].attrs["long_name"] += " (interpolated to constant height AGL levels)"
         encoding_dict = {}
@@ -512,7 +514,7 @@ def save_netcdf_diag(
     if meta_data is not False:
         # Add metadata attributes to every model variable if available
         for var in ds_merged.variables:
-            if var in meta_data.keys():
+            if var in meta_data:
                 if var != "time":
                     # use attrs.update for non-datetime variables
                     ds_merged[var].attrs.update(meta_data[var])

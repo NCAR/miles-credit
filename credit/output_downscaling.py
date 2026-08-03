@@ -6,16 +6,14 @@ Content:
     - OutputWriter
 """
 
-import os
-
 # import yaml
 import logging
+import os
 import traceback
+from dataclasses import dataclass, field
+
 import numpy as np
 import xarray as xr
-
-from dataclasses import dataclass, field
-from typing import Dict, List
 
 from credit.datasets.gen_1.datamap import VarDict
 from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
@@ -26,7 +24,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OutputWrangler:
     dataset: DownscalingDataset
-    templates: Dict  # {'dir': path, 'files': {dataset1: file1, dataset2: file2}}
+    templates: dict  # {'dir': path, 'files': {dataset1: file1, dataset2: file2}}
     output_dir: str
     # save_vars: List[str] = None  # todo: allow yaml to subset output vars
 
@@ -81,7 +79,7 @@ class OutputWrangler:
 class OutputWriter:
     template_path: str
     dim: str = "2D"
-    variables: VarDict[str, List] = field(default_factory=list)
+    variables: VarDict[str, list] = field(default_factory=list)
     zstride: int = 1
     noop: bool = False
 

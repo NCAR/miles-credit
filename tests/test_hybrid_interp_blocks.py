@@ -13,8 +13,7 @@ import xarray as xr
 from credit.interp import create_pressure_grid, interp_hybrid_to_hybrid_levels
 from credit.postblock import _load_postblock_entry
 from credit.postblock._interp_utils import load_hybrid_level_coefficients
-from credit.postblock.hybrid_interp import HybridLevelInterpPost
-from credit.postblock.hybrid_interp import interp_column_hybrid_to_hybrid
+from credit.postblock.hybrid_interp import HybridLevelInterpPost, interp_column_hybrid_to_hybrid
 from credit.preblock import _load_preblock_entry
 from credit.preblock.hybrid_interp import HybridLevelInterpPre
 

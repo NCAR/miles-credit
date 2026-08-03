@@ -15,7 +15,7 @@ class SpectralLoss2D(torch.nn.Module):
     """
 
     def __init__(self, wavenum_init=20, reduction="none"):
-        super(SpectralLoss2D, self).__init__()
+        super().__init__()
         self.wavenum_init = wavenum_init
         self.reduction = reduction
 

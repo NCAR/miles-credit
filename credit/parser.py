@@ -8,18 +8,18 @@ Content:
     - remove_string_by_pattern
 """
 
-import os
 import copy
 import inspect
+import os
 import warnings
-from glob import glob
 from collections import Counter
+from glob import glob
 
 from credit.data import get_forward_data
-from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
 # from credit.datasets.gen_1.datamap import DataMap
 from credit.datasets.count_channels import count_channels
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
 # from credit.transforms_downscaling import DataTransforms
 from credit.models import load_custom_model_modules
@@ -329,9 +329,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         varname_counts = Counter(all_varnames)
         duplicates = [varname for varname, count in varname_counts.items() if count > 1]
 
-        assert len(duplicates) == 0, "Duplicated variable names: [{}] found. No duplicates allowed, stop.".format(
-            duplicates
-        )
+        assert len(duplicates) == 0, f"Duplicated variable names: [{duplicates}] found. No duplicates allowed, stop."
 
         conf["data"]["all_varnames"] = (
             conf["data"]["variables"]
@@ -1009,15 +1007,15 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
                 varname_covered = list(conf["loss"]["variable_weights"].keys())
 
                 for varname in varname_upper_air:
-                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    assert varname in varname_covered, f"missing variable weights for '{varname}'"
                     N_weights = len(conf["loss"]["variable_weights"][varname])
-                    assert N_weights == N_levels, "{} levels were defined, but weights only have {} levels".format(
-                        N_levels, N_weights
+                    assert N_weights == N_levels, (
+                        f"{N_levels} levels were defined, but weights only have {N_weights} levels"
                     )
                     weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
                 for varname in varname_surface + varname_diagnostics:
-                    assert varname in varname_covered, "missing variable weights for '{}'".format(varname)
+                    assert varname in varname_covered, f"missing variable weights for '{varname}'"
                     weights_dict_ordered[varname] = conf["loss"]["variable_weights"][varname]
 
                 conf["loss"]["variable_weights"] = weights_dict_ordered
@@ -1344,7 +1342,7 @@ def training_data_check(conf, print_summary=False):
 
         for coord_name in coord_surface:
             assert ds_upper_air.coords[coord_name].equals(ds_surface.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and surface files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and surface files"
             )
 
     # dyn forcing files
@@ -1358,7 +1356,7 @@ def training_data_check(conf, print_summary=False):
 
         for coord_name in coord_dyn_forcing:
             assert ds_upper_air.coords[coord_name].equals(ds_dyn_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and dynamic forcing files"
             )
 
     # diagnostic files
@@ -1372,7 +1370,7 @@ def training_data_check(conf, print_summary=False):
 
         for coord_name in coord_diagnostic:
             assert ds_upper_air.coords[coord_name].equals(ds_diagnostic.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and diagnostic files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and diagnostic files"
             )
 
     # forcing files
@@ -1386,7 +1384,7 @@ def training_data_check(conf, print_summary=False):
 
         for coord_name in coord_forcing:
             assert ds_upper_air.coords[coord_name].equals(ds_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and forcing files"
             )
 
         # ============================================== #
@@ -1405,7 +1403,7 @@ def training_data_check(conf, print_summary=False):
 
         for coord_name in coord_static:
             assert ds_upper_air.coords[coord_name].equals(ds_static.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and static files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and static files"
             )
 
     # zscore mean file (no time coordinate)
@@ -1418,7 +1416,7 @@ def training_data_check(conf, print_summary=False):
 
     for coord_name in coord_mean:
         assert ds_upper_air.coords[coord_name].equals(ds_mean.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and mean files".format(coord_name)
+            f"coordinate {coord_name} mismatched between upper-air and mean files"
         )
 
     # zscore std file (no time coordinate)
@@ -1431,7 +1429,7 @@ def training_data_check(conf, print_summary=False):
 
     for coord_name in coord_std:
         assert ds_upper_air.coords[coord_name].equals(ds_std.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and std files".format(coord_name)
+            f"coordinate {coord_name} mismatched between upper-air and std files"
         )
 
     # lat / lon file
@@ -1448,9 +1446,7 @@ def training_data_check(conf, print_summary=False):
     N_level_model = conf["model"]["levels"]
 
     assert N_level_mean == N_level_model, (
-        "number of upper air levels mismatched between model config {} and input data {}".format(
-            N_level_model, N_level_mean
-        )
+        f"number of upper air levels mismatched between model config {N_level_model} and input data {N_level_mean}"
     )
 
     if print_summary:
@@ -1632,7 +1628,7 @@ def predict_data_check(conf, print_summary=False):
 
         for coord_name in coord_surface:
             assert ds_upper_air.coords[coord_name].equals(ds_surface.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and surface files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and surface files"
             )
 
     # dyn forcing files
@@ -1646,7 +1642,7 @@ def predict_data_check(conf, print_summary=False):
 
         for coord_name in coord_dyn_forcing:
             assert ds_upper_air.coords[coord_name].equals(ds_dyn_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and dynamic forcing files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and dynamic forcing files"
             )
 
     # forcing files
@@ -1660,7 +1656,7 @@ def predict_data_check(conf, print_summary=False):
 
         for coord_name in coord_forcing:
             assert ds_upper_air.coords[coord_name].equals(ds_forcing.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and forcing files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and forcing files"
             )
 
         # ============================================== #
@@ -1679,7 +1675,7 @@ def predict_data_check(conf, print_summary=False):
 
         for coord_name in coord_static:
             assert ds_upper_air.coords[coord_name].equals(ds_static.coords[coord_name]), (
-                "coordinate {} mismatched between upper-air and static files".format(coord_name)
+                f"coordinate {coord_name} mismatched between upper-air and static files"
             )
 
     # zscore mean file (no time coordinate)
@@ -1692,7 +1688,7 @@ def predict_data_check(conf, print_summary=False):
 
     for coord_name in coord_mean:
         assert ds_upper_air.coords[coord_name].equals(ds_mean.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and mean files".format(coord_name)
+            f"coordinate {coord_name} mismatched between upper-air and mean files"
         )
 
     # zscore std file (no time coordinate)
@@ -1705,7 +1701,7 @@ def predict_data_check(conf, print_summary=False):
 
     for coord_name in coord_std:
         assert ds_upper_air.coords[coord_name].equals(ds_std.coords[coord_name]), (
-            "coordinate {} mismatched between upper-air and std files".format(coord_name)
+            f"coordinate {coord_name} mismatched between upper-air and std files"
         )
 
     # lat / lon file

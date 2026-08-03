@@ -1,12 +1,12 @@
-import torch
-import xarray as xr
-import numpy as np
 import logging
 
-from credit.losses import _instantiate_loss
-from credit.losses.spectral import SpectralLoss2D
-from credit.losses.power import PSDLoss
+import numpy as np
+import torch
+import xarray as xr
 
+from credit.losses import _instantiate_loss
+from credit.losses.power import PSDLoss
+from credit.losses.spectral import SpectralLoss2D
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class VariableTotalLoss2D(torch.nn.Module):
                                                  datetime index, and additional information.
 
         """
-        super(VariableTotalLoss2D, self).__init__()
+        super().__init__()
 
         self.conf = conf
         self.training_loss = conf["loss"]["training_loss"]

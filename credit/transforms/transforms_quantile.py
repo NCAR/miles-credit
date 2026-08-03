@@ -8,13 +8,11 @@ Content
 """
 
 import logging
-from typing import Dict
 
 import numpy as np
 import pandas as pd
-import xarray as xr
-
 import torch
+import xarray as xr
 
 try:
     from bridgescaler import read_scaler  # optional dependency
@@ -26,7 +24,7 @@ from credit.data import Sample, device_compatible_to
 logger = logging.getLogger(__name__)
 
 
-class BridgescalerScaleState(object):
+class BridgescalerScaleState:
     """Convert to rescaled tensor using Bridgescaler."""
 
     def __init__(self, conf):
@@ -130,7 +128,7 @@ class BridgescalerScaleState(object):
         x_transformed = torch.cat((x_3d_transformed, x_surface_transformed), dim=1)
         return device_compatible_to(x_transformed, device)
 
-    def transform(self, sample: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def transform(self, sample: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Transform.
 
         Transform.
@@ -239,12 +237,12 @@ class NormalizeState_Quantile_Bridgescalar:
         rscal_3d = np.array(x[:, : (len(self.variables) * self.levels), :, :])
 
         transformed_tensor[:, :, :, :] = device_compatible_to(
-            torch.tensor((self.scaler_3d.inverse_transform(rscal_3d))), device
+            torch.tensor(self.scaler_3d.inverse_transform(rscal_3d)), device
         )
         # surf
         rscal_surf = np.array(x[:, (len(self.variables) * self.levels) :, :, :])
         transformed_surface_tensor[:, :, :, :] = device_compatible_to(
-            torch.tensor((self.scaler_surf.inverse_transform(rscal_surf))), device
+            torch.tensor(self.scaler_surf.inverse_transform(rscal_surf)), device
         )
         # cat them
         transformed_x = torch.cat((transformed_tensor, transformed_surface_tensor), dim=1)
@@ -376,7 +374,7 @@ class ToTensor_BridgeScaler:
                     return_dict["datetime"] = pd.to_datetime(self.datetime).astype(int).values[-1]
 
                 if sv == "Z_GDS4_SFC":
-                    arr = 2 * torch.tensor(np.array(((DSD[sv] - DSD[sv].min()) / (DSD[sv].max() - DSD[sv].min()))))
+                    arr = 2 * torch.tensor(np.array((DSD[sv] - DSD[sv].min()) / (DSD[sv].max() - DSD[sv].min())))
                 else:
                     try:
                         arr = DSD[sv].squeeze()

@@ -1,8 +1,7 @@
-from typing import Optional, Union
-
 import numpy as np
 import torch
 from torch_harmonics import InverseRealSHT
+
 from credit.boundary_padding import TensorPadding
 
 
@@ -44,7 +43,7 @@ class SphericalNoise:
         amplitude: float = 0.05,
         smoothness: float = 2.0,
         length_scale: float = 3.0,
-        variance_scale: Union[float, None] = None,
+        variance_scale: float | None = None,
         padding_conf: dict = None,
     ):
         self.amplitude = amplitude
@@ -184,7 +183,7 @@ class SphericalRandomField(torch.nn.Module):
         latitude_modes: int,
         smoothness: float = 2.0,
         length_scale: float = 3.0,
-        variance_scale: Union[float, None] = None,
+        variance_scale: float | None = None,
         sphere_radius: float = 1.0,
         grid_type: str = "equiangular",
         dtype: torch.dtype = torch.float32,
@@ -239,7 +238,7 @@ class SphericalRandomField(torch.nn.Module):
         self.register_buffer("gaussian_mean", gaussian_mean)
         self.register_buffer("gaussian_std", gaussian_std)
 
-    def forward(self, num_samples: int, noise_input: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, num_samples: int, noise_input: torch.Tensor | None = None) -> torch.Tensor:
         """Generate random field samples on the sphere.
 
         Uses Karhunen-Loève expansion to generate correlated random fields:

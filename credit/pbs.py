@@ -1,9 +1,10 @@
-import re
-import os
-import yaml
-import shutil
 import logging
+import os
+import re
+import shutil
 import subprocess
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -298,8 +299,6 @@ echo "Done at $(date)"
         except shutil.SameFileError:
             pass
 
-    return
-
 
 # Module set for the pbsdsh path. Identical to `credit submit`'s derecho module line
 # PLUS the libfabric module. NCCL's data plane runs over libfabric/CXI via the
@@ -551,8 +550,6 @@ def launch_script_pbsdsh(config_file, script_path, launch=True, backend="nccl"):
             shutil.copy("launch.sh", dst)
         except shutil.SameFileError:
             pass
-
-    return
 
 
 def get_num_cpus():

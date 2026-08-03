@@ -10,20 +10,19 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-
 from credit.datasets.gen_2.tisr import (
+    TISRDataset,
+    _compute_tisr,  # pyright: ignore[reportPrivateUsage]
     _era5_tsi_data,  # pyright: ignore[reportPrivateUsage]
-    _get_tsi,  # pyright: ignore[reportPrivateUsage]
-    _get_j2000_days,  # pyright: ignore[reportPrivateUsage]
-    _get_orbital_parameters,  # pyright: ignore[reportPrivateUsage]
-    _get_solar_time,  # pyright: ignore[reportPrivateUsage]
-    _get_hour_angle,  # pyright: ignore[reportPrivateUsage]
     _get_cosine_zenith_angle,  # pyright: ignore[reportPrivateUsage]
+    _get_hour_angle,  # pyright: ignore[reportPrivateUsage]
     _get_instantaneous_toa_tisr,  # pyright: ignore[reportPrivateUsage]
     _get_integrated_toa_tisr,  # pyright: ignore[reportPrivateUsage]
+    _get_j2000_days,  # pyright: ignore[reportPrivateUsage]
     _get_latlon_grid,  # pyright: ignore[reportPrivateUsage]
-    _compute_tisr,  # pyright: ignore[reportPrivateUsage]
-    TISRDataset,
+    _get_orbital_parameters,  # pyright: ignore[reportPrivateUsage]
+    _get_solar_time,  # pyright: ignore[reportPrivateUsage]
+    _get_tsi,  # pyright: ignore[reportPrivateUsage]
 )
 
 # Representative timestamps — chosen to exercise diverse solar geometry:

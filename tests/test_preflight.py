@@ -4,10 +4,9 @@ All tests run on CPU with no cluster or real data required.
 """
 
 import time
+
 import pytest
-
-from credit.trainers.preflight import estimate_dataloader_memory_gib, check_dataloader_startup  # noqa: E402
-
+from credit.trainers.preflight import check_dataloader_startup, estimate_dataloader_memory_gib
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -23,11 +23,10 @@ from typing import Any
 import pandas as pd
 import pytest
 import torch
-from torch.utils.data import DataLoader
-
 from credit.datasets.gen_2.base_dataset import AbstractBaseDataset, BaseDataset
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.samplers import DistributedMultiStepBatchSampler
+from torch.utils.data import DataLoader
 
 # Shared constants
 DATETIMES = pd.date_range("2024-06-01", "2026-06-02", freq="6h")

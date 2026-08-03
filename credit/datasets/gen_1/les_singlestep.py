@@ -7,24 +7,23 @@ Content:
 
 """
 
-import numpy as np
-
-import torch
 import random
+
+import numpy as np
+import torch
 import torch.utils.data
 from torch.utils.data import get_worker_info
 from torch.utils.data.distributed import DistributedSampler
 
-from credit.data import Sample_LES
-
 from credit.data import (
+    Sample_LES,
     drop_var_from_dataset,
     extract_month_day_hour,
-    find_common_indices,
-    get_forward_data,
-    find_key_for_number,
-    subset_patch,
     filter_ds,
+    find_common_indices,
+    find_key_for_number,
+    get_forward_data,
+    subset_patch,
 )
 
 
@@ -163,8 +162,7 @@ class LESDataset(torch.utils.data.Dataset):
         # handle out-of-bounds
         ind_largest = len(self.list_upper_ds[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
 
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension

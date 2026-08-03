@@ -15,7 +15,6 @@ import numpy as np
 import pandas as pd
 import pytest
 import xarray as xr
-
 from credit.datasets.gen_2._utils import (
     _find_file,
     build_time_index,

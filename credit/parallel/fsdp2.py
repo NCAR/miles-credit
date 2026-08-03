@@ -17,8 +17,9 @@ Checkpoint I/O:
 """
 
 import logging
+
 import torch
-import torch.nn as nn
+from torch import nn
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +169,7 @@ def _apply_activation_checkpointing(model: nn.Module) -> None:
     gets sharded.
     """
     import functools
+
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
         CheckpointImpl,
         apply_activation_checkpointing,
@@ -211,8 +213,8 @@ def fsdp2_state_dict(model: nn.Module) -> dict:
     at every checkpoint save.
     """
     from torch.distributed.checkpoint.state_dict import (
-        get_model_state_dict,
         StateDictOptions,
+        get_model_state_dict,
     )
 
     opts = StateDictOptions(full_state_dict=True, cpu_offload=True, broadcast_from_rank0=False)
@@ -222,8 +224,8 @@ def fsdp2_state_dict(model: nn.Module) -> dict:
 def fsdp2_load_state_dict(model: nn.Module, state_dict: dict) -> None:
     """Load a full state dict into an FSDP2 model."""
     from torch.distributed.checkpoint.state_dict import (
-        set_model_state_dict,
         StateDictOptions,
+        set_model_state_dict,
     )
 
     opts = StateDictOptions(full_state_dict=True, broadcast_from_rank0=True)
@@ -240,8 +242,8 @@ def fsdp2_optimizer_state_dict(model: nn.Module, optimizer) -> dict:
     ranks never materialize the ~3x-model-size optimizer state on GPU.
     """
     from torch.distributed.checkpoint.state_dict import (
-        get_optimizer_state_dict,
         StateDictOptions,
+        get_optimizer_state_dict,
     )
 
     opts = StateDictOptions(full_state_dict=True, cpu_offload=True, broadcast_from_rank0=False)
@@ -260,8 +262,8 @@ def fsdp2_load_optimizer_state_dict(model: nn.Module, optimizer, state_dict: dic
     to their pre-first-gradient condition.
     """
     from torch.distributed.checkpoint.state_dict import (
-        set_optimizer_state_dict,
         StateDictOptions,
+        set_optimizer_state_dict,
     )
 
     state = state_dict.get("state", {})

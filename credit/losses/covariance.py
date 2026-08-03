@@ -36,7 +36,7 @@ class CovarianceWeightedMSELoss(nn.Module):
         self.reduction_function = reduction_functions[reduction]
         self.batch_normalize = batch_normalize
         self.off_diagonal_scale = off_diagonal_scale
-        super(CovarianceWeightedMSELoss, self).__init__()
+        super().__init__()
 
     def forward(self, y_true, y_pred):
         # Assumes an initial shape based on (batch, variable, time, lat, lon)

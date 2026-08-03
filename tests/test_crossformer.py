@@ -1,5 +1,5 @@
-from credit.models.crossformer import CrossFormer
 import torch
+from credit.models.crossformer import CrossFormer
 
 
 def test_crossformer():

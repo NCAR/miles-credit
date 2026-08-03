@@ -6,7 +6,8 @@ communication with domain-parallel equivalents. Local operations
 """
 
 import logging
-import torch.nn as nn
+
+from torch import nn
 
 from credit.domain_parallel.layers import (
     DomainParallelConv2d,

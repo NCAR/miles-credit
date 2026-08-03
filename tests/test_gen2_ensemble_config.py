@@ -2,7 +2,6 @@ import sys
 
 import pytest
 import yaml
-
 from credit.applications import train_gen2
 from credit.losses import CRPS_LOSSES, is_crps_loss
 

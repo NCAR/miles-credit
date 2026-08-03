@@ -1,7 +1,9 @@
 import importlib
 import logging
+
 import torch
-import torch.nn as nn
+from torch import nn
+
 from credit.preblock.concat import ConcatToTensor
 
 logger = logging.getLogger(__name__)

@@ -1,22 +1,24 @@
+import datetime
+import time
+import traceback
+from functools import partial
+from importlib.resources import files
+from multiprocessing import Pool
+from os.path import exists, expandvars, join
+
 import numpy as np
 import pandas as pd
-from os.path import join, exists, expandvars
 import xarray as xr
-from functools import partial
-from multiprocessing import Pool
-from importlib.resources import files
+import yaml
+
 from credit.interp import (
-    geopotential_from_model_vars,
     create_pressure_grid,
     create_reduced_pressure_grid,
+    geopotential_from_model_vars,
     interp_hybrid_to_hybrid_levels,
     interp_hybrid_to_pressure_levels,
 )
 from credit.physics_constants import GRAVITY
-import datetime
-import time
-import traceback
-import yaml
 
 gfs_map = {}
 level_map = {}
@@ -109,7 +111,6 @@ def _get_gfs_maps(variable_mapping_type: str):
     level_map = mapping["level_map"]
     upper_air = mapping["upper_air"]
     surface = mapping["surface"]
-    return
 
 
 def _add_pressure_and_geopotential(data, temperature_var, specific_humidity_var):
@@ -206,7 +207,7 @@ def _combine_data(atm_data, sfc_data, temperature_var, specific_humidity_var):
         atm_data[var] = (sfc_data[var].dims, sfc_data[var].values)
 
     for var in atm_data.data_vars:
-        if var in gfs_map.keys():
+        if var in gfs_map:
             atm_data = atm_data.rename({var: gfs_map[var]})
 
     data = _add_pressure_and_geopotential(atm_data, temperature_var, specific_humidity_var)

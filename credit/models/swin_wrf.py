@@ -1,13 +1,14 @@
-import torch
-from torch import nn
-from torch.nn import functional as F
-from timm.layers.helpers import to_2tuple
-from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 import logging
 
-from credit.postblock.gen1 import PostBlock
-from credit.models.base_model import BaseModel
+import torch
+from timm.layers.helpers import to_2tuple
+from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
+from torch import nn
+from torch.nn import functional as F
+
 from credit.boundary_padding import TensorPadding
+from credit.models.base_model import BaseModel
+from credit.postblock.gen1 import PostBlock
 
 logger = logging.getLogger(__name__)
 

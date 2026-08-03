@@ -190,6 +190,7 @@ def download_mrms(
 
 if __name__ == "__main__":
     import argparse
+
     import yaml
 
     parser = argparse.ArgumentParser(description="Download MRMS data from AWS S3.")

@@ -4,6 +4,7 @@ import os
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -14,7 +15,6 @@ from torch.cuda.amp import autocast
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import StateDictType
 from torch.utils.data import IterableDataset
-import optuna
 
 
 def cleanup():
@@ -36,7 +36,7 @@ def accum_log(log, new_logs):
 
 class Trainer:
     def __init__(self, model, rank, module=False):
-        super(Trainer, self).__init__()
+        super().__init__()
         self.model = model
         self.rank = rank
         self.device = (

@@ -1,10 +1,11 @@
-import pytest
-import numpy as np
-import tempfile
 import os
 import shutil
-import netCDF4 as nc
+import tempfile
 from datetime import datetime, timedelta
+
+import netCDF4 as nc
+import numpy as np
+import pytest
 from credit.datasets.gen_1.datamap import DataMap  # assuming the module is importable
 
 # tests generated using claude to smoke-test integration

@@ -10,28 +10,27 @@ directly and assumes the new ``conf["data"]["source"]`` structure produced by
 For the legacy flat schema (v1), use ``applications/train.py``.
 """
 
-import os
-import sys
-import yaml
-import shutil
 import logging
+import os
+import shutil
+import sys
 import warnings
-
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 
 import torch
+import yaml
 
-from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
-from credit.seed import seed_everything
+from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, setup
 from credit.losses import is_crps_loss
-from credit.trainers import load_trainer
-from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
+from credit.pbs import launch_script, launch_script_mpi
+from credit.seed import seed_everything
+from credit.trainers import load_trainer
 from credit.trainers.utils import (
     inject_flat_var_keys,
-    load_dataset,
     load_dataloader,
+    load_dataset,
     load_model_states_and_optimizer,
 )
 

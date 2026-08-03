@@ -1,11 +1,12 @@
+from collections.abc import Sequence
+
 import numpy as np
 import pandas as pd
 import pvlib.solarposition
+import xarray as xr
 from pvlib.solarposition import get_solarposition
 from scipy.integrate import trapezoid
-import xarray as xr
 from tqdm import tqdm
-from collections.abc import Sequence
 
 
 def era5_tsi_data() -> xr.DataArray:

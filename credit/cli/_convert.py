@@ -3,6 +3,7 @@
 import argparse
 import os
 import sys
+
 import yaml
 
 from ._common import _prompt, _prompt_bool, _repo_root
@@ -40,8 +41,8 @@ def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out
 
     try:
         import torch
-        from bridgescaler.distributed_tensor import DStandardScalerTensor
         from bridgescaler import save_scaler_dict
+        from bridgescaler.distributed_tensor import DStandardScalerTensor
     except ImportError as e:
         print(f"  WARNING: cannot build BridgeScaler JSON — {e}", file=sys.stderr)
         print("  Falling back to era5_normalizer preblock.", file=sys.stderr)

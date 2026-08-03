@@ -3,6 +3,7 @@ import logging
 import torch
 
 from credit.preblock.base import BasePreblock
+
 from ._utils import _parse_variable_selection
 
 logger = logging.getLogger(__name__)
@@ -20,7 +21,7 @@ _OPS = {
 
 
 class FillValues(BasePreblock):
-    """Replace values matching a set of rules with constant fill values for selected variables.
+    r"""Replace values matching a set of rules with constant fill values for selected variables.
 
     Walks a nested batch dict of the form ``batch[data_type][source][var_key]``
     and applies each rule as a search-and-replace pass. All masks are computed

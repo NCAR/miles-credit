@@ -1,9 +1,11 @@
-import torch
+from functools import partial
+
 import numpy as np
+import torch
 import xarray as xr
+
 from credit.metadata import get_meta_file_path
 from credit.postblock.base import BasePostblock
-from functools import partial
 
 
 def pressure_on_interfaces(
@@ -169,7 +171,6 @@ class GeopotentialDiagnostic(BasePostblock):
         else:
             self.model_a_half = a_all
             self.model_b_half = b_all
-        return
 
     def forward(self, batch_dict: dict):
         """

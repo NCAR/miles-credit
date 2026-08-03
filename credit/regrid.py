@@ -53,13 +53,13 @@ ds_static_1deg = ds_static_1deg.isel(latitude=slice(None, None, -1))
 
 from __future__ import annotations
 
-import xarray
-import numpy as np
-from sklearn import neighbors
-
-import functools
 import dataclasses
+import functools
 from typing import Union
+
+import numpy as np
+import xarray
+from sklearn import neighbors
 
 Array = Union[np.ndarray]
 

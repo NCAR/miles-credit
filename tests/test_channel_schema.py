@@ -3,12 +3,10 @@
 import pytest
 import torch
 import yaml
-
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.postblock.reconstruct import Reconstruct
 from credit.preblock import attach_channel_schema, build_preblocks
 from credit.preblock.concat import ConcatToTensor
-from credit.postblock.reconstruct import Reconstruct
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -37,8 +35,8 @@ CONF = {
 
 def make_batch(n_levels=3, H=4, W=5, with_target=True):
     """Synthetic nested batch matching CONF, in dataset insertion order."""
-    t3 = lambda: torch.randn(1, n_levels, 1, H, W)  # noqa: E731
-    t2 = lambda: torch.randn(1, 1, 1, H, W)  # noqa: E731
+    t3 = lambda: torch.randn(1, n_levels, 1, H, W)
+    t2 = lambda: torch.randn(1, 1, 1, H, W)
     batch = {
         "input": {
             "CESM": {

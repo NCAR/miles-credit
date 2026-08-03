@@ -1,20 +1,14 @@
+import logging
 import os
 import shutil
-import torch
-import torch.nn as nn
-import logging
-
-from torch.distributed.fsdp import FullStateDictConfig
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import StateDictType
-
-from torch.optim import Optimizer
 from pathlib import Path
-from typing import Union
 
-from torch import Tensor
+import torch
+from torch import Tensor, nn
+from torch.distributed.fsdp import FullStateDictConfig, StateDictType
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.optim import Optimizer
 from torch.utils._pytree import tree_map
-
 
 # adapted from https://github.com/hpcaitech/ColossalAI/blob/f2e8b9ef9ff3032513732a699d766bcde1a3506e/colossalai/booster/plugin/torch_fsdp_plugin.py
 
@@ -361,8 +355,8 @@ class OptimizerWrapper:
 
     def clip_grad_by_norm(
         self,
-        max_norm: Union[float, int],
-        norm_type: Union[float, int] = 2.0,
+        max_norm: float,
+        norm_type: float = 2.0,
         error_if_nonfinite: bool = False,
         *args,
         **kwargs,
@@ -422,9 +416,8 @@ class FSDPOptimizerWrapper(OptimizerWrapper):
 
 
 if __name__ == "__main__":
-    import torch.optim as optim
-    import torch.nn as nn
     import torch.distributed as dist
+    from torch import nn, optim
 
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"

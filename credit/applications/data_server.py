@@ -1,8 +1,9 @@
-from fastapi import FastAPI
-import xarray as xr
 import base64
 from os.path import exists, join
+
+import xarray as xr
 import xesmf as xe
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.ndimage import gaussian_filter
 

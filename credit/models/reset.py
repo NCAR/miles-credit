@@ -1,9 +1,11 @@
+from collections.abc import Callable
+
 import torch
 import torch.distributed as dist
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp import FullStateDictConfig, StateDictType
-from typing import Callable
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.nn.parallel import DistributedDataParallel as DDP
+
 from credit.models import DebuggerModel
 from credit.models.checkpoint import TorchFSDPModel
 

@@ -9,13 +9,11 @@ from typing import Any
 
 import pandas as pd
 import pytest
-
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 
 # Importing this module registers "recording_base" via @register_dataset --
 # reused rather than re-registering to avoid the "overwriting registry entry" warning.
-from tests.test_cyclic_temporal_mode import RecordingDataset  # noqa: F401
-
+from tests.test_cyclic_temporal_mode import RecordingDataset
 
 BLOCKS = [["1950-01-01", "1965-12-31"], ["1970-01-01", "1985-12-31"], ["1990-01-01", "2005-12-31"]]
 

@@ -1,8 +1,8 @@
+from pathlib import Path
+
 import pytest
 import torch
 import yaml
-from pathlib import Path
-
 from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
 

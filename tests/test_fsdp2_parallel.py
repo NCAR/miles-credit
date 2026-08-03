@@ -7,10 +7,10 @@ These tests cover:
   - Parallelism config validation
 """
 
-import pytest
-import torch
 from unittest.mock import MagicMock
 
+import pytest
+import torch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -39,7 +39,7 @@ def _make_manager(rank, n):
 # shard_spatial
 # ---------------------------------------------------------------------------
 
-from credit.parallel.domain import shard_spatial, unpad_shard_interp  # noqa: E402
+from credit.parallel.domain import shard_spatial, unpad_shard_interp
 
 
 class TestShardSpatial:
@@ -160,8 +160,8 @@ class TestParallelismConfigMath:
 # data_parallel_coords — the dataloader sampler contract
 # ---------------------------------------------------------------------------
 
-from credit.parallel import mesh as mesh_mod  # noqa: E402
-from credit.parallel.mesh import data_parallel_coords, parse_parallelism_conf  # noqa: E402
+from credit.parallel import mesh as mesh_mod
+from credit.parallel.mesh import data_parallel_coords, parse_parallelism_conf
 
 
 class TestDataParallelCoords:
@@ -218,8 +218,8 @@ class TestDataParallelCoords:
 # Tensor-parallel col→row parity (serial simulation of tp=2)
 # ---------------------------------------------------------------------------
 
-from credit.parallel import tensor_parallel as tp_mod  # noqa: E402
-from credit.parallel.tensor_parallel import (  # noqa: E402
+from credit.parallel import tensor_parallel as tp_mod
+from credit.parallel.tensor_parallel import (
     TpColConv2d,
     TpColLinear,
     TpRowConv2d,

@@ -14,12 +14,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import numpy as np
+import optuna
 import pandas as pd
 
 # ---------- #
 import torch
 import xarray as xr
 import yaml
+from echo.src.base_objective import BaseObjective
 
 # ---------- #
 # credit
@@ -28,9 +30,9 @@ from credit.datasets import setup_data_loading
 from credit.datasets.gen_1.era5_multistep_batcher import Predict_Dataset_Batcher
 from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
 from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.ensemble.crps import calculate_crps_per_channel
 from credit.forecast import load_forecasts
 from credit.metrics import LatWeightedMetrics, LatWeightedMetricsClimatology
-
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.parser import credit_main_parser, predict_data_check
@@ -39,9 +41,6 @@ from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
 from credit.seed import seed_everything
 from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
-from credit.ensemble.crps import calculate_crps_per_channel
-from echo.src.base_objective import BaseObjective
-import optuna
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -626,13 +625,13 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
+                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {E!s}.")
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
+                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {E!s}.")
                 raise optuna.TrialPruned()
             else:
-                logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
+                logging.warning(f"Trial {trial.number} failed due to error: {E!s}.")
                 raise E
 
 

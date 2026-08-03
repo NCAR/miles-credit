@@ -1,24 +1,21 @@
+import logging
+import multiprocessing as mp
 import os
 import sys
-import yaml
-import logging
 import warnings
-
-from pathlib import Path
 from argparse import ArgumentParser
-import multiprocessing as mp
+from pathlib import Path
 
 # ---------- #
 # Numerics
 # import xarray as xr
-
 # ---------- #
 import torch
+import yaml
 
 # ---------- #
 # credit
-
-from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load_dataloader
+from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataloader, load_dataset
 from credit.distributed import distributed_model_wrapper, get_rank_info, setup
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
@@ -26,7 +23,6 @@ from credit.output_downscaling import OutputWrangler
 from credit.parser import credit_main_parser  # , predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
-
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -114,8 +110,6 @@ def predict(rank, world_size, conf, p):
         #
         # in any case, we could add a small perturbation
         # afterward to get an initial-condition ensemble
-
-        pass
 
     dataset.mode = "infer"
     data_loader = load_dataloader(conf, dataset, is_train=False)

@@ -1,17 +1,18 @@
-import torch
-import torch.nn as nn
-from torch.nn import Module, ModuleList
-from credit.diffusion import ModifiedGaussianDiffusion, default
 import math
+from functools import partial
 
+import torch
 import torch.nn.functional as F
 from einops import rearrange, repeat
-from functools import partial
-from credit.models.base_model import BaseModel
+from einops.layers.torch import Rearrange
+from torch import nn
+from torch.nn import Module, ModuleList
+
 from credit.attend import Attend
 from credit.boundary_padding import TensorPadding
-from credit.diffusion_utils import cast_tuple, exists, divisible_by
-from einops.layers.torch import Rearrange
+from credit.diffusion import ModifiedGaussianDiffusion, default
+from credit.diffusion_utils import cast_tuple, divisible_by, exists
+from credit.models.base_model import BaseModel
 
 
 def Upsample(dim, dim_out=None):
@@ -216,7 +217,7 @@ class Attention(Module):
 
 class PeriodicConv2d(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_size, padding=1):
-        super(PeriodicConv2d, self).__init__()
+        super().__init__()
         self.padding = padding
         self.conv = nn.Conv2d(dim_in, dim_out, kernel_size, padding=0)  # Padding is handled manually
 

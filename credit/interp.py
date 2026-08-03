@@ -1,11 +1,13 @@
 """Functions to interpolate data to pressure and height coordinates."""
 
-import numpy as np
-from numba import njit
-import xarray as xr
-from .physics_constants import RDGAS, GRAVITY
 import os
+
+import numpy as np
+import xarray as xr
+from numba import njit
 from numba.typed import Dict
+
+from .physics_constants import GRAVITY, RDGAS
 
 
 def full_state_pressure_interpolation(
@@ -354,7 +356,7 @@ def fast_state_interp_loop(
             interp_full_data[temperature_var],
         )
         if height_levels is not None:
-            for interp_field in interp_full_data.keys():
+            for interp_field in interp_full_data:
                 height_var = interp_field + height_ending
                 pressure_ds[height_var][:, i : i + 1, j : j + 1] = interp_hybrid_to_height_agl(
                     interp_full_data[interp_field],
@@ -465,7 +467,7 @@ def geopotential_from_model_vars(
     half_geopotential[-1] = surface_geopotential
     virtual_temperature = temperature * (1.0 + gamma * specific_humidity)
     m = model_geopotential.shape[-3] - 1
-    for i in range(0, model_geopotential.shape[-3]):
+    for i in range(model_geopotential.shape[-3]):
         if m == 0:
             dlog_p = np.log(half_pressure[m + 1] / 0.1)
             alpha = np.ones(half_pressure[m + 1].shape) * np.log(2)

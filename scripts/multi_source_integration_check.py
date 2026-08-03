@@ -1,18 +1,17 @@
-import time
 import logging
+import pathlib
+import time
+
+import numpy as np
+import torch
 
 # import_timer_start = time.perf_counter()
-
 import yaml
-import pathlib
-import torch
-import numpy as np
-
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
+from credit.postblock import apply_postblocks, build_postblocks
+from credit.preblock import apply_preblocks, build_preblocks
 from credit.samplers import DistributedMultiStepBatchSampler
 from torch.utils.data import DataLoader
-from credit.preblock import build_preblocks, apply_preblocks
-from credit.postblock import build_postblocks, apply_postblocks
 
 # Configure logging: set level to logging.DEBUG to show GRIB profiling timers
 logging.basicConfig(level=logging.INFO)

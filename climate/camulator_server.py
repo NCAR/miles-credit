@@ -30,26 +30,25 @@ python camulator_server.py --config ./camulator_config.yml --model_name checkpoi
 See climate/README_Coupling.md for full documentation.
 """
 
-import os
-import sys
-import time
-import shutil
 import argparse
 import logging
-import warnings
 import multiprocessing as mp
-from pathlib import Path
-from datetime import datetime, timedelta
+import os
+import shutil
+import sys
+import time
+import warnings
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from pathlib import Path
 
+import netCDF4 as nc
 import numpy as np
 import torch
-import netCDF4 as nc
 import yaml
-from scipy.special import roots_legendre
-
 from credit.output import make_xarray
-from Model_State import initialize_camulator, StateVariableAccessor
+from Model_State import StateVariableAccessor, initialize_camulator
+from scipy.special import roots_legendre
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(
@@ -285,6 +284,7 @@ def save_camulator_step_nc(upper_air, single_level, filepath):
         filepath     : str  destination path (parent dirs created if needed)
     """
     import os
+
     import xarray as xr
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
@@ -302,6 +302,7 @@ def save_camulator_daily_nc(buffer, filepath):
         filepath : str  destination path (parent dirs created if needed)
     """
     import os
+
     import xarray as xr
 
     os.makedirs(os.path.dirname(filepath), exist_ok=True)

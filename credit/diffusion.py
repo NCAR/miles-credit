@@ -1,16 +1,16 @@
 import math
-from random import random
-from functools import partial
 from collections import namedtuple
+from functools import partial
+from random import random
 
 import torch
 import torch.nn.functional as F
-from torch.nn import Module
-from torch.amp import autocast
 from einops import rearrange, reduce
-
 from scipy.optimize import linear_sum_assignment
+from torch.amp import autocast
+from torch.nn import Module
 from tqdm.auto import tqdm
+
 from credit.diffusion_utils import (
     default,
     identity,
@@ -367,7 +367,7 @@ class GaussianDiffusion(Module):
 
         x_start = None
         for t in tqdm(
-            reversed(range(0, self.num_timesteps)),
+            reversed(range(self.num_timesteps)),
             desc="sampling loop time step",
             total=self.num_timesteps,
         ):
@@ -476,7 +476,7 @@ class GaussianDiffusion(Module):
 
         x_start = None
 
-        for i in tqdm(reversed(range(0, t)), desc="interpolation sample time step", total=t):
+        for i in tqdm(reversed(range(t)), desc="interpolation sample time step", total=t):
             self_cond = x_start if self.self_condition else None
             x_cond = x_cond if self.condition else None
             img, x_start = self.p_sample(img, i, self_cond, x_cond)

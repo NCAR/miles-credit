@@ -1,10 +1,9 @@
 """Tests for the MSLP postblock: mslp_from_surface_pressure and MSLPDiagnostic."""
 
-import torch
 import pytest
-
-from credit.postblock.mslp import mslp_from_surface_pressure, MSLPDiagnostic
+import torch
 from credit.physics_constants import GRAVITY, RDGAS
+from credit.postblock.mslp import MSLPDiagnostic, mslp_from_surface_pressure
 
 _LAPSE_RATE = 0.0065
 

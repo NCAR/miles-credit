@@ -3,7 +3,7 @@
 
 
 import logging
-from typing import Dict, Optional
+from typing import Optional
 
 import torch
 import xarray as xr
@@ -129,7 +129,7 @@ default_metadata = {
 }
 
 
-def construct_metadata(data: xr.Dataset) -> Dict[str, Dict[str, str]]:
+def construct_metadata(data: xr.Dataset) -> dict[str, dict[str, str]]:
     metadata = {}
     for var in data.variables:
         try:
@@ -185,8 +185,8 @@ class TensorMap:
         self.prognostic_vars = PROG_VARS_MAP[prognostic_vars_key]
         self.boundary_vars = BOUND_VARS_MAP[boundary_vars_key]
 
-        self.VAR_3D_IDX: Dict[str, torch.Tensor] = {}
-        self.DP_3D_IDX: Dict[str, torch.Tensor] = {}
+        self.VAR_3D_IDX: dict[str, torch.Tensor] = {}
+        self.DP_3D_IDX: dict[str, torch.Tensor] = {}
 
         self.VAR_SET_2D = []
         self.VAR_SET_3D = []
@@ -198,7 +198,7 @@ class TensorMap:
                 self.VAR_SET_3D.append(var_split[0])
 
         # Consistent order of variables
-        self.VAR_SET = list(dict.fromkeys(([out.split("_")[0] for out in self.prognostic_vars])))
+        self.VAR_SET = list(dict.fromkeys([out.split("_")[0] for out in self.prognostic_vars]))
         self.DEPTH_SET = DEPTH_I_LEVELS
 
         self._populate_var_3d_idx()

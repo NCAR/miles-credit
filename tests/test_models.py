@@ -1,17 +1,15 @@
 """Tests for models.py."""
 
 import os
-import yaml
+
 import pytest
-
 import torch
-
+import yaml
 from credit.models import load_model, register_model
-from credit.parser import load_custom_model_modules
+from credit.models.fuxi import Fuxi
 from credit.models.unet import SegmentationModel
 from credit.models.wxformer.crossformer import CrossFormer
-from credit.models.fuxi import Fuxi
-from credit.parser import credit_main_parser
+from credit.parser import credit_main_parser, load_custom_model_modules
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join(
@@ -191,6 +189,7 @@ def test_load_custom_model_modules_missing_file():
 def test_register_model_overwrite(caplog):
     """Test that registering a duplicate key logs a warning and overwrites."""
     import logging
+
     from credit.models.base_model import BaseModel
 
     @register_model("test_overwrite_model")

@@ -5,21 +5,21 @@ from datetime import datetime
 
 import numpy as np
 import optuna
-import tqdm
 import torch
-import torch.fft
 import torch.distributed as dist
+import torch.fft
+import tqdm
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
 
-from credit.output_downscaling import OutputWrangler
-from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log
-from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
 
 # from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.datasets.count_channels import count_channels
+from credit.output_downscaling import OutputWrangler
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cycle
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,6 @@ class TrainerDownscaling(BaseTrainer):
         self.forecast_length = dconf["forecast_len"]
 
         self.ccount = count_channels(conf)
-
-        return
 
     ###################################
 

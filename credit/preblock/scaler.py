@@ -1,10 +1,13 @@
+from os import makedirs
+from os.path import exists, expandvars
+
 import torch
 from bridgescaler import load_scaler_dict, scale_var_dict
-from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScalerTensor, DMinMaxScalerTensor
+from bridgescaler.distributed_tensor import DMinMaxScalerTensor, DQuantileScalerTensor, DStandardScalerTensor
+
 from credit.preblock.base import BasePreblock
-from os.path import exists, expandvars
-from os import makedirs
-from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
+
+from ._utils import _flatten_spatial_tensors, _parse_variable_selection, _unflatten_spatial_tensors
 
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,

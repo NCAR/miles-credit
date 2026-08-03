@@ -1,7 +1,8 @@
 import xarray as xr
-import torch.nn as nn
+from torch import nn
+
 from credit.ocean.samudra_constants import PROG_VARS_MAP, TensorMap
-from credit.ocean.samudra_data import validate_data, extract_wet_mask
+from credit.ocean.samudra_data import extract_wet_mask, validate_data
 
 
 class WetMaskBlock(nn.Module):

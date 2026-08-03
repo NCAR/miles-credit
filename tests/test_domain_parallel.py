@@ -8,11 +8,16 @@ For single-device tests, we simulate sharding by manually splitting
 tensors and calling the domain-parallel primitives directly.
 """
 
-import pytest
-import torch
-import torch.nn as nn
 from unittest.mock import MagicMock
 
+import pytest
+import torch
+from credit.domain_parallel.convert import (
+    _needs_halo_conv2d,
+    _needs_halo_conv_transpose2d,
+    _needs_halo_conv_transpose3d,
+    convert_to_domain_parallel,
+)
 from credit.domain_parallel.layers import (
     DomainParallelConv2d,
     DomainParallelConvTranspose2d,
@@ -20,13 +25,8 @@ from credit.domain_parallel.layers import (
     DomainParallelGroupNorm,
     DomainParallelPeriodicConv2d,
 )
-from credit.domain_parallel.convert import (
-    convert_to_domain_parallel,
-    _needs_halo_conv2d,
-    _needs_halo_conv_transpose2d,
-    _needs_halo_conv_transpose3d,
-)
 from credit.domain_parallel.sharding import shard_tensor
+from torch import nn
 
 # Applied to any test that actually spawns processes or calls dist.*
 requires_multi_gpu = pytest.mark.skipif(

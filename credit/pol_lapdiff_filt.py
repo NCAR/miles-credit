@@ -1,8 +1,9 @@
+import copy
+import gc
+
 import numpy as np
 import torch
 import torch_harmonics as harmonics
-import copy
-import gc
 
 
 def polfiltT(D, inddo):

@@ -1,5 +1,5 @@
-from os.path import expandvars, dirname
 from importlib.resources import files
+from os.path import dirname, expandvars
 
 
 def get_meta_file_path(meta_file: str):

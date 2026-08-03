@@ -1,7 +1,7 @@
-from typing import Optional
 import itertools
-from torch.utils.data import Dataset, Sampler, DistributedSampler
 import logging
+
+from torch.utils.data import Dataset, DistributedSampler, Sampler
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,8 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
         dataset: Dataset,
         batch_size: int,
         num_forecast_steps: int,
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,

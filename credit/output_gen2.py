@@ -23,7 +23,6 @@ import logging
 import os
 import traceback
 from importlib.resources import files
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -141,7 +140,7 @@ class ForecastWriter:
         output_conf: dict,
         conf: dict,
         n_steps: int,
-        grid_schema: Optional[GridSchema] = None,
+        grid_schema: GridSchema | None = None,
         dataset=None,
         ic_preblocks=None,
         step_preblocks=None,
@@ -167,7 +166,7 @@ class ForecastWriter:
         # for the actual data (e.g. era5.yaml says "gregorian" even when applied to
         # noleap CESM output). Falls back to the metadata YAML, then a sane default,
         # when no dataset was given.
-        self._calendar: Optional[str] = getattr(dataset, "calendar", None)
+        self._calendar: str | None = getattr(dataset, "calendar", None)
 
         # output format
         fmt = (output_conf.get("format") or "netcdf").lower().strip()
@@ -179,7 +178,7 @@ class ForecastWriter:
         # output_interval: write only steps where fhr is a multiple of this
         ofreq = output_conf.get("output_interval")
         try:
-            self._output_freq_hrs: Optional[int] = int(pd.Timedelta(ofreq).total_seconds() / 3600) if ofreq else None
+            self._output_freq_hrs: int | None = int(pd.Timedelta(ofreq).total_seconds() / 3600) if ofreq else None
         except Exception:
             raise ValueError(f"Cannot parse output_interval: {ofreq!r}. Use a string like '6h', '24h', etc.")
 
@@ -187,7 +186,7 @@ class ForecastWriter:
         self._group_mode: str = self._parse_group_by(output_conf.get("group_by"))
 
         # variable + level filter
-        self._var_filter: Optional[dict] = self._parse_var_filter(output_conf.get("variables"))
+        self._var_filter: dict | None = self._parse_var_filter(output_conf.get("variables"))
 
         # CF attribute metadata
         self._meta: dict = self._load_metadata(output_conf.get("metadata"))
@@ -196,7 +195,7 @@ class ForecastWriter:
         self._encoding_conf: dict = output_conf.get("encoding") or {}
 
         # Coordinates: lazy-initialised on first __call__
-        self._coords: Optional[dict] = None
+        self._coords: dict | None = None
 
         # NetCDF buffer: list of (valid_time, xr.Dataset)
         self._buffer: list = []
@@ -217,7 +216,7 @@ class ForecastWriter:
         # (e.g. Lustre) writes let pickled payloads and worker processes pile up, which
         # progressively starves the rollout loop of host memory, CPU, and I/O bandwidth.
         # None => auto (2 * pool worker count), resolved per-submit in _drain_pending.
-        self._max_pending: Optional[int] = output_conf.get("max_pending")
+        self._max_pending: int | None = output_conf.get("max_pending")
 
     # ------------------------------------------------------------------
     # Public interface
@@ -640,7 +639,7 @@ class ForecastWriter:
                 )
 
     @staticmethod
-    def _load_metadata(path: Optional[str]) -> dict:
+    def _load_metadata(path: str | None) -> dict:
         if not path:
             return {}
         resolved = os.path.expandvars(path)
@@ -653,7 +652,7 @@ class ForecastWriter:
             return yaml.load(f, Loader=yaml.SafeLoader)
 
     @staticmethod
-    def _parse_var_filter(variables_conf) -> Optional[dict]:
+    def _parse_var_filter(variables_conf) -> dict | None:
         """Return {var_key: levels_or_None} dict, or None to save everything."""
         if variables_conf is None:
             return None

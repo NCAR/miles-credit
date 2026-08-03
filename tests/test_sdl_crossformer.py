@@ -1,5 +1,5 @@
-from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
 import torch
+from credit.models.wxformer.crossformer_ensemble import CrossFormerWithNoise
 
 
 def test_sdl_crossformer():

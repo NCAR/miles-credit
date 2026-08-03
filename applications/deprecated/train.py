@@ -6,42 +6,38 @@ Content
     load_model_states_and_optimizer
 """
 
-import os
-import sys
-import yaml
-import optuna
-import shutil
 import logging
+import os
+import shutil
+import sys
 import warnings
-from glob import glob
-
-from pathlib import Path
 from argparse import ArgumentParser
-from echo.src.base_objective import BaseObjective
+from glob import glob
+from pathlib import Path
 
+import optuna
 import torch
-from torch.cuda.amp import GradScaler
-from torch.utils.data.distributed import DistributedSampler
-from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
-
-from credit.seed import seed_everything
-from credit.losses import VariableTotalLoss2D
+import yaml
 from credit.data import ERA5_and_Forcing_Dataset
-from credit.transforms import load_transforms
-from credit.scheduler import load_scheduler, annealed_probability
-from credit.parser import credit_main_parser, training_data_check
-from credit.trainers import load_trainer
-
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.losses import VariableTotalLoss2D
 from credit.metrics import LatWeightedMetrics
-from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
     TorchFSDPCheckpointIO,
     load_state_dict_error_handler,
 )
-
+from credit.parser import credit_main_parser, training_data_check
+from credit.pbs import launch_script, launch_script_mpi
+from credit.scheduler import annealed_probability, load_scheduler
+from credit.seed import seed_everything
+from credit.trainers import load_trainer
+from credit.transforms import load_transforms
+from echo.src.base_objective import BaseObjective
+from torch.cuda.amp import GradScaler
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.utils.data.distributed import DistributedSampler
 
 warnings.filterwarnings("ignore")
 
@@ -548,13 +544,13 @@ class Objective(BaseObjective):
 
         except Exception as E:
             if "CUDA" in str(E) or "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {str(E)}.")
+                logging.warning(f"Pruning trial {trial.number} due to CUDA memory overflow: {E!s}.")
                 raise optuna.TrialPruned()
             elif "non-singleton" in str(E):
-                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {str(E)}.")
+                logging.warning(f"Pruning trial {trial.number} due to shape mismatch: {E!s}.")
                 raise optuna.TrialPruned()
             else:
-                logging.warning(f"Trial {trial.number} failed due to error: {str(E)}.")
+                logging.warning(f"Trial {trial.number} failed due to error: {E!s}.")
                 raise E
 
 

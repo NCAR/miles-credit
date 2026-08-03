@@ -1,24 +1,23 @@
 import gc
 import logging
 from collections import defaultdict
-from typing import Any, Dict
+from typing import Any
 
 import numpy as np
 import optuna
 import pandas as pd
-import xarray as xr
 import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm
-from torch.cuda.amp import autocast
-from torch.utils.data import IterableDataset
-
+import xarray as xr
 from credit.scheduler import update_on_batch
 
 # from credit.solar import TOADataLoader
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log
+from torch.cuda.amp import autocast
+from torch.utils.data import IterableDataset
 
 logger = logging.getLogger(__name__)
 
@@ -54,14 +53,14 @@ class Trainer(BaseTrainer):
     def train_one_epoch(
         self,
         epoch: int,
-        conf: Dict[str, Any],
+        conf: dict[str, Any],
         trainloader: torch.utils.data.DataLoader,
         optimizer: torch.optim.Optimizer,
         criterion: torch.nn.Module,
         scaler: torch.cuda.amp.GradScaler,
         scheduler: torch.optim.lr_scheduler._LRScheduler,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         # training hyperparameters
         batches_per_epoch = conf["trainer"]["batches_per_epoch"]
         grad_accum_every = conf["trainer"]["grad_accum_every"]
@@ -246,11 +245,11 @@ class Trainer(BaseTrainer):
     def validate(
         self,
         epoch: int,
-        conf: Dict[str, Any],
+        conf: dict[str, Any],
         valid_loader: torch.utils.data.DataLoader,
         criterion: torch.nn.Module,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         self.model.eval()
 
         valid_batches_per_epoch = conf["trainer"]["valid_batches_per_epoch"]

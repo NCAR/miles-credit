@@ -3,21 +3,20 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+import optuna
+import torch
 import torch.distributed as dist
 import torch.fft
+import torchmetrics
 import tqdm
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
-from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log
-from credit.trainers.base_trainer import BaseTrainer
+
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-import torchmetrics
-
-
-import optuna
-import torch
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cycle
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +102,7 @@ class TrainerERA5Diffusion(BaseTrainer):
             backprop_on_timestep = self.conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, self.conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(self.conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"

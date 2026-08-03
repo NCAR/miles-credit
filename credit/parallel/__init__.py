@@ -26,20 +26,20 @@ Usage (called from distributed_model_wrapper_gen2):
         model = apply_ddp(model, submeshes.get("dp"))
 """
 
-from .mesh import build_device_mesh
+from .domain import get_domain_manager, get_raw_model, shard_spatial, sync_domain_gradients, unpad_shard_interp
 from .fsdp2 import apply_fsdp2
+from .mesh import build_device_mesh
 from .tensor_parallel import apply_native_tensor_parallel, apply_tensor_parallel, supports_native_tp
-from .domain import get_domain_manager, get_raw_model, shard_spatial, unpad_shard_interp, sync_domain_gradients
 
 __all__ = [
-    "build_device_mesh",
     "apply_fsdp2",
     "apply_native_tensor_parallel",
     "apply_tensor_parallel",
-    "supports_native_tp",
+    "build_device_mesh",
     "get_domain_manager",
     "get_raw_model",
     "shard_spatial",
-    "unpad_shard_interp",
+    "supports_native_tp",
     "sync_domain_gradients",
+    "unpad_shard_interp",
 ]

@@ -30,7 +30,6 @@ import xarray as xr
 
 from credit.datasets.gen_2.grid_utils import find_coord_pair
 
-
 # ---------------------------------------------------------------------------
 # Shared SCRIP writer
 # ---------------------------------------------------------------------------
@@ -331,8 +330,8 @@ def scrip_from_netcdf(nc_file, scrip_file, grid_name=None, mask_var=None):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    import os
     import argparse
+    import os
 
     parser = argparse.ArgumentParser(description="Generate a SCRIP-format file from a NetCDF grid file.")
     parser.add_argument("-i", "--input", default=None, help="Input NetCDF file path")

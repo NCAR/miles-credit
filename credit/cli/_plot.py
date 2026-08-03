@@ -134,17 +134,17 @@ def _plot(args) -> None:
     model.eval()
     logger.info(f"Loaded checkpoint: {ckpt_path}")
 
+    # Build the effective validation data config: start from training data, then overlay
+    # validation_data overrides (date range, etc.) if present.  This mirrors how the
+    # trainer constructs its validation dataloader.
+    import copy
+
     import pandas as pd
     from torch.utils.data import default_collate
 
     from credit.datasets.gen_2.multi_source import MultiSourceDataset
     from credit.preblock import apply_preblocks, build_preblocks
     from credit.registry import load_custom_objects
-
-    # Build the effective validation data config: start from training data, then overlay
-    # validation_data overrides (date range, etc.) if present.  This mirrors how the
-    # trainer constructs its validation dataloader.
-    import copy
 
     data_conf = copy.deepcopy(conf["data"])
     val_override = conf.get("validation_data") or conf.get("data_valid") or {}

@@ -1,5 +1,6 @@
-from glob import glob
 import os
+from glob import glob
+
 import netCDF4 as nc
 
 

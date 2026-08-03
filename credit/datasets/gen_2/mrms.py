@@ -41,9 +41,8 @@ File naming (local mode):
 
 from __future__ import annotations
 
-from typing import Any
-
 import gzip
+from typing import Any
 
 import pandas as pd
 import torch

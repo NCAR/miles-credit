@@ -1,23 +1,24 @@
 import gc
 import os
+import random
 from collections import defaultdict
+from glob import glob
 
 import numpy as np
+import optuna
 import pandas as pd
-import xarray as xr
 import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm
+import xarray as xr
+from overrides import overrides
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
-import optuna
-from glob import glob
-from credit.transforms import load_transforms
+
 from credit.data import ERA5_and_Forcing_Dataset
 from credit.trainers.base_trainer import BaseTrainer
-from overrides import overrides
-import random
+from credit.transforms import load_transforms
 
 
 def cleanup():
@@ -52,7 +53,7 @@ class TOADataLoader:
 
 class WeightedRMSE(torch.nn.Module):
     def __init__(self, conf):
-        super(WeightedRMSE, self).__init__()
+        super().__init__()
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
             lat = xr.open_dataset(conf["loss"]["latitude_weights"])["latitude"].values

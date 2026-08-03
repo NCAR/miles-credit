@@ -1,14 +1,16 @@
-from credit.ocean.samudra_constants import PROG_VARS_MAP, BOUND_VARS_MAP, TensorMap
-from credit.ocean.samudra_data import validate_data, extract_wet_mask
-import xarray as xr
-import torch
 import logging
 import math
-import numpy as np
-from torch.utils.data import DistributedSampler
 from pathlib import Path
+
 import cftime
+import numpy as np
 import pandas as pd
+import torch
+import xarray as xr
+from torch.utils.data import DistributedSampler
+
+from credit.ocean.samudra_constants import BOUND_VARS_MAP, PROG_VARS_MAP, TensorMap
+from credit.ocean.samudra_data import extract_wet_mask, validate_data
 
 
 def load_transform(conf):
@@ -892,8 +894,8 @@ class Predict_Ocean_Batcher(Ocean_MultiStep_Batcher):
 
 
 if __name__ == "__main__":
-    import yaml
     import pandas as pd
+    import yaml
 
     with open("/glade/derecho/scratch/schreck/samudra/mom.yml", "r") as f:
         conf = yaml.safe_load(f)

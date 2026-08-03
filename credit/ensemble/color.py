@@ -1,5 +1,4 @@
 import torch
-from typing import Optional, Tuple, Union
 
 
 class ColorNoise:
@@ -96,11 +95,11 @@ class ColorNoise:
 
 def apply_noise_perturbation_step(
     x: torch.Tensor,
-    delta_prev: Optional[torch.Tensor],
+    delta_prev: torch.Tensor | None,
     forecast_step: int,
     rho: float = 0.9,
-    perturbation_std: Union[float, torch.Tensor] = 0.05,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+    perturbation_std: float | torch.Tensor = 0.05,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Red noise perturbation in physical units, with per-channel control.
     """

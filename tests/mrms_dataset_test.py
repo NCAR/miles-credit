@@ -27,10 +27,9 @@ import pandas as pd
 import pytest
 import torch
 import xarray as xr
-from torch.utils.data import DataLoader
-
 from credit.datasets.gen_2.mrms import MRMSDataset
 from credit.samplers import DistributedMultiStepBatchSampler
+from torch.utils.data import DataLoader
 
 QPE_1H = "MultiSensor_QPE_01H_Pass2_00.00"
 QPE_6H = "MultiSensor_QPE_06H_Pass2_00.00"

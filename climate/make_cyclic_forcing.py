@@ -26,9 +26,10 @@ Usage
 """
 
 import argparse
+import os
+
 import numpy as np
 import xarray as xr
-import os
 
 # ── Defaults ───────────────────────────────────────────────────────────────
 SRC_DEFAULT = "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate_branch_1980_2014.nc"

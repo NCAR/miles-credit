@@ -19,7 +19,7 @@ preblock is a thin wrapper around the same engine.
 """
 
 import torch
-import torch.nn as nn
+from torch import nn
 
 from credit.postblock._interp_utils import load_hybrid_level_coefficients, loglinear_interp_columns
 from credit.postblock.base import BasePostblock

@@ -14,9 +14,8 @@ import pytest
 import torch
 import xarray as xr
 import yaml
-
 from credit.cli._convert import _build_bridgescaler_jsons
-from credit.postblock import build_postblocks, apply_postblocks
+from credit.postblock import apply_postblocks, build_postblocks
 
 try:
     import bridgescaler  # noqa: F401
@@ -58,7 +57,7 @@ def mean_std_nc(tmp_path):
 @skip_bs
 def test_convert_writes_postblocks(tmp_path, mean_std_nc):
     """credit convert on a v1 config produces reconstruct + bridgescaler postblocks."""
-    import credit.cli as cli
+    from credit import cli
 
     mean_path, std_path, *_ = mean_std_nc
 

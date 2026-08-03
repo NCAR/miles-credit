@@ -68,7 +68,7 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets.gen_2._utils import _infer_period_freq, _find_file, _start_s3_fs
+from credit.datasets.gen_2._utils import _find_file, _infer_period_freq, _start_s3_fs
 from credit.datasets.gen_2.base_dataset import BaseDataset
 from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
 
@@ -92,7 +92,7 @@ _KNOWN_FLAGS = frozenset({_FILE_NOT_FOUND, _FILE_QC_MASKED, _FILE_SKIP})
 # --- Catalog row validation ---
 
 
-def _validate_catalog_row_path(path: str, t: "pd.Timestamp") -> None:
+def _validate_catalog_row_path(path: str, t: pd.Timestamp) -> None:
     """Raise a ValueError if *path* looks like a mistyped flag (sentinel) value.
 
     Real file paths always contain a '/' (local path or s3://) and end in '.nc'.

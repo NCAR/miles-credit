@@ -1,10 +1,12 @@
-from credit.solar import get_solar_radiation_loc, get_toa_radiation
-from mpi4py import MPI
 import argparse
-import xarray as xr
-import numpy as np
 import os
+
+import numpy as np
 import pandas as pd
+import xarray as xr
+from mpi4py import MPI
+
+from credit.solar import get_solar_radiation_loc, get_toa_radiation
 
 
 def main():
@@ -131,7 +133,6 @@ def main():
                     }
                 },
             )
-    return
 
 
 if __name__ == "__main__":

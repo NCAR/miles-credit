@@ -9,25 +9,25 @@ Reference:
     https://colab.research.google.com/drive/1OFLZnX9y5QUFNONuvFsxOizq4M-tFvk-?usp=sharing#scrollTo=CxSCQPOMHgwo
 """
 
-import os
 import logging
-from functools import partial
+import os
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor as Pool
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from functools import partial
+from typing import Any
 
 import numpy as np
-
 import torch
 from torch.utils.data import get_worker_info
 from torch.utils.data.distributed import DistributedSampler
 
 from credit.data import (
     Sample,
-    find_key_for_number,
-    get_forward_data,
     drop_var_from_dataset,
     extract_month_day_hour,
     find_common_indices,
+    find_key_for_number,
+    get_forward_data,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,26 +36,26 @@ logger = logging.getLogger(__name__)
 class DistributedSequentialDataset(torch.utils.data.IterableDataset):
     def __init__(
         self,
-        varname_upper_air: List[str],
-        varname_surface: List[str],
-        varname_dyn_forcing: List[str],
-        varname_forcing: List[str],
-        varname_static: List[str],
-        varname_diagnostic: List[str],
-        filenames: List[str],
-        filename_surface: Optional[List[str]] = None,
-        filename_dyn_forcing: Optional[List[str]] = None,
-        filename_forcing: Optional[str] = None,
-        filename_static: Optional[str] = None,
-        filename_diagnostic: Optional[List[str]] = None,
+        varname_upper_air: list[str],
+        varname_surface: list[str],
+        varname_dyn_forcing: list[str],
+        varname_forcing: list[str],
+        varname_static: list[str],
+        varname_diagnostic: list[str],
+        filenames: list[str],
+        filename_surface: list[str] | None = None,
+        filename_dyn_forcing: list[str] | None = None,
+        filename_forcing: str | None = None,
+        filename_static: str | None = None,
+        filename_diagnostic: list[str] | None = None,
         rank: int = 0,
         world_size: int = 1,
         history_len: int = 2,
         forecast_len: int = 0,
-        transform: Optional[Callable] = None,
+        transform: Callable | None = None,
         seed: int = 42,
-        skip_periods: Optional[int] = None,
-        max_forecast_len: Optional[int] = None,
+        skip_periods: int | None = None,
+        max_forecast_len: int | None = None,
         shuffle: bool = True,
         num_workers: int = 0,
     ):
@@ -229,7 +229,7 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
         self.filename_forcing = filename_forcing
 
         if self.filename_forcing is not None:
-            assert os.path.isfile(filename_forcing), "Cannot find forcing file [{}]".format(filename_forcing)
+            assert os.path.isfile(filename_forcing), f"Cannot find forcing file [{filename_forcing}]"
 
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_forcing)
@@ -245,7 +245,7 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
         self.filename_static = filename_static
 
         if self.filename_static is not None:
-            assert os.path.isfile(filename_static), "Cannot find static file [{}]".format(filename_static)
+            assert os.path.isfile(filename_static), f"Cannot find static file [{filename_static}]"
 
             # drop variables if they are not in the config
             xarray_dataset = get_forward_data(filename_static)
@@ -336,19 +336,19 @@ class DistributedSequentialDataset(torch.utils.data.IterableDataset):
 
 
 def worker(
-    tuple_index: Tuple[int, int],
-    ERA5_indices: Dict[str, List[int]],
-    all_files: List[Any],
-    surface_files: Optional[List[Any]],
-    dyn_forcing_files: Optional[List[Any]],
-    diagnostic_files: Optional[List[Any]],
-    xarray_forcing: Optional[Any],
-    xarray_static: Optional[Any],
+    tuple_index: tuple[int, int],
+    ERA5_indices: dict[str, list[int]],
+    all_files: list[Any],
+    surface_files: list[Any] | None,
+    dyn_forcing_files: list[Any] | None,
+    diagnostic_files: list[Any] | None,
+    xarray_forcing: Any | None,
+    xarray_static: Any | None,
     history_len: int,
     forecast_len: int,
     skip_periods: int,
-    transform: Optional[Callable],
-) -> Dict[str, Any]:
+    transform: Callable | None,
+) -> dict[str, Any]:
     """
     Processes a given index to extract and transform data for a specific time slice.
 
@@ -383,8 +383,7 @@ def worker(
 
         # handle out-of-bounds
         ind_largest = len(all_files[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension & load it to the memory
@@ -543,8 +542,7 @@ class DistributedSequentialDatasetBasic(DistributedSequentialDataset):
 
                 # handle out-of-bounds
                 ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
-                if ind_start_in_file > ind_largest:
-                    ind_start_in_file = ind_largest
+                ind_start_in_file = min(ind_start_in_file, ind_largest)
                 # ========================================================================== #
                 # subset xarray on time dimension & load it to the memory
 

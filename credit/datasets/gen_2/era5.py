@@ -36,18 +36,18 @@ Output key format (flat, slash-delimited):
 
 from __future__ import annotations
 
-import cftime
 import logging
 from typing import Any
 
-from gcsfs import GCSFileSystem
+import cftime
 import pandas as pd
 import torch
 import xarray as xr
 import zarr
+from gcsfs import GCSFileSystem
 
 from credit.datasets.gen_2._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
-from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.base_dataset import VALID_FIELD_TYPES, BaseDataset
 from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type, write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
@@ -154,7 +154,7 @@ class ARCOERA5Dataset(BaseDataset):
         """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data."""
         fs_config: dict[str, Any] = {
             "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
+            "token": "anon",  # nosec B106
             "access": "read_only",
             "block_size": 8**20,
             "asynchronous": True,
@@ -430,7 +430,7 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     def _init_fs(self) -> None:
         fs_config = {
             "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
+            "token": "anon",  # nosec B106
             "access": "read_only",
             "block_size": 8**20,
             "asynchronous": True,

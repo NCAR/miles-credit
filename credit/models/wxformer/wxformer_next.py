@@ -14,11 +14,9 @@ import logging
 import os
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
-
 from einops import rearrange
-from torch import einsum
+from torch import einsum, nn
 
 from credit.models.base_model import BaseModel
 from credit.models.wxformer.crossformer import (

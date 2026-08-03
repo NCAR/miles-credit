@@ -11,8 +11,7 @@ import time
 
 import pytest
 import torch
-import torch.nn as nn
-
+from torch import nn
 
 # ---------------------------------------------------------------------------
 # credit/trainers/preflight.py
@@ -182,7 +181,7 @@ class TestLoadScheduler:
         assert load_scheduler(_make_optimizer(), conf) is None
 
     def test_linear_warmup_cosine(self):
-        from credit.scheduler import load_scheduler, LinearWarmupCosineScheduler
+        from credit.scheduler import LinearWarmupCosineScheduler, load_scheduler
 
         conf = self._conf("linear-warmup-cosine", warmup_steps=10, total_steps=100)
         sched = load_scheduler(_make_optimizer(), conf)
@@ -197,7 +196,7 @@ class TestLoadScheduler:
         assert isinstance(sched, CosineAnnealingLR)
 
     def test_cosine_annealing_restarts(self):
-        from credit.scheduler import load_scheduler, CosineAnnealingWarmupRestarts
+        from credit.scheduler import CosineAnnealingWarmupRestarts, load_scheduler
 
         conf = self._conf(
             "cosine-annealing-restarts",
@@ -398,6 +397,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
     def test_memory_estimate_info_logged(self, caplog):
         """When est_gb > 0, should log an info message (lines 137-143)."""
         import logging
+
         from credit.trainers.preflight import check_dataloader_startup
 
         class _FastLoader:
@@ -413,6 +413,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
     def test_high_memory_triggers_warning(self, caplog, monkeypatch):
         """When estimated RAM > 80% of available, should emit a warning (lines 147-157)."""
         import logging
+
         from credit.trainers import preflight as pf
 
         # Make available RAM appear tiny so any estimate looks dangerous
@@ -431,6 +432,7 @@ class TestCheckDataloaderStartupMemoryWarnings:
     def test_moderate_memory_triggers_info(self, caplog, monkeypatch):
         """When estimated RAM is 50-80% of available, should emit info (lines 158-165)."""
         import logging
+
         from credit.trainers import preflight as pf
 
         # Calculate what the estimate will be for a small conf, then set avail_gb
@@ -601,6 +603,7 @@ class TestSchedulerEdgeCases:
     def test_fsdp_wrapper_unwrapped(self):
         """Line 67: optimizer wrapped in FSDPOptimizerWrapper is unwrapped before scheduling."""
         from unittest.mock import patch
+
         from credit.scheduler import load_scheduler
 
         inner_opt = self._simple_optimizer()

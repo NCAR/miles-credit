@@ -13,17 +13,16 @@ read.
 """
 
 import numpy as np
+import pytest
 import torch
 import xarray as xr
-import pytest
-
-from credit.postblock.reconstruct import Reconstruct, FlattenToTensor
 from credit.postblock.conservation import (
-    TracerFixer,
+    GlobalEnergyFixerUpDown,
     GlobalMassFixer,
     GlobalWaterFixer,
-    GlobalEnergyFixerUpDown,
+    TracerFixer,
 )
+from credit.postblock.reconstruct import FlattenToTensor, Reconstruct
 
 SRC = "ERA5"
 B, L, H, W = 2, 4, 4, 8
@@ -180,8 +179,8 @@ def test_flatten_to_tensor_scales_with_preprocess_scaler(tmp_path):
     `credit preprocess` writes (slicing the "target" data type), normalize the
     rebuilt y_pred, and leave the physical y_processed untouched."""
     from bridgescaler import save_scaler_dict
-    from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
     from credit.postblock.scaler import BridgeScalerTransform as PostScalerBlock
+    from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
 
     cmap, n_ch = build_channel_map()
 

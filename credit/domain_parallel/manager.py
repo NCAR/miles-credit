@@ -11,6 +11,7 @@ Example with 8 GPUs and domain_parallel_size=2:
 """
 
 import logging
+
 import torch.distributed as dist
 
 logger = logging.getLogger(__name__)

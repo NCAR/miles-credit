@@ -3,15 +3,14 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import torch
 import torch.distributed as dist
 import tqdm
 from torch.utils.data import IterableDataset
 
-import optuna
-
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.utils import accum_log, cycle
@@ -80,7 +79,7 @@ class TrainerERA5Gen1(BaseTrainer):
         if "backprop_on_timestep" in data_conf:
             self.backprop_on_timestep = data_conf["backprop_on_timestep"]
         else:
-            self.backprop_on_timestep = list(range(0, self.forecast_len + 2))
+            self.backprop_on_timestep = list(range(self.forecast_len + 2))
         assert self.forecast_len <= self.backprop_on_timestep[-1], (
             f"forecast_len ({self.forecast_len + 1}) must not exceed the max value "
             f"in backprop_on_timestep {self.backprop_on_timestep}"

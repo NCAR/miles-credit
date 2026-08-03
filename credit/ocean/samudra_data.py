@@ -3,7 +3,7 @@
 
 
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Optional
 
 import cftime
 import numpy as np
@@ -63,7 +63,7 @@ def get_inference_steps(time_config, time_delta=5, hist=1):
     return num_steps
 
 
-def convert_tensor_out_to_dict(tensor_out: torch.Tensor) -> Dict[str, torch.Tensor]:
+def convert_tensor_out_to_dict(tensor_out: torch.Tensor) -> dict[str, torch.Tensor]:
     tensor_map = TensorMap.get_instance()
     assert tensor_out.ndim == 5
     assert tensor_out.shape[2] == len(tensor_map.outputs)
@@ -126,7 +126,7 @@ def validate_data(
     data: xr.Dataset,
     data_mean: xr.Dataset,
     data_std: xr.Dataset,
-) -> Tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
+) -> tuple[xr.Dataset, xr.Dataset, xr.Dataset]:
     """
     Validate the data such that we have the correct format for training/evaluation.
     """

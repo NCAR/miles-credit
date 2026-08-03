@@ -3,19 +3,17 @@ import logging
 from collections import defaultdict
 
 import numpy as np
+import optuna
 import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm
+from credit.data import concat_and_reshape, reshape_only
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log, cycle
 from torch.cuda.amp import autocast
 from torch.utils.data import IterableDataset
-from credit.scheduler import update_on_batch
-from credit.trainers.utils import cycle, accum_log
-from credit.trainers.base_trainer import BaseTrainer
-from credit.data import concat_and_reshape, reshape_only
-import optuna
-import torch
-
 
 logger = logging.getLogger(__name__)
 

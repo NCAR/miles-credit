@@ -195,9 +195,9 @@ def load_fsdp_or_checkpoint_policy(conf):
     if "crossformer" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
+            CrossEmbedLayer,
             DynamicPositionBias,
             FeedForward,
-            CrossEmbedLayer,
         )
 
         transformer_layers_cls = {
@@ -209,9 +209,9 @@ def load_fsdp_or_checkpoint_policy(conf):
     elif "wxformer" in conf["model"]["type"]:
         from credit.models.wxformer.crossformer import (
             Attention,
+            CrossEmbedLayer,
             DynamicPositionBias,
             FeedForward,
-            CrossEmbedLayer,
         )
 
         transformer_layers_cls = {
@@ -223,9 +223,9 @@ def load_fsdp_or_checkpoint_policy(conf):
     elif "unet" in conf["model"]["type"]:
         from credit.models.crossformer import (
             Attention,
+            CrossEmbedLayer,
             DynamicPositionBias,
             FeedForward,
-            CrossEmbedLayer,
         )
 
         transformer_layers_cls = {
@@ -245,8 +245,8 @@ def load_fsdp_or_checkpoint_policy(conf):
     elif "swin" in conf["model"]["type"]:
         from credit.models.swin import (
             SwinTransformerV2CrBlock,
-            WindowMultiHeadAttentionNoPos,
             WindowMultiHeadAttention,
+            WindowMultiHeadAttentionNoPos,
         )
 
         transformer_layers_cls = {

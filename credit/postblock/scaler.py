@@ -1,10 +1,11 @@
 from os.path import expandvars
 
 from bridgescaler import load_scaler_dict, scale_var_dict
+
 from credit.postblock.base import BasePostblock
 from credit.preblock._utils import (
-    _parse_variable_selection,
     _flatten_spatial_tensors,
+    _parse_variable_selection,
     _unflatten_spatial_tensors,
 )  # shared utilities — live in preblock but used by both pre and postblocks
 

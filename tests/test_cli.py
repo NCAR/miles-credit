@@ -6,8 +6,8 @@ LLM APIs) are mocked via monkeypatch / unittest.mock.
 
 import argparse
 import os
-import sys
 import subprocess
+import sys
 from unittest import mock
 
 import pytest
@@ -16,33 +16,32 @@ import yaml
 # ---------------------------------------------------------------------------
 # Import the module under test
 # ---------------------------------------------------------------------------
-import credit.cli as cli
+from credit import cli
 from credit.cli import (
+    _agent_bash,
+    _agent_list_files,
+    _agent_read_file,
+    _build_channel_map,
+    _build_parser,
+    _build_pbs_script,
+    _build_rollout_pbs_script,
+    _compute_chain,
+    _dispatch_tool,
+    _find_torchrun,
+    _is_ncar_system,
+    _load_pbs_config,
+    _print_ensemble_rollout_plan,
+    _print_job_plan,
     _prompt,
     _prompt_bool,
-    _setup_logging,
-    _repo_root,
-    _write_reload_config,
-    _load_pbs_config,
-    _resolve_pbs_opts,
-    _build_pbs_script,
     _qsub,
-    _compute_chain,
-    _print_job_plan,
-    _build_rollout_pbs_script,
-    _print_ensemble_rollout_plan,
-    _find_torchrun,
+    _repo_root,
+    _resolve_pbs_opts,
     _resolve_torchrun,
-    _is_ncar_system,
-    _build_channel_map,
-    _agent_read_file,
-    _agent_list_files,
-    _agent_bash,
-    _dispatch_tool,
-    _build_parser,
+    _setup_logging,
+    _write_reload_config,
     main,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -559,8 +558,8 @@ class TestComputeChain:
 
 def _inject_preflight(mem_gb=0.0):
     """Context manager: injects a fake preflight module into sys.modules."""
-    import types
     import sys
+    import types
     from contextlib import contextmanager
 
     @contextmanager

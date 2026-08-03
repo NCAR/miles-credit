@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 
 def load_unet_attention(attention_type, out_chans, reduction=32, spatial_kernel=7):

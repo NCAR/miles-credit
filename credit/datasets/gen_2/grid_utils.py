@@ -330,7 +330,7 @@ class GridSchema:
     # ------------------------------------------------------------------
 
     @classmethod
-    def resolve(cls, dataset: Any, ic_preblocks=None, step_preblocks=None, save_loc: str | None = None) -> "GridSchema":
+    def resolve(cls, dataset: Any, ic_preblocks=None, step_preblocks=None, save_loc: str | None = None) -> GridSchema:
         """Resolve the effective output grid from a live dataset + preblocks.
 
         Starts from the dataset's native grid (``static_metadata["grid"]``,
@@ -389,7 +389,7 @@ class GridSchema:
         logger.info("GridSchema saved to %s", path)
 
     @classmethod
-    def load(cls, path: str) -> "GridSchema":
+    def load(cls, path: str) -> GridSchema:
         with xr.open_dataset(path) as ds:
             grid_type = ds.attrs["grid_type"]
             lat = ds["lat"].values
@@ -403,7 +403,7 @@ class GridSchema:
         ic_preblocks=None,
         step_preblocks=None,
         save_loc: str | None = None,
-    ) -> "GridSchema | None":
+    ) -> GridSchema | None:
         """Load ``output_grid_schema.nc`` from ``save_loc`` (only ever written when
         regridding was used), else resolve live from *dataset* (native grid,
         with a disk fallback to each source's own ``{source}_grid_schema.nc``,

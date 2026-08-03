@@ -1,11 +1,12 @@
-from credit.nwp import build_GFS_init
-import xarray as xr
+from os import makedirs
+from os.path import abspath, dirname, join
+from shutil import rmtree
+
 import numpy as np
 import pandas as pd
-from os.path import dirname, abspath, join
-from os import makedirs
-from shutil import rmtree
 import pytest
+import xarray as xr
+from credit.nwp import build_GFS_init
 
 
 def generate_synthetic_gfs_data(date):
@@ -142,7 +143,7 @@ def generate_synthetic_gfs_data(date):
             9.987807e02,
         ],
         dtype=np.float32,
-    )  # noqa
+    )
     phalf = np.array(
         [
             9.990000e-03,
@@ -275,7 +276,7 @@ def generate_synthetic_gfs_data(date):
             1.000000e03,
         ],
         dtype=np.float32,
-    )  # noqa
+    )
     coords = {
         "grid_yt": ("grid_yt", grid_yt),
         "grid_xt": ("grid_xt", grid_xt),
@@ -436,7 +437,7 @@ def generate_synthetic_gfs_data(date):
                 0.0000000e00,
             ],
             dtype=np.float32,
-        ),  # noqa
+        ),
         "bk": np.array(
             [
                 0.0000000e00,
@@ -569,7 +570,7 @@ def generate_synthetic_gfs_data(date):
                 1.0000000e00,
             ],
             dtype=np.float32,
-        ),  # noqa
+        ),
     }
     gfs_syn_atm = xr.Dataset(data_vars=data_vars_atm, coords=coords, attrs=gfs_attrs)
     base_path = dirname(abspath(__file__))
@@ -633,4 +634,3 @@ def test_build_GFS_init():
     }
     gfs_path = join(base_path, dir_path.split("/")[0])
     cleanup_gfs_data(gfs_path)
-    return

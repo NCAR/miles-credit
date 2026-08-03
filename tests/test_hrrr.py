@@ -10,16 +10,15 @@ Remote/dataset integration tests are run unless the environment variable
 
 import os
 import textwrap
-
 from typing import Any, get_args
 
-import pandas as pd
 import numpy as np
-
+import pandas as pd
 import pytest
-
+from credit.datasets.gen_2.grid_utils import GridSchema
 from credit.datasets.gen_2.hrrr import (
     VALID_PRODUCTS,
+    HRRRDataset,
     _build_nat_entry_map,  # pyright: ignore[reportPrivateUsage]
     _build_prs_entry_map,  # pyright: ignore[reportPrivateUsage]
     _find_subhf_entry,  # pyright: ignore[reportPrivateUsage]
@@ -27,9 +26,7 @@ from credit.datasets.gen_2.hrrr import (
     _parse_idx,  # pyright: ignore[reportPrivateUsage]
     _resolve_nat_levels,  # pyright: ignore[reportPrivateUsage]
     _resolve_pressure_levels,  # pyright: ignore[reportPrivateUsage]
-    HRRRDataset,
 )
-from credit.datasets.gen_2.grid_utils import GridSchema
 
 # ---------------------------------------------------------------------------
 # Constants / product registry

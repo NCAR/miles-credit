@@ -13,29 +13,31 @@ The multi-GPU tp=2 vs tp=1 parity run lives in tests/manual/gen2_parallelism/.
 """
 
 import logging
+from unittest.mock import MagicMock
 
 import pytest
 import torch
-import torch.nn as nn
-from unittest.mock import MagicMock
-
 from credit.models.wxformer.crossformer import (
     Transformer as ConvTransformer,
+)
+from credit.models.wxformer.crossformer import (
     apply_spectral_norm,
 )
 from credit.models.wxformer.wxformer_next import (
     Attention,
     FeedForward,
     NextGenWXFormer,
-    Transformer as LinearTransformer,
     remap_conv_state_dict,
+)
+from credit.models.wxformer.wxformer_next import (
+    Transformer as LinearTransformer,
 )
 from credit.parallel.tensor_parallel import (
     _is_tp_sharded_param,
     apply_native_tensor_parallel,
     supports_native_tp,
 )
-
+from torch import nn
 
 TINY_TRANSFORMER_KW = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
 
@@ -394,11 +396,10 @@ def _gloo_tp_worker(rank, world, port, result_q, partial_sn=False):
     os.environ["MASTER_PORT"] = str(port)
     dist.init_process_group("gloo", rank=rank, world_size=world)
     try:
-        from torch.distributed.device_mesh import init_device_mesh
-
         from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
         from credit.models.wxformer.wxformer_next import Transformer
         from credit.parallel.tensor_parallel import _is_tp_sharded_param, apply_native_tensor_parallel
+        from torch.distributed.device_mesh import init_device_mesh
 
         kw = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
         torch.manual_seed(0)
@@ -505,13 +506,12 @@ def _gloo_clip_worker(rank, world, port, result_q):
     os.environ["MASTER_PORT"] = str(port)
     dist.init_process_group("gloo", rank=rank, world_size=world)
     try:
-        from torch.distributed.device_mesh import init_device_mesh
-        from torch.distributed.tensor import DTensor
-
         from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
         from credit.models.wxformer.wxformer_next import Transformer
         from credit.parallel.collectives import clip_grad_norm_ as credit_clip
         from credit.parallel.tensor_parallel import apply_native_tensor_parallel
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor
 
         kw = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
         torch.manual_seed(0)

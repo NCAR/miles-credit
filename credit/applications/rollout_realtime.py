@@ -1,42 +1,42 @@
+import logging
+import multiprocessing as mp
 import os
 import sys
-import yaml
-import logging
+import traceback
 import warnings
-from pathlib import Path
 from argparse import ArgumentParser
-import multiprocessing as mp
-from multiprocessing.shared_memory import SharedMemory
-from tqdm import tqdm
 
 # ---------- #
 # Numerics
-from datetime import datetime, timedelta, timezone
-import xarray as xr
+from datetime import UTC, datetime, timedelta
+from multiprocessing.shared_memory import SharedMemory
+from pathlib import Path
+
 import numpy as np
 
 # ---------- #
 import torch
+import xarray as xr
+import yaml
+from tqdm import tqdm
+
+from credit.data import concat_and_reshape, reshape_only
+from credit.datasets import setup_data_loading
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
+from credit.datasets.gen_1.realtime_predict import RealtimePredictDataset
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.forecast import load_forecasts
 
 # ---------- #
 # credit
 from credit.models import load_model
-from credit.seed import seed_everything
-from credit.distributed import get_rank_info
-from credit.datasets import setup_data_loading
-from credit.datasets.gen_1.realtime_predict import RealtimePredictDataset
-from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.data import concat_and_reshape, reshape_only
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-from credit.pbs import launch_script, launch_script_mpi
-from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-import traceback
-
+from credit.parser import credit_main_parser
+from credit.pbs import launch_script, launch_script_mpi
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.seed import seed_everything
+from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -268,7 +268,7 @@ def predict(rank, world_size, conf, p):
             if forecast_step == 1:
                 # Process the entire batch at once
                 init_datetimes = [
-                    datetime.fromtimestamp(batch["datetime"][i].item(), tz=timezone.utc).strftime("%Y-%m-%dT%HZ")
+                    datetime.fromtimestamp(batch["datetime"][i].item(), tz=UTC).strftime("%Y-%m-%dT%HZ")
                     for i in range(batch_size)
                 ]
                 save_datetimes[forecast_count : forecast_count + batch_size] = init_datetimes
@@ -451,7 +451,7 @@ def main_cli():
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
-    logging.info("Save roll-outs to {}".format(forecast_save_loc))
+    logging.info(f"Save roll-outs to {forecast_save_loc}")
 
     # Update config using override options
     if mode in ["none", "ddp", "fsdp"]:

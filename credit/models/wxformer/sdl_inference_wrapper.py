@@ -1,33 +1,31 @@
 # Core Python
-import os
-import sys
-import yaml
+import argparse
 import copy
 import logging
-from typing import List, Dict, Optional, Union, Tuple
+import multiprocessing as mp
+import os
+import sys
+import warnings
 from datetime import datetime
-import xarray as xr
 
 # Numerical and ML
 import numpy as np
 import torch
-import torch.nn as nn
+import xarray as xr
+import yaml
+from torch import nn
+
+from credit.datasets import setup_data_loading
 
 # CREDIT framework
 from credit.datasets.gen_1.era5_multistep_batcher import Predict_Dataset_Batcher
 from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.parser import credit_main_parser
-from credit.datasets import setup_data_loading
-from credit.models import load_model
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
-from credit.seed import seed_everything
 from credit.interp import full_state_pressure_interpolation
+from credit.models import load_model
 from credit.output import make_xarray
-
-import argparse
-import multiprocessing as mp
-import warnings
-
+from credit.parser import credit_main_parser
+from credit.seed import seed_everything
+from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -44,7 +42,7 @@ class SDLWrapper(nn.Module):
     - Interpolate between latent vectors for smooth ensemble exploration
     """
 
-    def __init__(self, pretrained_model: nn.Module, channel_config: Dict = None):
+    def __init__(self, pretrained_model: nn.Module, channel_config: dict = None):
         super().__init__()
         self.model = pretrained_model
 
@@ -57,14 +55,14 @@ class SDLWrapper(nn.Module):
         self._original_factors = self.get_noise_factors()
 
         # Storage for latent vectors
-        self._stored_latents: Dict[str, Dict] = {}  # Now stores dict with 'latents' and 'timesteps'
-        self._current_latents: Optional[List[torch.Tensor]] = None
-        self._current_timestep_map: Optional[List[int]] = None  # Track which timestep each latent belongs to
+        self._stored_latents: dict[str, dict] = {}  # Now stores dict with 'latents' and 'timesteps'
+        self._current_latents: list[torch.Tensor] | None = None
+        self._current_timestep_map: list[int] | None = None  # Track which timestep each latent belongs to
         self._capture_enabled = False
 
         logging.info(f"Pre-trained noise factors {self._original_factors}")
 
-    def _collect_noise_layers(self) -> List[nn.Module]:
+    def _collect_noise_layers(self) -> list[nn.Module]:
         """Collect all PixelNoiseInjection layers from the model."""
         noise_layers = []
 
@@ -76,11 +74,11 @@ class SDLWrapper(nn.Module):
 
         return noise_layers
 
-    def get_noise_factors(self) -> List[float]:
+    def get_noise_factors(self) -> list[float]:
         """Get current noise factors from all layers."""
         return [layer.noise_factor.item() for layer in self._noise_layers]
 
-    def set_noise_factors(self, factors: Union[float, List[float]]):
+    def set_noise_factors(self, factors: float | list[float]):
         """Set noise factors for all layers."""
         if isinstance(factors, (int, float)):
             for layer in self._noise_layers:
@@ -97,7 +95,7 @@ class SDLWrapper(nn.Module):
         self.set_noise_factors(self._original_factors)
         logging.info("Reset to original noise factors")
 
-    def set_encoder_noise_factors(self, factors: Union[float, List[float]]):
+    def set_encoder_noise_factors(self, factors: float | list[float]):
         """Set encoder noise factors."""
         if not (hasattr(self.model, "encoder_noise_layers") and self.model.encoder_noise):
             return
@@ -111,7 +109,7 @@ class SDLWrapper(nn.Module):
             for layer, factor in zip(encoder_layers, factors):
                 layer.noise_factor.data.fill_(factor)
 
-    def set_decoder_noise_factors(self, factors: Union[float, List[float]]):
+    def set_decoder_noise_factors(self, factors: float | list[float]):
         """Set decoder noise factors."""
         decoder_layers = [self.model.noise_inject1, self.model.noise_inject2, self.model.noise_inject3]
 
@@ -122,7 +120,7 @@ class SDLWrapper(nn.Module):
             for layer, factor in zip(decoder_layers, factors):
                 layer.noise_factor.data.fill_(factor)
 
-    def set_decoder_modulation(self, target_channels: List[int] = None, weight: float = 2.0):
+    def set_decoder_modulation(self, target_channels: list[int] = None, weight: float = 2.0):
         """Set decoder modulation weights for specific channels."""
         decoder_layers = [self.model.noise_inject1, self.model.noise_inject2, self.model.noise_inject3]
 
@@ -132,7 +130,7 @@ class SDLWrapper(nn.Module):
                     if ch < layer.modulation.shape[1]:
                         layer.modulation.data[0, ch, 0, 0] *= weight
 
-    def set_decoder_style_vector(self, channel_weights: Dict[int, float]):
+    def set_decoder_style_vector(self, channel_weights: dict[int, float]):
         """Modify the model's style transformation weights."""
         decoder_layers = [self.model.noise_inject1, self.model.noise_inject2, self.model.noise_inject3]
 
@@ -240,15 +238,15 @@ class SDLWrapper(nn.Module):
         logging.info(f"  Organized into {len(timestep_to_latents)} timesteps")
         return name
 
-    def get_stored_latents(self, name: str) -> Optional[Dict]:
+    def get_stored_latents(self, name: str) -> dict | None:
         """Retrieve stored latent vectors by name."""
         return self._stored_latents.get(name)
 
-    def list_stored_latents(self) -> List[str]:
+    def list_stored_latents(self) -> list[str]:
         """List all stored latent vector names."""
         return list(self._stored_latents.keys())
 
-    def clear_stored_latents(self, name: Optional[str] = None):
+    def clear_stored_latents(self, name: str | None = None):
         """Clear stored latents (all or specific name)."""
         if name:
             if name in self._stored_latents:
@@ -275,7 +273,7 @@ class SDLWrapper(nn.Module):
     # LATENT INTERPOLATION
     # =========================================================================
 
-    def interpolate_latents(self, name1: str, name2: str, t: float) -> Dict:
+    def interpolate_latents(self, name1: str, name2: str, t: float) -> dict:
         """
         Linear interpolation between two stored latent vectors.
         Z_t = (1-t)*Z1 + t*Z2
@@ -420,7 +418,7 @@ class SDLWrapper(nn.Module):
         """Forward pass through the model."""
         return self.model(*args, **kwargs)
 
-    def _forward_with_latent_control(self, x, forecast_step: int, use_latents: Optional[Dict] = None):
+    def _forward_with_latent_control(self, x, forecast_step: int, use_latents: dict | None = None):
         """
         Internal forward pass with optional latent control.
 
@@ -487,11 +485,11 @@ class SDLWrapper(nn.Module):
         metrics_fn=None,
         # NEW LATENT CONTROL PARAMETERS
         capture_latents: bool = False,
-        store_latents_as: Optional[str] = None,
-        use_stored_latents: Optional[str] = None,
-        use_interpolated_latents: Optional[Tuple[str, str, float]] = None,
-        conf: Optional[Dict] = None,
-    ) -> Dict:
+        store_latents_as: str | None = None,
+        use_stored_latents: str | None = None,
+        use_interpolated_latents: tuple[str, str, float] | None = None,
+        conf: dict | None = None,
+    ) -> dict:
         """
         Unified hurricane forecast rollout with integrated latent vector control.
 
@@ -659,9 +657,9 @@ class SDLWrapper(nn.Module):
         num_steps: int = 5,
         state_transformer=None,
         device: str = "cuda",
-        conf: Optional[Dict] = None,
+        conf: dict | None = None,
         **rollout_kwargs,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Generate sequence of forecasts along interpolation path.
 
@@ -710,7 +708,7 @@ class SDLWrapper(nn.Module):
 
         return results
 
-    def scale_latents(self, name: str, beta: float) -> Dict:
+    def scale_latents(self, name: str, beta: float) -> dict:
         """
         Scale stored latent vectors by factor beta.
         Z_scaled = beta * Z
@@ -740,12 +738,12 @@ class SDLWrapper(nn.Module):
         self,
         dataset,
         base_latent_name: str,
-        beta_values: List[float],
+        beta_values: list[float],
         state_transformer=None,
         device: str = "cuda",
-        conf: Optional[Dict] = None,
+        conf: dict | None = None,
         **rollout_kwargs,
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """
         Generate ensemble with different scaling factors applied to base latent.
 
@@ -804,7 +802,7 @@ class SDLWrapper(nn.Module):
 
         return results
 
-    def scale_latents_multilevel(self, name: str, beta_per_layer: List[float]) -> Dict:
+    def scale_latents_multilevel(self, name: str, beta_per_layer: list[float]) -> dict:
         """
         Scale stored latent vectors with different beta for each layer.
 
@@ -847,7 +845,7 @@ class SDLWrapper(nn.Module):
 
 def run_multiscale_control_experiment(
     experiments, wrapper, dataset, state_transformer, conf, lat_centers, lon_centers, device="cuda", ensemble_size=1
-) -> Dict[str, Dict]:
+) -> dict[str, dict]:
 
     logging.info("\n" + "=" * 70)
     logging.info("MULTI-SCALE LATENT CONTROL EXPERIMENT")

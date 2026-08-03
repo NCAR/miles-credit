@@ -1,15 +1,17 @@
-import os
 import copy
-import torch
+import os
+from collections import OrderedDict
+from collections.abc import Callable
 from datetime import datetime, timedelta
+
+import numpy as np
+import torch
+import xarray as xr
+
 from credit.data import concat_and_reshape, reshape_only
 from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.postblock.gen1 import PostBlock, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
-from typing import Callable, Optional
-from collections import OrderedDict
-import numpy as np
-import xarray as xr
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer, PostBlock
 
 
 class BredVector:
@@ -19,8 +21,8 @@ class BredVector:
         noise_amplitude: float = 0.15,
         num_cycles: int = 5,
         integration_steps: int = 1,
-        perturbation_method: Optional[Callable[[torch.Tensor, OrderedDict[str, np.ndarray]], torch.Tensor]] = None,
-        hemispheric_rescale: Optional[Callable[[torch.Tensor, torch.Tensor], torch.Tensor]] = None,
+        perturbation_method: Callable[[torch.Tensor, OrderedDict[str, np.ndarray]], torch.Tensor] | None = None,
+        hemispheric_rescale: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] | None = None,
         terrain_file: str = None,
         perturb_channel_idx: int = None,
         ensemble_perturb: bool = False,
@@ -73,7 +75,7 @@ class BredVector:
 
         if self.use_post_block:
             # freeze base model weights before postblock init
-            if "skebs" in post_conf.keys():
+            if "skebs" in post_conf:
                 if post_conf["skebs"].get("activate", False) and post_conf["skebs"].get(
                     "freeze_base_model_weights", False
                 ):
@@ -654,8 +656,9 @@ def adjust_start_times(time_ranges, hours=24):
 
 
 if __name__ == "__main__":
-    from credit.models import load_model
     import logging
+
+    from credit.models import load_model
 
     # Set up the logger
     logging.basicConfig(

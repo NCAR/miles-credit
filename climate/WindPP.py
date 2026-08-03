@@ -2,15 +2,13 @@
 # Numerics
 
 # ---------- #
-import torch
-import torch.nn.functional as F
-
 # ---------- #
 # credit
-
-
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
+
+import torch
+import torch.nn.functional as F
 
 
 @dataclass

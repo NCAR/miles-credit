@@ -1,45 +1,43 @@
+import logging
+import multiprocessing as mp
 import os
 import sys
-import yaml
-import logging
 import warnings
-from glob import glob
-from pathlib import Path
 from argparse import ArgumentParser
-import multiprocessing as mp
 from collections import defaultdict
 
 # ---------- #
 # Numerics
 from datetime import datetime
-import xarray as xr
+from glob import glob
+from pathlib import Path
+
 import numpy as np
 
 # ---------- #
 import torch
+import xarray as xr
+import yaml
+from credit.data import (
+    Predict_Dataset,
+    concat_and_reshape,
+    reshape_only,
+)
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.forecast import load_forecasts
+from credit.metrics import LatWeightedMetrics
 
 # ---------- #
 # credit
 from credit.models import load_model, load_model_name
-from credit.seed import seed_everything
-from credit.distributed import get_rank_info
-
-from credit.data import (
-    concat_and_reshape,
-    reshape_only,
-    Predict_Dataset,
-)
-
-from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
+from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+from credit.output import load_metadata
+from credit.parser import credit_main_parser, predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
-from credit.metrics import LatWeightedMetrics
-from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup
-from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-from credit.parser import credit_main_parser, predict_data_check
-from credit.output import load_metadata
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.seed import seed_everything
+from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -425,7 +423,7 @@ if __name__ == "__main__":
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
-    print("Save roll-outs to {}".format(forecast_save_loc))
+    print(f"Save roll-outs to {forecast_save_loc}")
 
     # Create a project directory (to save launch.sh and model.yml) if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])

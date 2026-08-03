@@ -1,5 +1,5 @@
-from credit.seed import seed_everything
 import numpy as np
+from credit.seed import seed_everything
 
 
 def test_seed():

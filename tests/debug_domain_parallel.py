@@ -1,9 +1,10 @@
 """Debug script for failing domain-parallel multi-GPU tests."""
 
-import torch
-import torch.nn as nn
-import torch.distributed as dist
 import os
+
+import torch
+import torch.distributed as dist
+from torch import nn
 
 
 def setup_distributed():
@@ -15,9 +16,9 @@ def setup_distributed():
 
 def debug_forward():
     """Debug the model conversion forward test."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.convert import convert_to_domain_parallel
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -127,9 +128,9 @@ def debug_forward():
 
 def debug_backward():
     """Debug the backward gradient test."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.convert import convert_to_domain_parallel
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()

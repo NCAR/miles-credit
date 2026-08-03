@@ -12,9 +12,9 @@ Key invariants verified:
 """
 
 import argparse
+
 import pytest
 from credit.cli import _build_pbs_script
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -556,7 +556,7 @@ class TestWriteReloadConfig:
 class TestSchedulerIntegration:
     def test_load_scheduler_creates_linear_warmup_cosine(self):
         import torch
-        from credit.scheduler import load_scheduler, LinearWarmupCosineScheduler
+        from credit.scheduler import LinearWarmupCosineScheduler, load_scheduler
 
         model = torch.nn.Linear(2, 2)
         optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -673,6 +673,7 @@ class TestInitTemplates:
 
     def test_1deg_template_exists(self):
         import os
+
         from credit.cli import _repo_root
 
         path = os.path.join(_repo_root(), "config", "gen_2", "examples", "example-v2026.2.yml")
@@ -680,6 +681,7 @@ class TestInitTemplates:
 
     def test_025deg_template_exists(self):
         import os
+
         from credit.cli import _repo_root
 
         path = os.path.join(_repo_root(), "config", "gen_2", "examples", "wxformer_era5_025deg_6hr.yml")
@@ -687,6 +689,7 @@ class TestInitTemplates:
 
     def test_templates_are_valid_yaml(self):
         import os
+
         import yaml
         from credit.cli import _repo_root
 
@@ -776,6 +779,7 @@ class TestPrintJobPlan:
 
     def test_runs_without_error(self, tmp_path, caplog):
         import logging
+
         import yaml
         from credit.cli import _print_job_plan
 
@@ -812,6 +816,7 @@ class TestPrintJobPlan:
 
     def test_shows_cluster_and_chain(self, tmp_path, caplog):
         import logging
+
         import yaml
         from credit.cli import _print_job_plan
 
@@ -825,6 +830,7 @@ class TestPrintJobPlan:
     def test_tolerates_missing_config(self, tmp_path, caplog):
         """Should not raise even if config is missing."""
         import logging
+
         from credit.cli import _print_job_plan
 
         with caplog.at_level(logging.INFO):
@@ -1024,8 +1030,8 @@ class TestCreditAgent:
         # With no API keys at all, _ask should exit 1
         for key in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
             monkeypatch.delenv(key, raising=False)
-        from credit.cli import _ask
         import pytest
+        from credit.cli import _ask
 
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._agent_args())
@@ -1039,8 +1045,8 @@ class TestCreditAgent:
         for key in ("OPENAI_API_KEY", "GOOGLE_API_KEY", "GROQ_API_KEY"):
             monkeypatch.delenv(key, raising=False)
         monkeypatch.setitem(sys.modules, "anthropic", None)
-        from credit.cli import _ask
         import pytest
+        from credit.cli import _ask
 
         with pytest.raises(SystemExit) as exc_info:
             _ask(self._agent_args())
@@ -1339,6 +1345,7 @@ class TestFindTorchrun:
 
     def test_falls_back_when_not_on_path(self, monkeypatch):
         import shutil as _shutil
+
         from credit.cli import _find_torchrun
 
         monkeypatch.setattr(_shutil, "which", lambda _: None)
@@ -1355,6 +1362,7 @@ class TestFindTorchrun:
 class TestIsNcarSystem:
     def test_casper_hostname_detected(self, monkeypatch):
         import socket
+
         from credit.cli import _is_ncar_system
 
         monkeypatch.setattr(socket, "gethostname", lambda: "casper42.hpc.ucar.edu")
@@ -1362,6 +1370,7 @@ class TestIsNcarSystem:
 
     def test_derecho_hostname_detected(self, monkeypatch):
         import socket
+
         from credit.cli import _is_ncar_system
 
         monkeypatch.setattr(socket, "gethostname", lambda: "derecho01.ucar.edu")
@@ -1369,6 +1378,7 @@ class TestIsNcarSystem:
 
     def test_unknown_hostname_is_false(self, monkeypatch):
         import socket
+
         from credit.cli import _is_ncar_system
 
         monkeypatch.setattr(socket, "gethostname", lambda: "workstation.example.com")

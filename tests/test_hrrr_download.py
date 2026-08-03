@@ -7,16 +7,14 @@ Remote/dataset integration tests are run unless the environment variable
 ``SKIP_REMOTE=1`` is set (they hit real AWS endpoints).
 """
 
-from typing import Any
-
 import os
 import pathlib
 import time
+from typing import Any
 
 import pytest
-
-from credit.datasets.gen_2.hrrr_download import download_hrrr
 from credit.datasets.gen_2.hrrr import VALID_PRODUCTS
+from credit.datasets.gen_2.hrrr_download import download_hrrr
 from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 # ---------------------------------------------------------------------------

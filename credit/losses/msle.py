@@ -15,7 +15,7 @@ class MSLELoss(torch.nn.Module):
     """
 
     def __init__(self, reduction="mean"):
-        super(MSLELoss, self).__init__()
+        super().__init__()
         self.reduction = reduction
 
     def forward(self, prediction, target):

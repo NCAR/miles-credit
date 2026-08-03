@@ -1,36 +1,38 @@
-import torch
 import logging
-import numpy as np
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+
+import numpy as np
+import torch
+
 from credit.data import (
-    drop_var_from_dataset,
-    get_forward_data,
     Sample,
-    find_key_for_number,
+    drop_var_from_dataset,
     extract_month_day_hour,
     find_common_indices,
+    find_key_for_number,
+    get_forward_data,
 )
-
 
 logger = logging.getLogger(__name__)
 
 
 def worker(
-    tuple_index: Tuple[int, int],
-    ERA5_indices: Dict[str, List[int]],
-    all_files: List[Any],
-    surface_files: Optional[List[Any]],
-    dyn_forcing_files: Optional[List[Any]],
-    diagnostic_files: Optional[List[Any]],
-    xarray_forcing: Optional[Any],
-    xarray_static: Optional[Any],
+    tuple_index: tuple[int, int],
+    ERA5_indices: dict[str, list[int]],
+    all_files: list[Any],
+    surface_files: list[Any] | None,
+    dyn_forcing_files: list[Any] | None,
+    diagnostic_files: list[Any] | None,
+    xarray_forcing: Any | None,
+    xarray_static: Any | None,
     history_len: int,
     forecast_len: int,
     skip_periods: int,
-    transform: Optional[Callable],
-    sst_forcing: Optional[Any] = None,
-) -> Dict[str, Any]:
+    transform: Callable | None,
+    sst_forcing: Any | None = None,
+) -> dict[str, Any]:
     """
     Processes a given index to extract and transform data for a specific time slice.
 
@@ -64,8 +66,7 @@ def worker(
 
         # handle out-of-bounds
         ind_largest = len(all_files[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension & load it to the memory
@@ -607,9 +608,10 @@ if __name__ == "__main__":
     import torch
     import yaml
     from torch.utils.data import DataLoader
-    from credit.transforms import load_transforms
+
+    from credit.datasets import set_globals, setup_data_loading
     from credit.parser import credit_main_parser, training_data_check
-    from credit.datasets import setup_data_loading, set_globals
+    from credit.transforms import load_transforms
 
     filename = "../../config/example-v2026.1.0.yml"
     with open(filename) as cf:

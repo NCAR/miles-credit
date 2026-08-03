@@ -2,9 +2,10 @@ import logging
 import warnings
 
 import torch
-# import numpy as np
 
+# import numpy as np
 from credit.losses import _instantiate_loss
+
 # from credit.losses.spectral import SpectralLoss2D
 # from credit.losses.power import PSDLoss
 
@@ -73,7 +74,7 @@ class DownscalingLoss(torch.nn.Module):
     """
 
     def __init__(self, conf, validation=False):
-        super(DownscalingLoss, self).__init__()
+        super().__init__()
 
         # todo: make this a dataclass, initialize with **conf['loss']
 

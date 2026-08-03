@@ -9,19 +9,19 @@ wrap policy and the generic auto-detect path, then reports discovered layer sets
 and whether FSDP wrap + fwd + bwd succeeds for each.
 """
 
+import functools
 import os
 import sys
 import time
-import functools
 import traceback
 
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.wrap import (
-    transformer_auto_wrap_policy,
     size_based_auto_wrap_policy,
+    transformer_auto_wrap_policy,
 )
 
 _root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -37,7 +37,7 @@ B, C_IN, C_OUT, H, W = 1, 20, 18, 32, 64
 
 def _hardcoded_policy(model_type):
     if "crossformer" in model_type or "unet" in model_type:
-        from credit.models.crossformer.crossformer import Attention, DynamicPositionBias, FeedForward, CrossEmbedLayer
+        from credit.models.crossformer.crossformer import Attention, CrossEmbedLayer, DynamicPositionBias, FeedForward
 
         return {Attention, DynamicPositionBias, FeedForward, CrossEmbedLayer}
     if "fuxi" in model_type or "wrf" in model_type or "dscale" in model_type:
@@ -47,8 +47,8 @@ def _hardcoded_policy(model_type):
     if "swin" in model_type:
         from credit.models.swin.swin import (
             SwinTransformerV2CrBlock,
-            WindowMultiHeadAttentionNoPos,
             WindowMultiHeadAttention,
+            WindowMultiHeadAttentionNoPos,
         )
 
         return {SwinTransformerV2CrBlock, WindowMultiHeadAttentionNoPos, WindowMultiHeadAttention}

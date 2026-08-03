@@ -1,44 +1,46 @@
-import torch
 import logging
-import numpy as np
-import xarray as xr
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+
+import numpy as np
+import torch
+import xarray as xr
 
 from credit.data import (
     Sample_WRF,
-    extract_month_day_hour,
-    find_common_indices,
-    get_forward_data,
     drop_var_from_dataset,
+    encode_datetime64,
+    extract_month_day_hour,
+    filter_ds,
+    find_common_indices,
     find_key_for_number,
+    get_forward_data,
     next_n_hour,
     previous_hourly_steps,
-    encode_datetime64,
-    filter_ds,
 )
 
 logger = logging.getLogger(__name__)
 
 
 def worker(
-    tuple_index: Tuple[int, int],
-    WRF_file_indices: Dict[str, List[int]],
-    list_upper_ds: List[Any],
-    list_surf_ds: Optional[List[Any]],
-    list_dyn_forcing_ds: Optional[List[Any]],
-    list_diag_ds: Optional[List[Any]],
-    xarray_forcing: Optional[Any],
-    xarray_static: Optional[Any],
+    tuple_index: tuple[int, int],
+    WRF_file_indices: dict[str, list[int]],
+    list_upper_ds: list[Any],
+    list_surf_ds: list[Any] | None,
+    list_dyn_forcing_ds: list[Any] | None,
+    list_diag_ds: list[Any] | None,
+    xarray_forcing: Any | None,
+    xarray_static: Any | None,
     history_len: int,
     forecast_len: int,
-    list_upper_ds_outside: Optional[List[Any]],
-    list_surf_ds_outside: Optional[List[Any]],
-    outside_file_year_range: Optional[List[Any]],
-    outside_file_indices: Optional[List[Any]],
+    list_upper_ds_outside: list[Any] | None,
+    list_surf_ds_outside: list[Any] | None,
+    outside_file_year_range: list[Any] | None,
+    outside_file_indices: list[Any] | None,
     history_len_outside: int,
-    transform: Optional[Callable],
-) -> Dict[str, Any]:
+    transform: Callable | None,
+) -> dict[str, Any]:
     index, ind_start_current_step = tuple_index
 
     try:
@@ -55,8 +57,7 @@ def worker(
         # handle out-of-bounds
         ind_largest = len(list_upper_ds[int(ind_file)]["time"]) - (history_len + forecast_len + 1)
 
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension

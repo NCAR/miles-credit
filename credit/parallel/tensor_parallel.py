@@ -41,9 +41,10 @@ Usage:
 """
 
 import logging
+
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+from torch import nn
 
 logger = logging.getLogger(__name__)
 

@@ -5,32 +5,31 @@ GlobalEnergyFixer, GlobalEnergyFixerUpDown), Reconstruct, ExpTransform,
 SquareTransform, and BridgeScalerTransform (postblock scaler).
 """
 
-import yaml
-import os
 import logging
+import os
 
 import pytest
 import torch
-from bridgescaler.distributed_tensor import DStandardScalerTensor
+import yaml
 from bridgescaler import save_scaler_dict, scale_var_dict
+from bridgescaler.distributed_tensor import DStandardScalerTensor
+from credit.parser import credit_main_parser
+from credit.postblock.exp import ExpTransform
 from credit.postblock.gen1 import (
+    GlobalEnergyFixer,
+    GlobalEnergyFixerUpDown,
+    GlobalMassFixer,
     GlobalWaterFixer,
     PostBlock,
     TracerFixer,
-    GlobalMassFixer,
-    GlobalEnergyFixer,
-    GlobalEnergyFixerUpDown,
 )
-from credit.postblock.scaler import BridgeScalerTransform as PostScaler
-from credit.preblock._utils import _flatten_spatial_tensors
-from credit.postblock.exp import ExpTransform
 from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.scaler import BridgeScalerTransform as PostScaler
 from credit.postblock.square import SquareTransform
+from credit.preblock._utils import _flatten_spatial_tensors
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.skebs import BackscatterFCNN
-from credit.parser import credit_main_parser
-
 
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
 

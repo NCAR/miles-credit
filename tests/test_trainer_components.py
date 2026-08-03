@@ -4,15 +4,16 @@ and the load_trainer() factory.
 All tests run on CPU with no data files required.
 """
 
-import pytest
-import torch
-import torch.nn as nn
-import torch.nn.utils as nnu
 import warnings
 
+import pytest
+import torch
+import torch.nn.utils as nnu
+from torch import nn
+
 try:
-    from credit.trainers.base_trainer import EMATracker, BaseTrainer
     from credit.scheduler import LinearWarmupCosineScheduler
+    from credit.trainers.base_trainer import BaseTrainer, EMATracker
 
     _TRAINER_GEN2_AVAILABLE = True
 except ImportError:
@@ -427,8 +428,6 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
 class _FakeDataset:
     """Stub dataset so the batches_per_epoch resolution logic doesn't crash."""
 
-    pass
-
 
 class _FakeLoader:
     """Minimal iterable loader that yields nested-format batches for trainer_gen2.
@@ -487,8 +486,8 @@ class TestERA5Gen2MultiStepTraining:
     def test_2step_train_one_epoch_runs(self, tmp_path):
         """2-step autoregressive loop completes with toy data."""
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
@@ -529,8 +528,8 @@ class TestERA5Gen2MultiStepTraining:
     def test_2step_x_replaced_with_y_pred(self, tmp_path):
         """At t=2, x must equal y_pred from t=1 (all vars are prognostic)."""
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -585,8 +584,8 @@ class TestERA5Gen2MultiStepTraining:
         Channel order follows FIELD_TYPE_RANK: prognostic < static < dynamic_forcing.
         """
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         N_PROG, N_STATIC, N_DYNFRC = 3, 1, 2
         B, H, W = 1, 4, 4
@@ -1044,8 +1043,8 @@ class TestEMATrackerEdgeCases:
             _ = sn_model(torch.randn(2, 8))
         for mod in sn_model.modules():
             if hasattr(mod, "weight_orig"):
-                u = getattr(mod, "weight_u")
-                v = getattr(mod, "weight_v")
+                u = mod.weight_u
+                v = mod.weight_v
                 w = mod.weight_orig.reshape(mod.weight_orig.size(0), -1)
                 sigma = (u @ w @ v).item()
                 assert sigma > 0.1, f"sigma={sigma:.4f} too small — u/v still corrupted after fix"
@@ -1502,6 +1501,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
     def test_scheduler_lambda_step_called(self, tmp_path):
         """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
         from unittest.mock import MagicMock
+
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
@@ -1544,8 +1544,9 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         at the end of train_one_epoch (not inside the per-step loop).
         """
         from unittest.mock import patch
-        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+
         import credit.trainers.trainer_gen2 as trainer_module
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2

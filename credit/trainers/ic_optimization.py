@@ -1,29 +1,30 @@
-import torch
-import tqdm
-import numpy as np
-from collections import defaultdict
 import gc
-from itertools import cycle
-from credit.trainers.utils import accum_log
-import torch.distributed as dist
 import logging
-import pandas as pd
-from torch.utils.data import IterableDataset
-from credit.trainers.base_trainer import BaseTrainer
-from credit.data import concat_and_reshape, reshape_only
-from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
-from torch.optim.lr_scheduler import CosineAnnealingLR  # , CosineAnnealingWarmRestarts
-from credit.output import load_metadata, make_xarray
-from credit.transforms import Normalize_ERA5_and_Forcing
-from datetime import datetime as date_time, timedelta
-import xarray as xr
-import traceback
-import optuna
 import os
-
-from credit.data import drop_var_from_dataset
-from credit.interp import full_state_pressure_interpolation
+import traceback
+from collections import defaultdict
+from datetime import datetime as date_time
+from datetime import timedelta
 from inspect import signature
+from itertools import cycle
+
+import numpy as np
+import optuna
+import pandas as pd
+import torch
+import torch.distributed as dist
+import tqdm
+import xarray as xr
+from torch.optim.lr_scheduler import CosineAnnealingLR  # , CosineAnnealingWarmRestarts
+from torch.utils.data import IterableDataset
+
+from credit.data import concat_and_reshape, drop_var_from_dataset, reshape_only
+from credit.interp import full_state_pressure_interpolation
+from credit.output import load_metadata, make_xarray
+from credit.postblock.gen1 import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.utils import accum_log
+from credit.transforms import Normalize_ERA5_and_Forcing
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +104,7 @@ def save_netcdf_increment(
         if meta_data is not False:
             # Add metadata attributes to every model variable if available
             for var in ds_merged.variables.keys():
-                if var in meta_data.keys():
+                if var in meta_data:
                     if var != "time":
                         # use attrs.update for non-datetime variables
                         ds_merged[var].attrs.update(meta_data[var])
@@ -114,12 +115,12 @@ def save_netcdf_increment(
                 if "interp_pressure" in conf["predict"].keys():
                     if pres_end in var:
                         var_short = var.strip(pres_end)
-                        if var_short in meta_data.keys():
+                        if var_short in meta_data:
                             ds_merged[var].attrs.update(meta_data[var_short])
                             ds_merged[var].attrs["long_name"] += " (interpolated to isobaric levels)"
                     elif height_end in var:
                         var_short = var.strip(height_end)
-                        if var_short in meta_data.keys():
+                        if var_short in meta_data:
                             ds_merged[var].attrs.update(meta_data[var_short])
                             ds_merged[var].attrs["long_name"] += " (interpolated to constant height AGL levels)"
         encoding_dict = {}
@@ -308,7 +309,7 @@ class TrainerIC(BaseTrainer):
             backprop_on_timestep = conf["data"]["backprop_on_timestep"]
         else:
             # If not specified in config, use the range 1 to forecast_len
-            backprop_on_timestep = list(range(0, conf["data"]["forecast_len"] + 1 + 1))
+            backprop_on_timestep = list(range(conf["data"]["forecast_len"] + 1 + 1))
 
         assert forecast_length <= backprop_on_timestep[-1], (
             f"forecast_length ({forecast_length + 1}) must not exceed the max value in backprop_on_timestep {backprop_on_timestep}"

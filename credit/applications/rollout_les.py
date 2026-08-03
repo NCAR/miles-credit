@@ -1,47 +1,45 @@
-import os
 import gc
-import sys
-import yaml
 import logging
-import warnings
-from glob import glob
-from pathlib import Path
-from argparse import ArgumentParser
 import multiprocessing as mp
+import os
+import sys
+import warnings
+from argparse import ArgumentParser
 from collections import defaultdict
 
 # ---------- #
 # Numerics
 from datetime import datetime, timedelta
+from glob import glob
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 # ---------- #
 import torch
+import yaml
 from torchvision import transforms as tforms
+
+from credit.data import (
+    concat_and_reshape,
+    get_forward_data,
+    reshape_only,
+)
+from credit.datasets.gen_1.les_singlestep import LESPredict
+from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.forecast import load_forecasts
+from credit.metrics import LatWeightedMetrics
 
 # ---------- #
 # credit
 from credit.models import load_model
-from credit.seed import seed_everything
-from credit.distributed import get_rank_info
-
-from credit.data import (
-    concat_and_reshape,
-    reshape_only,
-    get_forward_data,
-)
-
-from credit.datasets.gen_1.les_singlestep import LESPredict
-
-from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
-from credit.pbs import launch_script, launch_script_mpi
-from credit.metrics import LatWeightedMetrics
-from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
-from credit.parser import credit_main_parser
 from credit.output import load_metadata, make_xarray, save_netcdf_clean
+from credit.parser import credit_main_parser
+from credit.pbs import launch_script, launch_script_mpi
+from credit.seed import seed_everything
+from credit.transforms.transforms_les import NormalizeLES, ToTensorLES
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -480,7 +478,7 @@ def main():
     forecast_save_loc = conf["predict"]["save_forecast"]
     os.makedirs(forecast_save_loc, exist_ok=True)
 
-    print("Save roll-outs to {}".format(forecast_save_loc))
+    print(f"Save roll-outs to {forecast_save_loc}")
 
     # Create a project directory (to save launch.sh and model.yml) if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])

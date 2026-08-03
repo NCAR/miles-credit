@@ -9,7 +9,6 @@ share the same ``_SemiLagrangianAdvectionEngine``.
 
 import pytest
 import torch
-
 from credit.postblock import _load_postblock_entry
 from credit.postblock.advect import SemiLagrangianAdvectionPost
 from credit.preblock import _load_preblock_entry

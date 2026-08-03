@@ -14,22 +14,23 @@ Key Classes:
 - CAMulatorStepper: Core time-stepping interface with conservation fixers
 """
 
-import os
-import yaml
-import torch
-import numpy as np
-import xarray as xr
-from typing import Dict, Optional, Literal
 import logging
+import os
+from typing import Literal
+
+import numpy as np
+import torch
+import xarray as xr
+import yaml
 
 # Import CREDIT components
 try:
-    from credit.models import load_model, load_model_name
-    from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
     from credit.distributed import distributed_model_wrapper
+    from credit.models import load_model, load_model_name
     from credit.models.checkpoint import load_model_state
-    from credit.parser import credit_main_parser
     from credit.output import load_metadata
+    from credit.parser import credit_main_parser
+    from credit.transforms import Normalize_ERA5_and_Forcing, load_transforms
 
     CREDIT_AVAILABLE = True
 except ImportError:
@@ -38,7 +39,7 @@ except ImportError:
 
 # Import post-processing components
 try:
-    from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+    from credit.postblock import GlobalEnergyFixer, GlobalMassFixer, GlobalWaterFixer
 
     POSTBLOCK_AVAILABLE = True
 except ImportError:
@@ -240,7 +241,7 @@ class StateVariableAccessor:
 
         self.var_indices["output"] = indices
 
-    def get_var_info(self, var_name: str) -> Dict:
+    def get_var_info(self, var_name: str) -> dict:
         """
         Get indexing information for a variable.
 
@@ -271,7 +272,7 @@ class StateVariableAccessor:
 
         return indices[var_name]
 
-    def get_state_var(self, state_tensor: torch.Tensor, var_name: str, time_idx: Optional[int] = None) -> torch.Tensor:
+    def get_state_var(self, state_tensor: torch.Tensor, var_name: str, time_idx: int | None = None) -> torch.Tensor:
         """
         Extract a variable from the state tensor.
 
@@ -311,7 +312,7 @@ class StateVariableAccessor:
         return var_slice
 
     def set_state_var(
-        self, state_tensor: torch.Tensor, var_name: str, var_data: torch.Tensor, time_idx: Optional[int] = None
+        self, state_tensor: torch.Tensor, var_name: str, var_data: torch.Tensor, time_idx: int | None = None
     ) -> None:
         """
         Set a variable in the state tensor (in-place modification).
@@ -359,7 +360,7 @@ class StateVariableAccessor:
         else:
             state_tensor[:, info["start_idx"] : info["end_idx"], time_idx, :, :] = var_data
 
-    def list_available_vars(self) -> Dict[str, Dict]:
+    def list_available_vars(self) -> dict[str, dict]:
         """
         List all variables available in current tensor type.
 
@@ -633,7 +634,7 @@ class CAMulatorStepper:
         tensor: torch.Tensor,
         var_name: str,
         tensor_type: Literal["state", "input", "output"] = "state",
-        time_idx: Optional[int] = None,
+        time_idx: int | None = None,
     ) -> torch.Tensor:
         """
         Convenience method to get a variable from any tensor type.
@@ -659,7 +660,7 @@ class CAMulatorStepper:
         var_name: str,
         var_data: torch.Tensor,
         tensor_type: Literal["state", "input", "output"] = "state",
-        time_idx: Optional[int] = None,
+        time_idx: int | None = None,
     ) -> None:
         """
         Convenience method to set a variable in any tensor type.

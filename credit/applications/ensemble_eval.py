@@ -6,23 +6,22 @@
 # WARNING: currently only works for CAM data, since the XRSamplerByYear can only handle one data file for all variables
 #
 
+import logging
+import multiprocessing as mp
+import os
+import sys
 from argparse import ArgumentParser
 from functools import partial
 from glob import glob
-import logging
-import os
 from os.path import join
 from pathlib import Path
-import sys
-import multiprocessing as mp
 
 import numpy as np
 import pandas as pd
 import xarray as xr
-
 import yaml
 
-from credit.pbs import launch_script, launch_script_mpi, get_num_cpus
+from credit.pbs import get_num_cpus, launch_script, launch_script_mpi
 from credit.verification.ensemble import binned_spread_skill, spread_error
 from credit.verification.standard import average_div_rot_spectrum, average_zonal_spectrum
 from credit.xr_sampler import XRSamplerByYear

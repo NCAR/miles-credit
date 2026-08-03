@@ -1,7 +1,8 @@
 import os
+
 import torch
 import xarray as xr
-from typing import Optional, Union
+
 from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
 
 
@@ -35,8 +36,8 @@ class TemporalNoise:
         self,
         noise_generator: torch.Tensor,
         temporal_correlation: float = 0.9,
-        perturbation_std: Optional[Union[float, torch.Tensor]] = None,
-        hemispheric_rescale: Optional[bool] = False,
+        perturbation_std: float | torch.Tensor | None = None,
+        hemispheric_rescale: bool | None = False,
         terrain_file: str = None,
     ):
         self.noise_generator = noise_generator
@@ -50,7 +51,7 @@ class TemporalNoise:
             self.latitudes = torch.tensor(latlons.latitude.values)
 
     def __call__(
-        self, x: torch.Tensor, previous_perturbation: Optional[torch.Tensor] = None, forecast_step: int = 1
+        self, x: torch.Tensor, previous_perturbation: torch.Tensor | None = None, forecast_step: int = 1
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply temporally correlated perturbation for sequential forecasting.
 

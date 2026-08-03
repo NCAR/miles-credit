@@ -27,22 +27,22 @@ Deprecated
 """
 
 # system tools
-from typing import TypedDict, Union, List, Sequence
-
 # data utils
 import datetime
-import numpy as np
-import xarray as xr
-import pandas as pd
+from collections.abc import Sequence
+from typing import TypedDict, Union
+
 import cftime
+import numpy as np
+import pandas as pd
 
 # Pytorch utils
 import torch
 import torch.utils.data
+import xarray as xr
 from torch.utils.data import get_worker_info
 from torch.utils.data.distributed import DistributedSampler
 
-#
 Array = Union[np.ndarray, xr.DataArray]
 IMAGE_ATTR_NAMES = ("historical_ERA5_images", "target_ERA5_images")
 
@@ -238,12 +238,12 @@ def drop_var_from_dataset(xarray_dataset, varname_keep):
     varname_clean = list(xarray_dataset.keys())
 
     varname_diff = list(set(varname_keep) - set(varname_clean))
-    assert len(varname_diff) == 0, "Variable name: {} missing".format(varname_diff)
+    assert len(varname_diff) == 0, f"Variable name: {varname_diff} missing"
 
     return xarray_dataset
 
 
-def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: List[str]):
+def keep_dataset_vars(xarray_dataset: xr.Dataset, varnames_keep: list[str]):
     """
     Return a version of an xarray dataset with only a selected subset of variables.
 
@@ -653,8 +653,7 @@ class ERA5_and_Forcing_Dataset(torch.utils.data.Dataset):
 
         # handle out-of-bounds
         ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension
@@ -1094,8 +1093,7 @@ class ERA5_Dataset_Distributed(torch.utils.data.Dataset):
 
         # handle out-of-bounds
         ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # ========================================================================== #
         # subset xarray on time dimension

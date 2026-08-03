@@ -1,8 +1,9 @@
 import copy
 import math
+
 import torch
-from torch.optim.lr_scheduler import LRScheduler
-from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau, CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, LRScheduler, ReduceLROnPlateau
+
 from credit.models.checkpoint import FSDPOptimizerWrapper
 
 update_on_batch = ["cosine-annealing-restarts", "linear-warmup-cosine"]
@@ -148,7 +149,7 @@ class CosineAnnealingWarmupRestarts(LRScheduler):
         self.cycle = 0  # cycle count
         self.step_in_cycle = last_epoch  # step size of the current cycle
 
-        super(CosineAnnealingWarmupRestarts, self).__init__(optimizer, last_epoch)
+        super().__init__(optimizer, last_epoch)
 
         # set learning rate min_lr
         self.init_lr()

@@ -1,10 +1,11 @@
 import numpy as np
+
 from credit.data import (
     ERA5_and_Forcing_Dataset,
     Sample,
-    find_key_for_number,
     extract_month_day_hour,
     find_common_indices,
+    find_key_for_number,
 )
 
 
@@ -21,8 +22,7 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
 
         # handle out-of-bounds
         ind_largest = len(self.all_files[int(ind_file)]["time"]) - (self.history_len + self.forecast_len + 1)
-        if ind_start_in_file > ind_largest:
-            ind_start_in_file = ind_largest
+        ind_start_in_file = min(ind_start_in_file, ind_largest)
 
         # subset xarray on time dimension
 
@@ -200,9 +200,10 @@ class ERA5_and_Forcing_SingleStep(ERA5_and_Forcing_Dataset):
 if __name__ == "__main__":
     import yaml
     from torch.utils.data import DataLoader
-    from credit.transforms import load_transforms
+
+    from credit.datasets import set_globals, setup_data_loading
     from credit.parser import credit_main_parser, training_data_check
-    from credit.datasets import setup_data_loading, set_globals
+    from credit.transforms import load_transforms
 
     with open("/glade/derecho/scratch/schreck/repos/miles-credit/production/multistep/wxformer_6h/model.yml") as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)

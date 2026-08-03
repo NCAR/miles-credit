@@ -11,9 +11,7 @@ from datetime import datetime
 
 import numpy as np
 import pytest
-
 from credit.output import load_metadata, make_xarray
-
 
 # ---------------------------------------------------------------------------
 # Helpers

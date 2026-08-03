@@ -2,8 +2,8 @@ import math
 
 import torch
 
-from credit.preblock.base import BasePreblock
 from credit.preblock._utils import _parse_variable_selection
+from credit.preblock.base import BasePreblock
 
 
 class LogTransform(BasePreblock):

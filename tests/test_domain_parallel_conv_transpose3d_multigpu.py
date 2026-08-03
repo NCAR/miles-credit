@@ -12,10 +12,11 @@ single-GPU nn.ConvTranspose3d, covering:
 
 import os
 import sys
+
 import pytest
 import torch
-import torch.nn as nn
 import torch.distributed as dist
+from torch import nn
 
 
 def setup_distributed():
@@ -36,9 +37,9 @@ def test_pangu_patch_recovery_passthrough():
     Input shape:  (B=1, C=192, Z=2, H_local, W=8)  — H sharded across 2 GPUs
     Output shape: (B=1, C=13,  Z=4, H_local*4, W=32)
     """
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelConvTranspose3d
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -94,9 +95,9 @@ def test_conv_transpose3d_with_halo():
     halos along H before the transposed convolution, and trim the output back
     to the correct local size.
     """
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelConvTranspose3d
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -148,9 +149,9 @@ def test_conv_transpose3d_with_halo():
 )
 def test_backward_gradients_passthrough():
     """Backward through the passthrough (halo_width=0) case."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelConvTranspose3d
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()
@@ -204,9 +205,9 @@ def test_backward_gradients_passthrough():
 )
 def test_backward_gradients_with_halo():
     """Backward through the halo-exchange case."""
-    from credit.domain_parallel.manager import initialize_domain_parallel
     from credit.domain_parallel.layers import DomainParallelConvTranspose3d
-    from credit.domain_parallel.sharding import shard_tensor, gather_tensor
+    from credit.domain_parallel.manager import initialize_domain_parallel
+    from credit.domain_parallel.sharding import gather_tensor, shard_tensor
 
     rank = dist.get_rank()
     world_size = dist.get_world_size()

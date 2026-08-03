@@ -7,10 +7,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import obstore as obs
 import pandas as pd
 import yaml
-
-import obstore as obs
 from credit.datasets._utils import _start_s3_obstore
 from credit.datasets.hrrr import (
     VAR_REGISTRY,

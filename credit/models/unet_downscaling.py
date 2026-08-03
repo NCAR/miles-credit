@@ -1,8 +1,10 @@
-import segmentation_models_pytorch as smp
-import logging
 import copy
+import logging
 import os
+
+import segmentation_models_pytorch as smp
 import torch.nn.functional as F
+
 from credit.models.base_model import BaseModel
 from credit.postblock.gen1 import PostBlock
 
@@ -165,7 +167,7 @@ class DownscalingSegmentationModel(BaseModel):
     ):
         if post_conf is None:
             post_conf = {"activate": False, "use_skebs": False}
-        super(DownscalingSegmentationModel, self).__init__()
+        super().__init__()
 
         self.image_height = image_height
         self.image_width = image_width

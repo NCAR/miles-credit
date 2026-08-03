@@ -183,6 +183,7 @@ _AGENT_TOOL_DEFS = [
 def _collect_run_context(args) -> str:
     """Gather config, training log, and recent PBS output for context injection."""
     import glob as _glob
+
     import yaml
 
     parts = []

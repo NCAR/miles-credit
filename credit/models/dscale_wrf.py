@@ -1,14 +1,15 @@
-import torch
-from torch import nn
-from torch.nn import functional as F
-from timm.layers.helpers import to_2tuple
-from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 import logging
 
-from credit.postblock.gen1 import PostBlock
-from credit.models.base_model import BaseModel
+import torch
+from timm.layers.helpers import to_2tuple
+from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
+from torch import nn
+from torch.nn import functional as F
+
 from credit.boundary_padding import TensorPadding
+from credit.models.base_model import BaseModel
 from credit.models.fuxi import Fuxi
+from credit.postblock.gen1 import PostBlock
 
 logger = logging.getLogger(__name__)
 
@@ -533,8 +534,8 @@ if __name__ == "__main__":
 
     y_pred = model(input_tensor.to("cuda"))
 
-    print("Input shape: {}".format(input_tensor.shape))
-    print("Predicted shape: {}".format(y_pred.shape))
+    print(f"Input shape: {input_tensor.shape}")
+    print(f"Predicted shape: {y_pred.shape}")
 
     # print the number of params
     num_params = sum(p.numel() for p in model.parameters())

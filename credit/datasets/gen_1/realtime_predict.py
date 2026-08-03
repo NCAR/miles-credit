@@ -1,8 +1,9 @@
+import numpy as np
+import pandas as pd
 import torch
 import xarray as xr
-from credit.data import keep_dataset_vars, get_forward_data
-import pandas as pd
-import numpy as np
+
+from credit.data import get_forward_data, keep_dataset_vars
 
 
 class RealtimePredictDataset(torch.utils.data.Dataset):
@@ -140,7 +141,6 @@ class RealtimePredictDataset(torch.utils.data.Dataset):
             self.xarray_static = static_dataset.load()
         else:
             self.xarray_static = None
-        return
 
     def __len__(self):
         return self.forecast_times.size - 1

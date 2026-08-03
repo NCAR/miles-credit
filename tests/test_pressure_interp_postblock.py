@@ -10,7 +10,6 @@ from functools import partial
 import numpy as np
 import pytest
 import torch
-
 from credit.interp import (
     interp_geopotential_to_pressure_levels,
     interp_hybrid_to_pressure_levels,
