@@ -15,6 +15,7 @@ _REGISTRY_MAP = {
     "model": ("credit.models", "register_model"),
     "postblock": ("credit.postblock", "register_postblock"),
     "loss": ("credit.losses", "register_loss"),
+    "metric": ("credit.metrics", "register_metric"),
 }
 
 # Tracks what has already been registered so repeated calls with the same conf
@@ -57,11 +58,12 @@ def load_custom_objects(conf):
     - ``credit.models.base_model.BaseModel`` for models
     - ``credit.postblock.base.BasePostblock`` for postblocks
     - ``torch.nn.Module`` for losses
+    - ``torch.nn.Module`` for metrics
 
     Note: CREDIT's built-in types use snake_case (``unet``, ``log_transform``).
     Use a distinct key to avoid accidentally overwriting a built-in.
 
-    Full example — all five object types::
+    Full example — all six object types::
 
         # ---- Register custom classes ----
         custom_objects:
@@ -86,6 +88,10 @@ def load_custom_objects(conf):
           MyLoss:
             object_type: loss
             module_path: mypackage.losses
+
+          MyMetric:
+            object_type: metric
+            module_path: mypackage.metrics
 
         # ---- Use the registered classes elsewhere in the config ----
 
@@ -119,6 +125,12 @@ def load_custom_objects(conf):
         # loss: referenced as loss.training_loss
         loss:
           training_loss: MyLoss
+
+        # metric: referenced under metrics.type (single) or metrics.args.metrics (combined)
+        metrics:
+          type: combined
+          args:
+            metrics: {rmse: {}, MyMetric: {}}
 
     Args:
         conf (dict): Top-level config dict. If ``custom_objects`` is absent or

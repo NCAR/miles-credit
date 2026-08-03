@@ -299,6 +299,36 @@ loss:
     latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
 
+# ---- Metrics ---- #
+# Follows the loss/preblocks/postblocks structure: type + args. "combined" =
+# BaseCombinedMetric: univariate metric per variable on the postblocks output
+# (physical units), combined across variables. Requires the same reconstruct +
+# scaler postblocks as the loss section above (including the y_target_processed
+# twin). Metrics run under torch.no_grad and return detached floats for logging.
+metrics:
+  type: combined
+  args:
+    metrics:                          # registry names of univariate metrics
+      rmse: {}
+      mae: {}
+      bias: {}
+    # base_metric_overrides:          # optional per-variable metric overrides
+    #   ERA5/diagnostic/2d/total_precipitation: {metric: "mae"}
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
+    # file. Options: inverse_variance | manual | none (no learnable for metrics).
+    var_weighting: "inverse_variance"
+    scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: true           # rescale combination weights to mean 1
+
+    include_computed_diagnostics: true
+
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
 #
 # run_mode selects between batch and single forecast without requiring CLI flags.

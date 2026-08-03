@@ -12,6 +12,7 @@ import tqdm
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.losses import BaseLoss, is_crps_loss
+from credit.metrics import BaseCombinedMetric
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.domain import (
     gather_spatial,
@@ -28,7 +29,6 @@ from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.rollout_utils import apply_rollout_renames, assemble_rollout_batch
 from credit.trainers.utils import accum_log, cycle
-
 
 logger = logging.getLogger(__name__)
 
@@ -507,7 +507,10 @@ class TrainerERA5Gen2(BaseTrainer):
                     self.ema.update(self.model)
 
             if full_data_dict.get("y_pred") is not None and full_data_dict.get("y") is not None:
-                metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
+                if isinstance(metrics, BaseCombinedMetric):
+                    metrics_dict = metrics(full_data_dict)
+                else:
+                    metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
@@ -674,7 +677,10 @@ class TrainerERA5Gen2(BaseTrainer):
                                 full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
                                 full_data_dict["y_pred"],
                             ).mean()
-                        metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
+                        if isinstance(metrics, BaseCombinedMetric):
+                            metrics_dict = metrics(full_data_dict)
+                        else:
+                            metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:
