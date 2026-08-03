@@ -17,6 +17,7 @@ from credit.preblock.regrid import Regridder
 from credit.preblock.rename import RenameVariables
 from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
+from credit.preblock.device import ToDevice
 from credit.preblock._utils import (
     _parse_variable_selection,
     _flatten_spatial_tensors,
@@ -707,6 +708,34 @@ class TestBuildPreblocks:
         preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
         assert isinstance(preblocks, nn.ModuleDict)
         assert "concat" in preblocks
+
+    def test_to_device_moves_nested_state(self):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        block = ToDevice(device)
+        state = {
+            "input": {"ERA5": {"ERA5/prognostic/2d/SP": torch.ones(1)}},
+            "target": {"ERA5": {"ERA5/prognostic/2d/SP": torch.zeros(1)}},
+            "metadata": {"levels": [500, 850], "tensor": torch.ones(2)},
+            "sequence": (torch.ones(1), "unchanged"),
+        }
+
+        result = block(state)
+
+        assert result["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device == device
+        assert result["target"]["ERA5"]["ERA5/prognostic/2d/SP"].device == device
+        assert result["metadata"]["tensor"].device == device
+        assert result["metadata"]["levels"] == [500, 850]
+        assert result["sequence"][0].device == device
+        assert result["sequence"][1] == "unchanged"
+        assert state["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == "cpu"
+
+    def test_to_device_builds_from_config(self):
+        preblocks = build_preblocks(
+            {"preblocks": {"per_step": {"to_device": {"type": "to_device", "args": {"device": "cpu"}}}}}
+        )
+
+        assert isinstance(preblocks["to_device"], ToDevice)
+        assert preblocks["to_device"].device == torch.device("cpu")
 
     def test_valid_two_section_ic_only_builds(self):
         """ic_only section builds an nn.ModuleDict with the named block."""
