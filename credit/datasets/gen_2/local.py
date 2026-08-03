@@ -60,11 +60,12 @@ File naming:
 
 from __future__ import annotations
 
-import cftime
 import logging
 from glob import glob
 from typing import Any
 
+import cftime
+import numpy as np
 import pandas as pd
 import torch
 import xarray as xr
@@ -149,6 +150,9 @@ class LocalDataset(BaseDataset):
             data_config (dict[str, Any]): Data configuration dictionary from YAML config.
             return_target (bool, optional): Whether to return target variables. Defaults to False.
         """
+        # Must exist before super().__init__() -- it calls _load_dt/_load_start_datetime/
+        # _load_end_datetime/_load_cycle_year, whose overrides below memoize onto this.
+        self._cyclic_time_info_cache: dict[str, Any] | None = None
         super().__init__(data_config, return_target)
         assert self.curr_source_cfg["dataset_type"] == "local", (
             f"Expected dataset_type 'local' in config for LocalDataset, got '{self.curr_source_cfg['dataset_type']}'"
@@ -202,7 +206,7 @@ class LocalDataset(BaseDataset):
                     if time_coord not in ds:
                         continue
                     t0 = ds[time_coord].values.ravel()[0]
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "LocalDataset '%s': could not find calendar in %s (%s); assuming 'standard'. "
                     "Set an explicit `calendar:` key in the source config to silence this.",
@@ -216,6 +220,169 @@ class LocalDataset(BaseDataset):
                 logger.info("LocalDataset '%s': found calendar '%s' in %s", self.curr_source_name, calendar, files[0])
             return calendar
         return None
+
+    def _infer_cyclic_time_info(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
+        """Infer dt/start_datetime/end_datetime/cycle_year for a cyclic source
+        from its own data, when the config doesn't declare them explicitly.
+
+        Opens the first available file (same file-finding as ``_find_calendar``/
+        ``_find_grid``) and reads its full time coordinate: ``dt`` is the
+        spacing between its first two timestamps, start/end are its min/max,
+        and ``cycle_year`` is the single calendar year they all share -- a
+        cyclic source's file should only ever contain one representative
+        cycle, so this raises loudly if it doesn't (rather than silently
+        picking one). Memoized on ``self._cyclic_time_info_cache`` since
+        ``_load_dt``/``_load_start_datetime``/``_load_end_datetime``/
+        ``_load_cycle_year`` may all need it. Failures (missing time
+        coordinate, unreadable file, a single-timestamp file with no
+        inferrable spacing) are non-fatal: warn and return None, in which case
+        the ordinary required-config-key error surfaces instead.
+
+        Raises:
+            ValueError: if the file's timestamps span more than one calendar
+                year (ambiguous cycle_year -- set it explicitly to disambiguate).
+        """
+        if self._cyclic_time_info_cache is not None:
+            return self._cyclic_time_info_cache
+
+        time_coord = source_cfg.get("time_coord", "time")
+        engine = source_cfg.get("engine")
+        variables = source_cfg.get("variables") or {}
+        for field_type in ("prognostic", "dynamic_forcing", "diagnostic", "static"):
+            field_cfg = variables.get(field_type)
+            if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+                continue
+            files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
+            if not files:
+                continue
+            try:
+                with xr.open_dataset(files[0], engine=engine) as ds:
+                    if time_coord not in ds:
+                        continue
+                    raw = ds[time_coord].values.ravel()
+                    # Nanosecond-precision datetime64 (xarray's usual CF-decoded dtype)
+                    # can't round-trip through .tolist() as datetime objects (numpy
+                    # gives plain int in that case) -- pd.DatetimeIndex handles it
+                    # correctly. Non-standard calendars decode to an object array of
+                    # cftime.datetime, which already sorts/compares/has .year natively.
+                    if np.issubdtype(raw.dtype, np.datetime64):
+                        times = list(pd.DatetimeIndex(raw).sort_values())
+                    else:
+                        times = sorted(raw.tolist())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "LocalDataset '%s': could not infer cyclic time info from %s (%s). Set "
+                    "cycle_year/start_datetime/end_datetime/timestep explicitly in the source config.",
+                    self.curr_source_name,
+                    files[0],
+                    exc,
+                )
+                return None
+
+            if not times:
+                continue
+            if len(times) < 2:
+                logger.warning(
+                    "LocalDataset '%s': %s has only one timestamp; cannot infer a timestep. "
+                    "Set timestep explicitly in the source config.",
+                    self.curr_source_name,
+                    files[0],
+                )
+                return None
+
+            years = {t.year for t in times}
+            if len(years) > 1:
+                raise ValueError(
+                    f"LocalDataset '{self.curr_source_name}': cyclic source's data file {files[0]} spans "
+                    f"more than one year ({sorted(years)}) -- a cyclic source's data must contain exactly "
+                    "one representative cycle. Set cycle_year explicitly to disambiguate, or fix the data."
+                )
+
+            start_raw, end_raw = times[0], times[-1]
+            if not isinstance(start_raw, cftime.datetime):
+                start_raw, end_raw = pd.Timestamp(start_raw), pd.Timestamp(end_raw)
+
+            info = {
+                "dt": pd.Timedelta(times[1] - times[0]),
+                "start_datetime": start_raw,
+                "end_datetime": end_raw,
+                "cycle_year": next(iter(years)),
+            }
+            logger.info(
+                "LocalDataset '%s': inferred cyclic time info from %s: %s", self.curr_source_name, files[0], info
+            )
+            self._cyclic_time_info_cache = info
+            return info
+        return None
+
+    def _load_dt(
+        self, data_config: dict[str, Any], curr_source_config: dict[str, Any], dt_key: str = "timestep"
+    ) -> pd.Timedelta:
+        """Falls back to inferring dt from the data for a cyclic source with no
+        explicit timestep (source or data level); otherwise identical to
+        ``BaseDataset._load_dt``. See ``_infer_cyclic_time_info``.
+        """
+        if (
+            curr_source_config.get("temporal_mode") == "cyclic"
+            and dt_key not in curr_source_config
+            and dt_key not in data_config
+        ):
+            info = self._infer_cyclic_time_info(curr_source_config)
+            if info is not None:
+                return info["dt"]
+        return super()._load_dt(data_config, curr_source_config, dt_key)
+
+    def _load_start_datetime(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        start_datetime_key: str = "start_datetime",
+    ) -> pd.Timestamp:
+        """Falls back to inferring start_datetime from the data for a cyclic
+        source with no explicit start_datetime (source or data level);
+        otherwise identical to ``BaseDataset._load_start_datetime``. See
+        ``_infer_cyclic_time_info``.
+        """
+        if (
+            curr_source_config.get("temporal_mode") == "cyclic"
+            and start_datetime_key not in curr_source_config
+            and start_datetime_key not in data_config
+        ):
+            info = self._infer_cyclic_time_info(curr_source_config)
+            if info is not None:
+                return info["start_datetime"]
+        return super()._load_start_datetime(data_config, curr_source_config, start_datetime_key)
+
+    def _load_end_datetime(
+        self, data_config: dict[str, Any], curr_source_config: dict[str, Any], end_datetime_key: str = "end_datetime"
+    ) -> pd.Timestamp:
+        """Falls back to inferring end_datetime from the data for a cyclic
+        source with no explicit end_datetime (source or data level); otherwise
+        identical to ``BaseDataset._load_end_datetime``. See
+        ``_infer_cyclic_time_info``.
+        """
+        if (
+            curr_source_config.get("temporal_mode") == "cyclic"
+            and end_datetime_key not in curr_source_config
+            and end_datetime_key not in data_config
+        ):
+            info = self._infer_cyclic_time_info(curr_source_config)
+            if info is not None:
+                return info["end_datetime"]
+        return super()._load_end_datetime(data_config, curr_source_config, end_datetime_key)
+
+    def _load_cycle_year(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> int | None:
+        """Falls back to inferring cycle_year from the data when config gives
+        no answer; otherwise identical to ``BaseDataset._load_cycle_year``.
+        See ``_infer_cyclic_time_info``.
+        """
+        cycle_year = super()._load_cycle_year(data_config, curr_source_config)
+        if cycle_year is not None:
+            return cycle_year
+        if curr_source_config.get("temporal_mode") != "cyclic":
+            return None
+        info = self._infer_cyclic_time_info(curr_source_config)
+        return info["cycle_year"] if info is not None else None
 
     def _find_grid(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
         """Read the real lat/lon coordinates from the first available data file, once.
@@ -276,7 +443,7 @@ class LocalDataset(BaseDataset):
                         self.levels = ds[self.level_coord].values.tolist()
                     return grid
 
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "LocalDataset '%s': could not find grid in %s (%s).",
                     self.curr_source_name,
@@ -417,7 +584,7 @@ class LocalDataset(BaseDataset):
     # Internal helpers for _extract_field
     # ------------------------------------------------------------------
 
-    def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp) -> xr.Dataset:
+    def _select_at_time(self, ds: xr.Dataset, t: pd.Timestamp | cftime.datetime) -> xr.Dataset:
         """Select a single time slice from *ds* at timestamp *t*.
 
         Handles both numpy datetime64 and cftime calendars, in both directions:
@@ -448,7 +615,7 @@ class LocalDataset(BaseDataset):
             t_sel = to_calendar(t, "standard")
         return ds.sel({self.time_coord: t_sel})
 
-    def _read_3d_array(self, ds_t: xr.Dataset, vname: str):
+    def _read_3d_array(self, ds_t: xr.Dataset, vname: str) -> np.ndarray:
         """Read a 3D variable from a per-time-slice dataset, applying level
         selection if configured. Lazily caches ``self.levels`` on first use,
         matching the original single-step logic.
