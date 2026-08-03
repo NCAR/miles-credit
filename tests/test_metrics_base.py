@@ -38,12 +38,12 @@ N_LEVELS = 3
 VARIANCES = {VAR_T: [100.0, 25.0, 4.0], VAR_SP: [1.0e6], VAR_PRECIP: [1.0e-8]}
 
 
-def _make_scaler_file(tmp_path):
+def _make_scaler_file(tmp_path, variances_by_var=None, name="scaler.json"):
     from bridgescaler import save_scaler_dict
     from bridgescaler.distributed_tensor import DStandardScalerTensor
 
     scalers = {}
-    for var_key, variances in VARIANCES.items():
+    for var_key, variances in (variances_by_var or VARIANCES).items():
         n = len(variances)
         s = DStandardScalerTensor(channels_last=False)
         s.mean_x_ = torch.zeros(n)
@@ -52,9 +52,23 @@ def _make_scaler_file(tmp_path):
         s.n_ = 100
         s._fit = True
         scalers[var_key] = s
-    path = str(tmp_path / "scaler.json")
+    path = str(tmp_path / name)
     save_scaler_dict({"target": {"ERA5": scalers}}, path)
     return path
+
+
+# Moderate, closely-spaced variances. The default VARIANCES span 14 orders of
+# magnitude, so after normalize_weights one variable dominates the aggregate
+# and 1/sigma vs 1/sigma^2 become numerically indistinguishable — useless for
+# testing that scale_power is honored.
+MODERATE_VARIANCES = {VAR_T: [4.0, 4.0, 4.0], VAR_SP: [16.0], VAR_PRECIP: [64.0]}
+
+
+def _expected_aggregate(metric, variances_by_var, power):
+    """Aggregate the metric's own per-variable scores under 1/sigma**power."""
+    raw = {k: 1.0 / np.mean(v) ** (power / 2) for k, v in variances_by_var.items()}
+    mean_w = np.mean(list(raw.values()))
+    return np.mean([raw[k] / mean_w * metric.last_var_scores[k] for k in raw])
 
 
 def _make_schema():
@@ -407,6 +421,59 @@ def test_forward_inverse_variance_weights(tmp_path):
     mean_w = np.mean(list(raw.values()))
     expected = np.mean([raw[k] / mean_w * metric.last_var_scores[k] for k in raw])
     assert out["mse"] == pytest.approx(expected, rel=1e-5)
+
+
+def test_scale_power_per_metric():
+    """Each metric declares the power of sigma its score carries."""
+    assert MSEMetric.scale_power == 2
+    assert RMSEMetric.scale_power == 1
+    assert MAEMetric.scale_power == 1
+    assert BiasMetric.scale_power == 1
+    assert R2ScoreMetric.scale_power == 0
+    assert LogVarianceRatioMetric.scale_power == 0
+    assert ForecastActivityMetric.scale_power == 1
+    assert AnomalyCorrelationCoefficientMetric.scale_power == 0
+
+
+def test_inverse_variance_uses_sigma_for_linear_metrics(tmp_path):
+    """RMSE is linear in sigma, so it is weighted by 1/sigma, not 1/sigma^2."""
+    scaler_path = _make_scaler_file(tmp_path, MODERATE_VARIANCES)
+    metric = _make_metric(RMSEMetric, scaler_path)
+    out = metric(_make_state_dict())
+
+    expected = _expected_aggregate(metric, MODERATE_VARIANCES, power=1)
+    assert out["rmse"] == pytest.approx(expected, rel=1e-5)
+
+    # And is measurably different from the 1/sigma^2 weighting it replaced,
+    # so this test actually fails if scale_power is ignored.
+    wrong = _expected_aggregate(metric, MODERATE_VARIANCES, power=2)
+    assert not np.isclose(expected, wrong, rtol=1e-3)
+
+
+def test_inverse_variance_uses_variance_for_quadratic_metrics(tmp_path):
+    """MSE is quadratic in sigma and keeps the 1/sigma^2 weighting."""
+    scaler_path = _make_scaler_file(tmp_path, MODERATE_VARIANCES)
+    metric = _make_metric(MSEMetric, scaler_path)
+    out = metric(_make_state_dict())
+
+    expected = _expected_aggregate(metric, MODERATE_VARIANCES, power=2)
+    assert out["mse"] == pytest.approx(expected, rel=1e-5)
+
+
+def test_inverse_variance_ignores_scaler_for_dimensionless_metrics(tmp_path):
+    """R2 is already normalized, so inverse_variance leaves its weights uniform."""
+    scaler_path = _make_scaler_file(tmp_path)
+    weighted = _make_metric(R2ScoreMetric, scaler_path, var_weighting="inverse_variance")
+    uniform = _make_metric(R2ScoreMetric, scaler_path, var_weighting="none")
+    state = _make_state_dict()
+    assert weighted(state)["r2score"] == pytest.approx(uniform(state)["r2score"], rel=1e-9)
+
+
+def test_dimensionless_metric_needs_no_scaler_path():
+    """A scale_power == 0 metric never consults the scaler, so none is required."""
+    metric = R2ScoreMetric(metric_name="r2score", var_weighting="inverse_variance", channel_schema=_make_schema())
+    out = metric(_make_state_dict())
+    assert np.isfinite(out["r2score"])
 
 
 def test_learnable_mode_rejected(tmp_path):

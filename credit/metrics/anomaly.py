@@ -326,6 +326,8 @@ class AnomalyCorrelationCoefficientMetric(_AnomalyMetricBase):
     Requires a climatology (see :class:`_AnomalyMetricBase`).
     """
 
+    scale_power = 0  # a correlation is dimensionless
+
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         # Not used — _score_anomaly is the hook for anomaly metrics.
         return (pred - target) ** 2
@@ -348,6 +350,8 @@ class ForecastActivityMetric(_AnomalyMetricBase):
 
     Requires a climatology (see :class:`_AnomalyMetricBase`).
     """
+
+    scale_power = 1  # a standard deviation is linear in sigma
 
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         # Not used — _score_anomaly is the hook for anomaly metrics.

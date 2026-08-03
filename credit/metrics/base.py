@@ -50,8 +50,16 @@ and then require a matching entry in ``y_target_processed``.
 ``var_weighting`` reuses the BaseLoss modes **except** ``learnable`` (metrics
 are not optimized):
 
-  - ``inverse_variance`` (default): per-variable weight ``1 / sigma_v^2`` read
-    from the fitted bridgescaler at ``scaler_path``.
+  - ``inverse_variance`` (default): per-variable weight
+    ``1 / sigma_v ** scale_power``, with ``sigma_v`` read from the fitted
+    bridgescaler at ``scaler_path``. ``scale_power`` is a class attribute of
+    each metric giving the power of sigma its score carries, so the weighted
+    aggregate is dimensionless regardless of the metric's order: 2 for MSE,
+    1 for RMSE / MAE / bias / activity, and 0 for already-normalized scores
+    such as R2 and ACC (which ignore the scaler entirely). Weighting every
+    metric by ``1 / sigma^2`` would over-weight low-variance variables
+    quadratically for the linear metrics and is meaningless for the
+    dimensionless ones.
   - ``manual``: weights come from ``variable_weights`` alone.
   - ``none``: uniform combination; only sensible when variables are already
     on comparable scales.
@@ -149,7 +157,23 @@ class BaseVariableMetric(nn.Module, ABC):
         last_var_scores: ``{var_key: float}`` detached per-variable scores
             (pre-combination) from the most recent forward pass.
         var_keys: scored variable list, resolved on the first forward pass.
+        scale_power: class attribute; see below.
     """
+
+    #: Power of the variable's standard deviation carried by this metric's
+    #: per-variable score, used by ``var_weighting="inverse_variance"`` to make
+    #: the combined aggregate dimensionless. The weight is
+    #: ``1 / sigma ** scale_power``, i.e. ``variance ** (-scale_power / 2)``.
+    #:
+    #:   * ``2`` — quadratic in sigma (MSE). ``1 / sigma^2`` recovers the
+    #:     normalized-space score exactly, matching ``BaseLoss``.
+    #:   * ``1`` — linear in sigma (RMSE, MAE, bias, forecast activity).
+    #:   * ``0`` — already dimensionless (R2, ACC, log variance ratio); the
+    #:     scaler variance is not consulted at all.
+    #:
+    #: Subclasses that are not quadratic MUST override this, otherwise
+    #: ``inverse_variance`` over-weights low-variance variables.
+    scale_power: int = 2
 
     def __init__(
         self,
@@ -195,9 +219,14 @@ class BaseVariableMetric(nn.Module, ABC):
             self.data_var_keys = [entry["var_key"] for entry in channel_schema.target_layout]
 
         self._variances = None
-        if self.var_weighting == "inverse_variance":
+        # A dimensionless metric (scale_power == 0) never consults the scaler,
+        # so requiring scaler_path for it would be a pointless config burden.
+        if self.var_weighting == "inverse_variance" and self.scale_power != 0:
             if not scaler_path:
-                raise ValueError(f"scaler_path is required for var_weighting='{self.var_weighting}'.")
+                raise ValueError(
+                    f"scaler_path is required for var_weighting='{self.var_weighting}' "
+                    f"with metric '{metric_name}' (scale_power={self.scale_power})."
+                )
             self._variances = _load_target_variances(scaler_path)
 
         self._combination_weights = None  # {var_key: float}; built at first forward
@@ -247,6 +276,11 @@ class BaseVariableMetric(nn.Module, ABC):
         for var_key in var_keys:
             manual = self.manual_weights.get(var_key, 1.0)
             if self.var_weighting == "inverse_variance":
+                if self.scale_power == 0:
+                    # Already dimensionless (R2, ACC, ...) — dividing by a
+                    # variance would distort the aggregate, not normalize it.
+                    weights[var_key] = manual
+                    continue
                 variance = self._variances.get(var_key)
                 if variance is None:
                     logger.warning(
@@ -256,7 +290,9 @@ class BaseVariableMetric(nn.Module, ABC):
                     )
                     weights[var_key] = manual
                 else:
-                    weights[var_key] = manual / max(variance, 1e-12)
+                    # 1 / sigma**scale_power, so the weighted score is dimensionless
+                    # for any metric order (MSE 2, RMSE/MAE/bias 1).
+                    weights[var_key] = manual / max(variance, 1e-12) ** (self.scale_power / 2)
             elif self.var_weighting == "manual":
                 if var_key not in self.manual_weights:
                     logger.warning("BaseVariableMetric: no variable_weights entry for '%s'; using 1.0.", var_key)

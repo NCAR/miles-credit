@@ -52,6 +52,8 @@ class MSEMetric(BaseVariableMetric):
 class MAEMetric(BaseVariableMetric):
     """Mean absolute error per variable (elementwise ``abs(pred - target)``)."""
 
+    scale_power = 1  # linear in sigma
+
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return torch.abs(pred - target)
 
@@ -63,6 +65,8 @@ class BiasMetric(BaseVariableMetric):
     be negative.
     """
 
+    scale_power = 1  # linear in sigma
+
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return pred - target
 
@@ -73,6 +77,8 @@ class RMSEMetric(BaseVariableMetric):
     ``compute_variable`` returns the elementwise squared error; ``reduce``
     takes the square root of the spatial mean to yield the per-variable RMSE.
     """
+
+    scale_power = 1  # sqrt of a quadratic score -> linear in sigma
 
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         return (pred - target) ** 2
@@ -96,6 +102,8 @@ class R2ScoreMetric(BaseVariableMetric):
     latitude-weighted target mean, so it overrides :meth:`_score_variable`
     rather than :meth:`compute_variable`/:meth:`reduce`.
     """
+
+    scale_power = 0  # already normalized by the target variance
 
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         # Not used — _score_variable is overridden instead. Provided so the
@@ -162,6 +170,8 @@ class LogVarianceRatioMetric(BaseVariableMetric):
                 eps: 1.0e-12
             var_weighting: "none"
     """
+
+    scale_power = 0  # a log ratio is dimensionless
 
     def __init__(self, *args, eps: float = 1e-12, **kwargs):
         super().__init__(*args, **kwargs)
