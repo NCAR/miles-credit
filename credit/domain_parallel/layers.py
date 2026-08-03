@@ -15,6 +15,17 @@ from credit.domain_parallel.halo_exchange import HaloExchange
 from credit.domain_parallel.manager import get_domain_parallel_manager
 
 
+def _run_forward_pre_hooks(module, x):
+    """Run a module's forward pre-hooks without invoking its full forward pass.
+
+    Required when bypassing module.__call__ (e.g. calling F.conv2d directly)
+    but parameterization hooks such as SpectralNorm must still fire to
+    recompute the weight attribute on the correct device before use.
+    """
+    for hook in module._forward_pre_hooks.values():
+        hook(module, (x,))
+
+
 class DomainParallelConv2d(nn.Module):
     """Domain-parallel Conv2d with automatic halo exchange.
 
@@ -68,6 +79,9 @@ class DomainParallelConv2d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        # Trigger forward pre-hooks (e.g. SpectralNorm) before bypassing __call__
+        _run_forward_pre_hooks(self.conv, x)
 
         # Exchange halos
         x_padded = self.halo_exchange(x)
@@ -144,6 +158,8 @@ class DomainParallelConv3d(nn.Module):
         if self.halo_width == 0:
             return self.conv(x)
 
+        _run_forward_pre_hooks(self.conv, x)
+
         x_padded = self.halo_exchange(x)
 
         # Adjust padding: zero out H-dimension padding, keep T and W
@@ -208,6 +224,8 @@ class DomainParallelConvTranspose2d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        _run_forward_pre_hooks(self.conv, x)
 
         x_padded = self.halo_exchange(x)
 
@@ -287,6 +305,8 @@ class DomainParallelConvTranspose3d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        _run_forward_pre_hooks(self.conv, x)
 
         x_padded = self.halo_exchange(x)
 

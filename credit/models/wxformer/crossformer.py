@@ -100,8 +100,11 @@ class UpBlock(nn.Module):
         attention_type=None,
         reduction=32,
         spatial_kernel=7,
+        fsdp2_shard=True,
     ):
         super().__init__()
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
 
         # Always use ConvTranspose2d for upsampling
         self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -132,8 +135,10 @@ class UpBlock(nn.Module):
 
 
 class UpBlockPS(nn.Module):
-    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
+    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2, fsdp2_shard=True):
         super().__init__()
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
         # sub-pixel conv at low res (ICNR init removes checkerboard at initialization)
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
         icnr_init_(self.conv.weight, scale)
@@ -228,8 +233,13 @@ class LayerNorm(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult=4, dropout=0.0):
+    def __init__(self, dim, mult=4, dropout=0.0, tp_col="layers.1", tp_row="layers.4"):
         super(FeedForward, self).__init__()
+        # Tensor-parallel opt-in: dotted paths to the column-parallel layer
+        # (Conv2d dim → dim*mult, output channels sharded) and the row-parallel
+        # layer (Conv2d dim*mult → dim, input channels sharded + all_reduce).
+        self._tp_col = tp_col
+        self._tp_row = tp_row
         self.layers = nn.Sequential(
             LayerNorm(dim),
             nn.Conv2d(dim, dim * mult, 1),
@@ -246,6 +256,9 @@ class Attention(nn.Module):
     """
     Attention module for the CrossFormer model.
 
+    Tensor parallelism opt-in: ``to_qkv`` is column-parallel (output sharded),
+    ``to_out`` is row-parallel (input sharded, all_reduce).
+
     This module performs either short-range or long-range attention on the input tensor.
     It uses a dynamic positional bias to incorporate relative positional information.
 
@@ -257,8 +270,30 @@ class Attention(nn.Module):
         dropout (float, optional): Dropout rate. Defaults to 0.0.
     """
 
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, rope: Optional[nn.Module] = None):
+    @staticmethod
+    def _tp_constraints(instance, tp_size):
+        if instance.heads % tp_size != 0:
+            raise ValueError(
+                f"Attention TP: heads={instance.heads} not divisible by tp_size={tp_size}. "
+                f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
+            )
+
+    def __init__(
+        self,
+        dim,
+        attn_type,
+        window_size,
+        dim_head=32,
+        dropout=0.0,
+        tp_col="to_qkv",
+        tp_row="to_out",
+        rope: Optional[nn.Module] = None,
+    ):
         super().__init__()
+        # Tensor-parallel opt-in: to_qkv is column-parallel (output channels
+        # sharded), to_out is row-parallel (input sharded + all_reduce).
+        self._tp_col = tp_col
+        self._tp_row = tp_row
         assert attn_type in {
             "short",
             "long",
@@ -417,8 +452,11 @@ class Transformer(nn.Module):
         attn_dropout=0.0,
         ff_dropout=0.0,
         use_rope: bool = False,
+        fsdp2_shard=True,
     ):
         super().__init__()
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
         self.layers = nn.ModuleList([])
 
         # One shared GnomonicRoPE per Transformer (dim_head is constant across
@@ -644,14 +682,17 @@ class CrossFormer(BaseModel):
             self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
             self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
             scale = 2
+            ps_conv = nn.Conv2d(
+                2 * (last_dim // 8),  # in_channels
+                self.output_channels * (scale**2),  # conv_out = target_channels * 4
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            )
+            icnr_init_(ps_conv.weight, scale)  # checkerboard-free sub-pixel init
+            nn.init.zeros_(ps_conv.bias)
             self.up_block4 = nn.Sequential(
-                nn.Conv2d(
-                    2 * (last_dim // 8),  # in_channels
-                    self.output_channels * (scale**2),  # conv_out = target_channels * 4
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
+                ps_conv,
                 nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
                 nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
             )

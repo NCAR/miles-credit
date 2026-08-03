@@ -1,7 +1,7 @@
 """
 tests/test_hrrr.py
 ------------------
-Unit tests for credit/datasets/hrrr.py covering path helpers, .idx parsers,
+Unit tests for credit/datasets/gen_2/hrrr.py covering path helpers, .idx parsers,
 and product-specific entry-map functions.
 
 Remote/dataset integration tests are run unless the environment variable
@@ -18,20 +18,18 @@ import numpy as np
 
 import pytest
 
-from credit.datasets.hrrr import (
+from credit.datasets.gen_2.hrrr import (
     VALID_PRODUCTS,
-    _HRRR_HTTPS_BASE,  # pyright: ignore[reportPrivateUsage]
     _build_nat_entry_map,  # pyright: ignore[reportPrivateUsage]
     _build_prs_entry_map,  # pyright: ignore[reportPrivateUsage]
     _find_subhf_entry,  # pyright: ignore[reportPrivateUsage]
     _hrrr_local_path,  # pyright: ignore[reportPrivateUsage]
-    _hrrr_s3_uri,  # pyright: ignore[reportPrivateUsage]
     _parse_idx,  # pyright: ignore[reportPrivateUsage]
     _resolve_nat_levels,  # pyright: ignore[reportPrivateUsage]
     _resolve_pressure_levels,  # pyright: ignore[reportPrivateUsage]
-    _s3_uri_to_https,  # pyright: ignore[reportPrivateUsage]
     HRRRDataset,
 )
+from credit.datasets.gen_2.grid_utils import GridSchema
 
 # ---------------------------------------------------------------------------
 # Constants / product registry
@@ -48,34 +46,6 @@ def test_valid_products():
 
 _T_V3 = pd.Timestamp("2022-01-01 06:00")  # v3/v4 (after cutoff)
 _T_V2 = pd.Timestamp("2018-01-01 12:00")  # v1/v2 (before cutoff)
-
-
-def test_s3_uri_wrfprs_v3():
-    uri = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
-    assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfprsf00.grib2"
-
-
-def test_s3_uri_wrfnat_v3():
-    uri = _hrrr_s3_uri(_T_V3, forecast_hour=1, product="wrfnat")
-    assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfnatf01.grib2"
-
-
-def test_s3_uri_wrfsubh_v3():
-    uri = _hrrr_s3_uri(_T_V3, forecast_hour=2, product="wrfsubh")
-    assert uri == "s3://noaa-hrrr-bdp-pds/hrrr.20220101/conus/hrrr.t06z.wrfsubhf02.grib2"
-
-
-def test_s3_uri_v2_no_conus():
-    uri = _hrrr_s3_uri(_T_V2, forecast_hour=0, product="wrfprs")
-    assert "conus" not in uri
-    assert "hrrr.20180101/hrrr.t12z.wrfprsf00.grib2" in uri
-
-
-def test_s3_uri_default_product():
-    """Default product is wrfprs."""
-    uri_explicit = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
-    uri_default = _hrrr_s3_uri(_T_V3, forecast_hour=0)
-    assert uri_explicit == uri_default
 
 
 def test_local_path_wrfnat():
@@ -100,13 +70,13 @@ def test_local_path_v2_no_conus():
 # s3 uri to https
 
 
-def test_s3_uri_to_https():
-    s3_uri = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
-    assert s3_uri.startswith("s3://")
-    https_url = _s3_uri_to_https(s3_uri)
-    assert https_url.startswith(_HRRR_HTTPS_BASE + "/")
-    start_len = len(_HRRR_HTTPS_BASE) + 1
-    assert https_url[start_len + 1] != "/"  # no double slashes in path
+# def test_s3_uri_to_https():
+#     s3_uri = _hrrr_s3_uri(_T_V3, forecast_hour=0, product="wrfprs")
+#     assert s3_uri.startswith("s3://")
+#     https_url = _s3_uri_to_https(s3_uri)
+#     assert https_url.startswith(_HRRR_HTTPS_BASE + "/")
+#     start_len = len(_HRRR_HTTPS_BASE) + 1
+#     assert https_url[start_len + 1] != "/"  # no double slashes in path
 
 
 # ---------------------------------------------------------------------------
@@ -784,6 +754,45 @@ def test_hrrr_spatial_slicing_no_extent():
     assert len(curr_slice) == 2
     assert isinstance(curr_slice[0], slice) and isinstance(curr_slice[1], slice)
     assert curr_slice[0] == slice(None) and curr_slice[1] == slice(None)
+
+
+def test_hrrr_spatial_slice_caches_grid_for_static_metadata():
+    """First _get_spatial_slice call should populate static_metadata['grid']
+    (curvilinear, cropped to the resolved extent) — a debugging aid, and the
+    native grid GridSchema.resolve falls back to when no regridder is active."""
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("wrfprs", extent=extent)
+    ds = HRRRDataset(cfg)
+
+    assert ds.static_metadata.get("grid") is None  # not yet resolved
+
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+    grid = ds.static_metadata["grid"]
+
+    assert grid["grid_type"] == "curvilinear"
+    np.testing.assert_array_equal(grid["lat"], lat_array[curr_slice])
+    np.testing.assert_array_equal(grid["lon"], lon_array[curr_slice])
+
+
+def test_hrrr_grid_schema_written_to_save_loc(tmp_path):
+    """HRRRDataset should best-effort persist its native grid to
+    {save_loc}/{source}_grid_schema.nc the moment it's found — this is what
+    makes the file reliably available regardless of DataLoader num_workers."""
+    lat_array, lon_array = make_example_sparse_lat_lon_array()
+    extent = _make_extent_from_dict(_make_small_inner_extent_dict())
+    cfg = _make_config("wrfprs", extent=extent)
+    cfg["save_loc"] = str(tmp_path)
+    ds = HRRRDataset(cfg)
+
+    curr_slice = ds._get_spatial_slice(lat_array, lon_array)
+
+    path = tmp_path / f"{_make_source_key('wrfprs')}_grid_schema.nc"
+    assert path.is_file()
+    schema = GridSchema.load(str(path))
+    assert schema.grid_type == "curvilinear"
+    np.testing.assert_array_equal(schema.lat, lat_array[curr_slice])
+    np.testing.assert_array_equal(schema.lon, lon_array[curr_slice])
 
 
 def test_hrrr_spatial_slicing_extent_out_of_bounds():

@@ -37,8 +37,8 @@ import torch
 import xarray as xr
 from tqdm import tqdm
 
-from credit.datasets.local import LocalDataset
-from credit.datasets.channel_layout import build_channel_layout, update_x
+from credit.datasets.gen_2.local import LocalDataset
+from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -267,7 +267,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
     n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
     # ---- Preblocks ----
-    preblocks = build_preblocks(conf.get("preblocks", {}))
+    preblocks = build_preblocks(conf)
 
     # ---- Inverse normalizer ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)

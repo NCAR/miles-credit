@@ -2,6 +2,23 @@ import torch
 import numpy as np
 from datetime import datetime
 from credit.losses.weighted_loss import latitude_weights
+from credit.parallel.domain import shard_lat_weights
+
+
+def _w_lat_for_target(metrics_obj, target):
+    """Sharded, device-resident latitude weights, cached per (H, dtype, device).
+
+    The shard and the host-to-device copy are invariant for a run, so caching
+    avoids re-doing both on every metrics call.
+    """
+    if metrics_obj.w_lat is None:
+        return 1.0
+    key = (target.shape[-2], target.dtype, target.device)
+    if getattr(metrics_obj, "_w_lat_key", None) != key:
+        w = shard_lat_weights(metrics_obj.w_lat, target.shape[-2])
+        metrics_obj._w_lat_cached = w.to(dtype=target.dtype, device=target.device)
+        metrics_obj._w_lat_key = key
+    return metrics_obj._w_lat_cached
 
 
 class LatWeightedMetrics:
@@ -28,6 +45,9 @@ class LatWeightedMetrics:
         else:
             self.ensemble_size = conf["predict"].get("ensemble_size", 1)
 
+    def _get_w_lat(self, target):
+        return _w_lat_for_target(self, target)
+
     def __call__(self, pred, y, clim=None, transform=None, forecast_datetime=0):
         # forecast_datetime is passed for interface consistency but not used here
 
@@ -36,7 +56,7 @@ class LatWeightedMetrics:
             y = transform(y)
 
         # Get latitude and variable weights
-        w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        w_lat = self._get_w_lat(pred)
         w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         if clim is not None:
@@ -114,6 +134,9 @@ class LatWeightedMetricsClimatology:
         # DO NOT apply these weights during metrics computations, only on the loss during
         self.w_var = None
 
+    def _get_w_lat(self, target):
+        return _w_lat_for_target(self, target)
+
     def get_climatology(self, forecast_datetime, variable):
         """Extract the climatology for the given forecast datetime and variable."""
         if isinstance(forecast_datetime, datetime):
@@ -134,7 +157,7 @@ class LatWeightedMetricsClimatology:
             y = transform(y)
 
         # Get latitude and variable weights to device
-        w_lat = self.w_lat.to(dtype=pred.dtype, device=pred.device) if self.w_lat is not None else 1.0
+        w_lat = self._get_w_lat(pred)
         w_var = self.w_var.to(dtype=pred.dtype, device=pred.device) if self.w_var is not None else 1.0
 
         loss_dict = {}

@@ -26,9 +26,9 @@ def load_state_dict_error_handler(load_msg):
     if load_msg[1]:
         raise RuntimeError(str(load_msg))
     elif load_msg[0]:
-        logging.warning(f"Loaded partial model {load_msg}")
+        logging.getLogger(__name__).warning(f"Loaded partial model {load_msg}")
     else:  # all keys matched
-        logging.info(load_msg)
+        logging.getLogger(__name__).info("All keys matched successfully")
 
 
 def get_file_extension(file_path):

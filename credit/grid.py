@@ -28,6 +28,8 @@ Dependencies
 import numpy as np
 import xarray as xr
 
+from credit.datasets.gen_2.grid_utils import find_coord_pair
+
 
 # ---------------------------------------------------------------------------
 # Shared SCRIP writer
@@ -183,50 +185,6 @@ def _corners_curvilinear(lons_2d, lats_2d):
 
 
 # ---------------------------------------------------------------------------
-# Coordinate detection  (used by scrip_from_netcdf)
-# ---------------------------------------------------------------------------
-
-# Supported name pairs in priority order: (lon_name, lat_name)
-_COORD_CANDIDATES = [
-    ("longitude", "latitude"),
-    ("lon", "lat"),
-]
-
-
-def _find_coord_pair(ds):
-    """
-    Find a lon/lat coordinate pair in an xr.Dataset.
-
-    Searches _COORD_CANDIDATES in order across both ds.coords and ds.data_vars.
-
-    Returns
-    -------
-    (lon_array, lat_array, lon_name, lat_name)
-
-    Raises
-    ------
-    ValueError if no recognised pair is found.
-    """
-    all_names = set(ds.data_vars) | set(ds.coords)
-    for lon_name, lat_name in _COORD_CANDIDATES:
-        if lon_name in all_names and lat_name in all_names:
-            return (
-                ds[lon_name].values.astype(float),
-                ds[lat_name].values.astype(float),
-                lon_name,
-                lat_name,
-            )
-
-    raise ValueError(
-        "Could not find a recognised lon/lat coordinate pair.\n"
-        f"Expected one of: {_COORD_CANDIDATES}\n"
-        f"Available names: {sorted(all_names)}\n"
-        "Rename your coordinates or call scrip_from_rectilinear / "
-        "scrip_from_curvilinear directly."
-    )
-
-
-# ---------------------------------------------------------------------------
 # Public entry points
 # ---------------------------------------------------------------------------
 
@@ -335,7 +293,7 @@ def scrip_from_netcdf(nc_file, scrip_file, grid_name=None, mask_var=None):
 
     ds = xr.open_dataset(nc_file)
 
-    lon_arr, lat_arr, lon_name, lat_name = _find_coord_pair(ds)
+    lon_arr, lat_arr, lon_name, lat_name = find_coord_pair(ds)
     print(f"[scrip_from_netcdf] Coordinates : {lon_name} / {lat_name}")
 
     if lon_arr.ndim == 1 and lat_arr.ndim == 1:

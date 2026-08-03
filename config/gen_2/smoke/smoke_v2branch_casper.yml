@@ -8,13 +8,13 @@ seed: 1000
 
 data:
     variables: ['U', 'V', 'T', 'Q']
-    save_loc: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*'
+    save_loc: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL_%Y_*.zarr'
 
     surface_variables: ['SP', 't2m', 'V500', 'U500', 'T500', 'Z500', 'Q500']
-    save_loc_surface: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL*'
+    save_loc_surface: '/glade/campaign/cisl/aiml/credit/era5_zarr/SixHourly_y_TOTAL_%Y_*.zarr'
 
     dynamic_forcing_variables: ['tsi']
-    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/*.nc'
+    save_loc_dynamic_forcing: '/glade/campaign/cisl/aiml/credit/credit_solar_nc_6h_0.25deg/solar_irradiance_%Y-*.nc'
 
     static_variables: ['Z_GDS4_SFC', 'LSM']
     save_loc_static: '/glade/campaign/cisl/aiml/credit/static_scalers/static_norm_old.nc'

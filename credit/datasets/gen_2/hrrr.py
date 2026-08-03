@@ -1,0 +1,1111 @@
+"""
+hrrr.py
+-------------------------------------------------------
+HRRRDataset: PyTorch Dataset for HRRR GRIB2 data.
+
+Supports three HRRR products (``VALID_PRODUCTS``):
+
+* ``"wrfprs"`` — pressure-level output (default, ~200 MB/file)
+* ``"wrfnat"`` — native/hybrid-sigma level output (~200 MB/file, ~65 levels)
+* ``"wrfsubh"`` — 15-minute sub-hourly surface output (surface vars only)
+
+Tensor keys follow the pattern ``{user_provided_name}/{hrrr_product}/{field_type}/{dim}/{varname}``
+where *hrrr_product* is product-specific:
+
+* ``"wrfprs"``  → ``{user_provided_name}/wrfprs/{field_type}/{dim}/{varname}``
+* ``"wrfnat"``  → ``{user_provided_name}/wrfnat/{field_type}/{dim}/{varname}``
+* ``"wrfsubh"`` → ``{user_provided_name}/wrfsubh/{field_type}/2d/{varname}``
+
+*dim* is ``"3d"`` for multi-level variables and ``"2d"`` for surface variables.
+
+Tensor shapes (before DataLoader batching):
+    3D variables: ``(n_levels, 1, y, x)``
+    2D variables: ``(1, 1, y, x)``
+
+The ``y`` / ``x`` spatial dimensions correspond to HRRR's native Lambert
+Conformal Conic grid; if ``extent`` is specified they reflect the cropped
+sub-domain rather than the full CONUS grid (~1059 x 1799).
+
+Two S3 path layouts are handled automatically:
+
+    v1/v2  (before 2018-07-12):
+        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/hrrr.t{HH}z.{product}f{FF:02d}.grib2
+    v3/v4  (2018-07-12 onward):
+        s3://noaa-hrrr-bdp-pds/hrrr.{YYYYMMDD}/conus/hrrr.t{HH}z.{product}f{FF:02d}.grib2
+
+GRIB2 reading
+-------------
+Both local and remote modes use the same ``.idx`` + byte-range pipeline:
+
+*Remote mode*:
+
+1. Fetch the sidecar ``.idx`` inventory (~100 KB) to get exact byte
+   offsets for every GRIB message.
+2. Issue one Obstore get_ranges request to pull all the relevant data
+   fields (based on the byte ranges from the idx file).
+
+*Local mode*:
+
+1. Reads the ``.idx`` sidecar from disk,
+2. Uses ``file.seek()`` + ``file.read()`` — identical byte-range approach, no
+full-file scan.
+
+The ``.idx`` sidecar must be present alongside the grib2;
+download it with ``hrrr_download.py``.
+
+For a typical training sample (5 vars x 6 levels ≈ 30 messages) remote mode
+transfers ~3 MB instead of ~200 MB (~60-100x reduction).
+
+Variable lookup is driven by :data:`VAR_REGISTRY`.  Extend it at import
+time to add variables without subclassing::
+
+    from credit.datasets.gen_2.hrrr import VAR_REGISTRY
+    VAR_REGISTRY["MYVAR"] = {
+        "shortName": "myvar", "typeOfLevel": "isobaricInhPa",
+        "idx_name": "MYVAR", "idx_level": None,
+    }
+
+Example YAML (wrfprs, local mode)::
+
+    data:
+      source:
+        Example_HRRR:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR"
+          # product: "wrfprs" # Optional for PRS product. Default is "wrfprs".
+          mode: "local"
+          base_path: "/data/hrrr"
+          forecast_hour: 0
+          levels: [250, 500, 700, 850, 925, 1000]
+          variables:
+            prognostic:
+              vars_3D: [T, U, V, Q, GH]
+              vars_2D: [t2m]
+          extent: [-130, -60, 20, 55]
+
+      start_datetime: "2021-06-01"
+      end_datetime:   "2021-06-05"
+      timestep:       "1h"
+      forecast_len:   0
+
+Example YAML (wrfnat, remote mode)::
+
+    data:
+      source:
+        Example_HRRR_NAT:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR"
+          product: "wrfnat" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
+          mode: "remote"
+          forecast_hour: 0
+          levels: [10, 20, 30, 40, 50]   # hybrid level indices 1-65
+          variables:
+            prognostic:
+              vars_3D: [T, U, V, Q]
+
+      start_datetime: "2022-01-01"
+      end_datetime:   "2022-01-31"
+      timestep:       "1h"
+      forecast_len:   0
+
+Example YAML (wrfsubh, remote mode — 15-min output)::
+
+    data:
+      source:
+        Example_HRRR_SUBH:  # User-provided name (arbitrary key)
+          dataset_type: "HRRR"
+          product: "wrfsubh" # Options: "wrfprs" (default), "wrfnat", "wrfsubh"
+          mode: "remote"
+          variables:
+            prognostic:
+              vars_2D: [t2m, sp, refc]
+
+      start_datetime: "2022-01-01 00:15"
+      end_datetime:   "2022-01-31 00:00"
+      timestep:       "15min"
+      forecast_len:   0
+"""
+
+from __future__ import annotations
+
+from typing import Any, Callable, Literal, get_args
+
+import logging
+import os
+import time
+from collections import defaultdict
+
+from concurrent.futures import ThreadPoolExecutor
+
+import numpy as np
+import pandas as pd
+import torch
+
+from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
+from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+from credit.datasets.gen_2._utils import _start_s3_obstore
+
+logger = logging.getLogger(__name__)
+
+# V3+ S3 path includes a 'conus/' subdirectory; v1/v2 does not
+_HRRR_V3_CUTOFF = pd.Timestamp("2018-07-12")
+_S3_BUCKET = "noaa-hrrr-bdp-pds"
+
+#: Variable registry mapping user-facing names to HRRR ``.idx`` lookup keys.
+#:
+#: Each entry contains exactly two keys:
+#:
+#:   ``idx_name``   — variable abbreviation as it appears in the ``.idx`` file
+#:                    (e.g. ``"TMP"``, ``"UGRD"``)
+#:   ``idx_level``  — level string in the ``.idx`` file; ``None`` for
+#:                    pressure-level variables (matched dynamically as ``"{N} mb"``)
+#:
+#: Extend at import time to add variables without subclassing::
+#:
+#:     from credit.datasets.gen_2.hrrr import VAR_REGISTRY
+#:     VAR_REGISTRY["MYVAR"] = {"idx_name": "MYVAR", "idx_level": "surface"}
+VAR_REGISTRY: dict[str, dict[str, str | None]] = {
+    # -------------------------------------------------------------------------
+    # Pressure-level variables  (idx_level=None → matched as "{N} mb")
+    # -------------------------------------------------------------------------
+    # Dynamics / thermodynamics
+    "T": {"idx_name": "TMP", "idx_level": None},  # temperature (K)
+    "U": {"idx_name": "UGRD", "idx_level": None},  # u-component of wind (m/s)
+    "V": {"idx_name": "VGRD", "idx_level": None},  # v-component of wind (m/s)
+    "W": {"idx_name": "VVEL", "idx_level": None},  # vertical velocity (Pa/s)
+    "GH": {"idx_name": "HGT", "idx_level": None},  # geopotential height (gpm)
+    "ABSV": {"idx_name": "ABSV", "idx_level": None},  # absolute vorticity (1/s)
+    "P": {"idx_name": "PRES", "idx_level": None},  # pressure (Pa)
+    # Moisture
+    "Q": {"idx_name": "SPFH", "idx_level": None},  # specific humidity (kg/kg)
+    "RH": {"idx_name": "RH", "idx_level": None},  # relative humidity (%)
+    "DPT": {"idx_name": "DPT", "idx_level": None},  # dew point temperature (K)
+    # Microphysics (not always present at all levels — verify against your files)
+    "CLWMR": {"idx_name": "CLWMR", "idx_level": None},  # cloud liquid water mixing ratio (kg/kg)
+    "ICMR": {"idx_name": "ICMR", "idx_level": None},  # ice crystal mixing ratio (kg/kg)
+    "RWMR": {"idx_name": "RWMR", "idx_level": None},  # rain water mixing ratio (kg/kg)
+    "SNMR": {"idx_name": "SNMR", "idx_level": None},  # snow mixing ratio (kg/kg)
+    "GRLE": {"idx_name": "GRLE", "idx_level": None},  # graupel mixing ratio (kg/kg)
+    # -------------------------------------------------------------------------
+    # Surface / near-surface variables
+    # -------------------------------------------------------------------------
+    # 2 m
+    "t2m": {"idx_name": "TMP", "idx_level": "2 m above ground"},  # 2-m temperature (K)
+    "d2m": {"idx_name": "DPT", "idx_level": "2 m above ground"},  # 2-m dew point temperature (K)
+    "rh2m": {"idx_name": "RH", "idx_level": "2 m above ground"},  # 2-m relative humidity (%)
+    # 10 m
+    "u10m": {"idx_name": "UGRD", "idx_level": "10 m above ground"},  # 10-m u-wind (m/s)
+    "v10m": {"idx_name": "VGRD", "idx_level": "10 m above ground"},  # 10-m v-wind (m/s)
+    # 80 m (wind turbine hub height)
+    "u80m": {"idx_name": "UGRD", "idx_level": "80 m above ground"},  # 80-m u-wind (m/s)
+    "v80m": {"idx_name": "VGRD", "idx_level": "80 m above ground"},  # 80-m v-wind (m/s)
+    # Pressure / mass
+    "sp": {"idx_name": "PRES", "idx_level": "surface"},  # surface pressure (Pa)
+    "mslp": {"idx_name": "MSLMA", "idx_level": "mean sea level"},  # mean sea-level pressure (Pa)
+    "orog": {"idx_name": "HGT", "idx_level": "surface"},  # orography / model terrain height (m)
+    # Wind
+    "gust": {"idx_name": "GUST", "idx_level": "surface"},  # surface wind gust speed (m/s)
+    "fricv": {"idx_name": "FRICV", "idx_level": "surface"},  # friction velocity (m/s)
+    # Precipitation
+    "prate": {"idx_name": "PRATE", "idx_level": "surface"},  # precipitation rate (kg/m²/s)
+    "tp": {"idx_name": "APCP", "idx_level": "surface"},  # accumulated total precipitation (kg/m²)
+    # Reflectivity
+    "refc": {"idx_name": "REFC", "idx_level": "entire atmosphere"},  # composite reflectivity (dBZ)
+    # Convection
+    "cape": {"idx_name": "CAPE", "idx_level": "surface"},  # convective available potential energy (J/kg)
+    "cin": {"idx_name": "CIN", "idx_level": "surface"},  # convective inhibition (J/kg)
+    # Boundary layer
+    "hpbl": {"idx_name": "HPBL", "idx_level": "surface"},  # planetary boundary layer height (m)
+    "vis": {"idx_name": "VIS", "idx_level": "surface"},  # surface visibility (m)
+    # Radiation (instantaneous fluxes at the surface, W/m²)
+    "dswrf": {"idx_name": "DSWRF", "idx_level": "surface"},  # downward shortwave radiation flux
+    "uswrf": {"idx_name": "USWRF", "idx_level": "surface"},  # upward shortwave radiation flux
+    "dlwrf": {"idx_name": "DLWRF", "idx_level": "surface"},  # downward longwave radiation flux
+    "ulwrf": {"idx_name": "ULWRF", "idx_level": "surface"},  # upward longwave radiation flux
+    # Surface energy / heat fluxes (W/m²)
+    "shtfl": {"idx_name": "SHTFL", "idx_level": "surface"},  # sensible heat flux
+    "lhtfl": {"idx_name": "LHTFL", "idx_level": "surface"},  # latent heat flux
+    # Snow / land surface
+    "snowd": {"idx_name": "SNOD", "idx_level": "surface"},  # snow depth (m)
+    "weasd": {"idx_name": "WEASD", "idx_level": "surface"},  # water equivalent of snow depth (kg/m²)
+    "snowc": {"idx_name": "SNOWC", "idx_level": "surface"},  # snow cover (%)
+    # Masking
+    "landmask": {"idx_name": "LAND", "idx_level": "surface"},  # land sea mask (land=1,sea=0)
+    # Simulated Brightness Temperatures
+    "goes11bt3": {"idx_name": "SBT113", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES West Chan. 3
+    "goes11bt4": {"idx_name": "SBT114", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES West Chan. 4
+    "goes12bt3": {"idx_name": "SBT123", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 3
+    "goes12bt4": {"idx_name": "SBT124", "idx_level": "top of atmosphere"},  # Sim. Brightness Temp. GOES East Chan. 4
+}
+
+
+# Maximum parallel threads for CPU-bound GRIB decompression
+_MAX_DECOMPRESS_WORKERS = 8
+
+#: Supported HRRR GRIB2 products.
+VALID_PRODUCTS = Literal["wrfprs", "wrfnat", "wrfsubh"]
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+
+def _hrrr_local_path(base_path: str, t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs") -> str:
+    """Construct the local filesystem path for a HRRR grib2 file.
+
+    Args:
+        base_path (str): Root directory containing HRRR data.
+        t (pd.Timestamp): Initialization timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
+
+    Returns:
+        str: Local filesystem path to the grib2 file.
+    """
+    date_str = t.strftime("%Y%m%d")
+    hour_str = t.strftime("%H")
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+    if t >= _HRRR_V3_CUTOFF:
+        return os.path.join(base_path, f"hrrr.{date_str}", "conus", fname)
+    return os.path.join(base_path, f"hrrr.{date_str}", fname)
+
+
+def _hrrr_s3_entry_name(
+    t: pd.Timestamp, forecast_hour: int, product: VALID_PRODUCTS = "wrfprs", region: str = "conus"
+) -> str:
+    """Construct the S3 entry key name for a HRRR grib2 file.
+
+    Args:
+        t (pd.Timestamp): Initialization timestamp (UTC).
+        forecast_hour (int): Forecast lead hour (FF), e.g. ``0`` for analysis.
+        product (VALID_PRODUCTS, optional): HRRR product name. Defaults to "wrfprs".
+
+    Returns:
+        str: S3 entry key name.
+    """
+    date_str = t.strftime("%Y%m%d")
+    hour_str = t.strftime("%H")
+    fname = f"hrrr.t{hour_str}z.{product}f{forecast_hour:02d}.grib2"
+
+    if t >= _HRRR_V3_CUTOFF:
+        assert region in ["conus", "alaska"]
+        subdir = f"{region}/"
+    else:
+        subdir = ""
+    return f"hrrr.{date_str}/{subdir}{fname}"
+
+
+# ---------------------------------------------------------------------------
+# Remote reading: .idx parsing + parallel HTTPS range fetching
+# ---------------------------------------------------------------------------
+
+
+def _parse_idx(text: str) -> list[dict[str, str | int | None]]:
+    """Parse a HRRR ``.idx`` inventory file into a list of message entries.
+
+    Each entry dict has keys: ``var``, ``level``, ``byte_start``, ``byte_end``
+    (``None`` for the last entry, meaning read to EOF).
+
+    Args:
+        text (str): The content of the .idx file.
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+    """
+    entries: list[dict[str, str | int | None]] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split(":")
+        if len(parts) < 6:
+            continue
+        entries.append(
+            {
+                "var": parts[3].strip(),
+                "level": parts[4].strip(),
+                "step": parts[5].strip() if len(parts) > 5 else "",
+                "byte_start": int(parts[1]),
+                "byte_end": None,
+            }
+        )
+    for i in range(len(entries) - 1):
+        assert isinstance(entries[i]["byte_start"], int) and isinstance(entries[i + 1]["byte_start"], int)
+        entries[i]["byte_end"] = entries[i + 1]["byte_start"] - 1  # pyright: ignore[reportOperatorIssue]
+
+    return entries
+
+
+def _fetch_obstore_idx(store, s3_entry_name: str) -> list[dict[str, str | int | None]]:
+    """Fetch and parse the ``.idx`` sidecar for a HRRR grib2 file via HTTPS.
+
+    Args:
+        store (obstore.store.S3Store): the obstore store object that houses the s3_entry of interest
+        s3_entry_name (str): S3 entry in the obstore
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+    """
+
+    if len(s3_entry_name) < 4:
+        raise ValueError(f"Invalid s3_entry_name passed (too short). Entry: {s3_entry_name}")
+
+    idx_entry_name = s3_entry_name + ".idx" if s3_entry_name[:-3] != ".idx" else s3_entry_name
+
+    try:
+        idx_data = store.get(idx_entry_name)
+        idx_data_bytes = idx_data.bytes()
+        idx_data_text = str(idx_data_bytes, "utf-8")
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"HRRR .idx file not found: {idx_entry_name}\n"
+            "Older HRRR files (v1/v2) may lack .idx files. "
+            "Pre-download with hrrr_download.py and use local mode."
+        )
+
+    return _parse_idx(idx_data_text)
+
+
+def _fetch_obstore_messages(store, s3_entry_name: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Fetch multiple GRIB messages via store.get_ranges in a single batch request.
+
+    Args:
+        store: The obstore S3Store object.
+        s3_entry_name (str): S3 entry name in the obstore.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
+
+    Returns:
+        list[bytes]: List of raw bytes for each message.
+    """
+    starts = []
+    ends = []
+    for entry in entries:
+        start = entry["byte_start"]
+        end = entry["byte_end"]
+        if end is None:
+            # Resolve EOF range using a HEAD request to get file size
+            meta = store.head(s3_entry_name)
+            end = meta.size
+        else:
+            end = end + 1  # end parameter in obstore is exclusive
+        starts.append(start)
+        ends.append(end)
+
+    results = store.get_ranges(s3_entry_name, starts=starts, ends=ends)
+    return [res.to_bytes() for res in results]
+
+
+def _build_prs_entry_map(
+    idx_entries: list[dict[str, str | int | None]], idx_name: str
+) -> dict[float, dict[str, str | None]]:
+    """Return a ``{pressure_level_hPa: idx_entry}`` dict for a pressure-level variable.
+
+    Args:
+        idx_entries (list[dict[str, str  |  int  |  None]]): List of entries parsed from the .idx file.
+        idx_name (str): Name of the variable to filter for.
+
+    Returns:
+        dict[float, dict[str, str | None]]: Mapping from pressure level (hPa) to the corresponding .idx entry for that variable.
+    """
+    result: dict[float, dict[str, str | None]] = {}
+    for e in idx_entries:
+        # If level is in the entry, it should be a string like "500 mb"
+        if e["var"] == idx_name and e["level"].endswith(" mb"):  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportOptionalMemberAccess]
+            try:
+                lv_f = float(e["level"].replace(" mb", ""))  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType, reportOptionalMemberAccess]
+            except ValueError:
+                logging.debug(f"Skipping idx entry with non-float pressure level: {e['level']}")
+                continue
+            result[lv_f] = e  # pyright: ignore[reportArgumentType]
+    return result
+
+
+def _resolve_pressure_levels(
+    requested: list[int] | None,
+    prs_map: dict[float, dict[str, str | None]],
+    var_name: str,
+) -> list[float]:
+    """Return the float pressure levels to fetch, validating against available.
+
+    Args:
+        requested (list[int] | None): List of requested pressure levels.
+        prs_map (dict[float, dict[str, str  |  None]]): Mapping from _build_prs_entry_map()
+        var_name (str): Variable name for error messages (e.g. "T", "U", "Q", etc.)
+
+    Raises:
+        ValueError: If any requested levels are not found in the available levels for that variable.
+
+    Returns:
+        list[float]: The float pressure levels to fetch.
+    """
+    if requested is None:
+        return sorted(prs_map.keys(), reverse=True)
+
+    avail = sorted(prs_map.keys())
+    resolved, missing = [], []
+    for lv in requested:
+        match = next((k for k in avail if abs(k - lv) < 0.5), None)
+        if match is None:
+            missing.append(lv)
+        else:
+            resolved.append(match)
+    if missing:
+        raise ValueError(
+            f"Pressure levels {missing} not found for '{var_name}' in .idx. "
+            f"Available: {[int(k) if k == int(k) else k for k in avail]}"
+        )
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# Native (hybrid-sigma) level helpers — wrfnat
+# ---------------------------------------------------------------------------
+
+
+def _build_nat_entry_map(
+    idx_entries: list[dict[str, str | int | None]], idx_name: str
+) -> dict[int, dict[str, str | None]]:
+    """Return ``{hybrid_level_index: idx_entry}`` for a wrfnat variable.
+
+    HRRR native-level ``.idx`` entries look like::
+
+        TMP:10 hybrid level:anl:
+
+    i.e. ``level`` ends with ``" hybrid level"`` and the prefix is the integer
+    level index (1-65, bottom-up).
+
+    Args:
+        idx_entries (list[dict[str, str  |  int  |  None]]): List of entries parsed from the .idx file.
+        idx_name (str): Name of the variable to filter for.
+
+    Returns:
+        dict[int, dict[str, str | None]]: Mapping from hybrid level index to the corresponding .idx entry for that variable.
+    """
+    result: dict[int, dict[str, str | None]] = {}
+    for e in idx_entries:
+        # If level is in the entry, it should be a string like "10 hybrid level"
+        if e["var"] == idx_name and e["level"].endswith(" hybrid level"):  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportOptionalMemberAccess]
+            try:
+                lv = int(e["level"].replace(" hybrid level", ""))  # pyright: ignore[reportAttributeAccessIssue, reportUnknownMemberType, reportUnknownArgumentType, reportOptionalMemberAccess]
+            except ValueError:
+                logging.debug(f"Skipping idx entry with non-integer hybrid level: {e['level']}")
+                continue
+            result[lv] = e  # pyright: ignore[reportArgumentType]
+    return result
+
+
+def _resolve_nat_levels(
+    requested: list[int] | None,
+    nat_map: dict[int, dict[str, str | None]],
+    var_name: str,
+) -> list[int]:
+    """Return native level indices to fetch, validating against available.
+
+    Args:
+        requested (list[int] | None): List of requested hybrid levels.
+        nat_map (dict[int, dict[str, str  |  None]]): Mapping from _build_nat_entry_map()
+        var_name (str): Variable name for error messages (e.g. "T", "U", "Q", etc.)
+
+    Raises:
+        ValueError: If any requested levels are not found in the available levels for that variable.
+
+    Returns:
+        list[int]: The integer native level indices to fetch.
+    """
+    if requested is None:
+        return sorted(nat_map.keys())
+    avail = sorted(nat_map.keys())
+    resolved, missing = [], []
+    for lv in requested:
+        if lv in avail:
+            resolved.append(lv)
+        else:
+            missing.append(lv)
+    if missing:
+        raise ValueError(f"Native levels {missing} not found for '{var_name}' in .idx. Available: {avail}")
+    return resolved
+
+
+# ---------------------------------------------------------------------------
+# Sub-hourly helpers — wrfsubh
+# ---------------------------------------------------------------------------
+
+
+def _resolve_subh_timestamp(t: pd.Timestamp) -> tuple[pd.Timestamp, int, int]:
+    """Derive effective initialization time, forecast hour (ff), and sub-hourly step (in minutes) for wrfsubh.
+
+    For sub-hourly data, a timestamp `t` is mapped to its HRRR run init time and file number:
+    - ``init_hour = t.floor("1h")``
+    - ``step_min  = minutes since init`` (15, 30, 45, 60)
+    - ``ff        = ceil(step_min / 60)`` (forecast lead hour within the run)
+    - If `t` is exactly on the hour (`step_min == 0`), it is treated as the 60-min step of
+      the previous hour's run (`init_hour -= 1h`, `step_min = 60`).
+
+    Note: sub-hourly analysis files also exist, but are not pulled with the current code.
+
+    Args:
+        t (pd.Timestamp): Target timestamp.
+
+    Returns:
+        tuple[pd.Timestamp, int, int]: (init_hour, ff, step_min)
+    """
+    init_hour = t.floor("1h")
+    step_min = int((t - init_hour).total_seconds() / 60)
+    if step_min == 0:
+        # t is on the hour → 60-min step of the previous run
+        init_hour = init_hour - pd.Timedelta("1h")
+        step_min = 60
+    ff = (step_min + 59) // 60  # ceil: 1-60 → 1, 61-120 → 2, …
+    return init_hour, ff, step_min
+
+
+def _find_subhf_entry(
+    idx_entries: list[dict[str, str | int | None]],
+    idx_name: str,
+    idx_level: str,
+    step_min: int,
+) -> dict[str, str | int | None]:
+    """Return the idx entry for a wrfsubh variable at a specific sub-step.
+
+    Sub-hourly ``.idx`` entries have a ``step`` field like ``"15 min fcst"``,
+    ``"30 min fcst"``, ``"45 min fcst"``, ``"60 min fcst"``.
+
+    Args:
+        idx_entries (list[dict[str, str  |  int  |  None]])): Parsed ``.idx`` entries for the wrfsubh file.
+        idx_name (str): Variable name as it appears in the ``.idx``.
+        idx_level (str): Level string (e.g. ``"2 m above ground"``).
+        step_min (int): Sub-step in minutes (15, 30, 45, 60, …).
+
+    Raises:
+        KeyError: If no matching entry is found.
+
+    Returns:
+        dict[str, str | int | None]: The matching .idx entry for that variable, level, and step.
+    """
+    step_str = f"{step_min} min fcst"
+    for e in idx_entries:
+        if e["var"] == idx_name and e["level"] == idx_level and e.get("step", "") == step_str:
+            return e
+    raise KeyError(
+        f"No .idx entry for '{idx_name}' at level='{idx_level}', step='{step_str}'. "
+        "Verify that the wrfsubh .idx step strings match the expected format."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Local byte-range reading (mirrors the remote HTTPS approach)
+# ---------------------------------------------------------------------------
+
+
+def _fetch_bytes_local(path: str, byte_start: int, byte_end: int | None) -> bytes:
+    """Read a byte range directly from a local GRIB2 file.
+
+    Args:
+        path (str): Absolute path to the local grib2 file.
+        byte_start (int): First byte (inclusive).
+        byte_end (int | None): Last byte (inclusive), or ``None`` to read to EOF.
+
+    Returns:
+        bytes: Raw bytes for that message.
+    """
+    with open(path, "rb") as f:
+        f.seek(byte_start)
+        if byte_end is not None:
+            return f.read(byte_end - byte_start + 1)
+        return f.read()
+
+
+def _fetch_bytes_local_batch(path: str, entries: list[dict[str, str | int | None]]) -> list[bytes]:
+    """Read multiple byte ranges directly from a local GRIB2 file.
+
+    Args:
+        path (str): Absolute path to the local grib2 file.
+        entries (list[dict]): List of entries containing byte_start and byte_end keys.
+
+    Returns:
+        list[bytes]: List of raw bytes for each message.
+    """
+    return [_fetch_bytes_local(path, entry["byte_start"], entry["byte_end"]) for entry in entries]
+
+
+def _load_idx_local(grib2_path: str) -> list[dict[str, str | int | None]]:
+    """Read and parse the ``.idx`` sidecar from local disk.
+
+    Expects the index at ``{grib2_path}.idx``.  Download it alongside the
+    grib2 with ``hrrr_download.py``.
+
+    Args:
+        grib2_path (str): Absolute path to the local grib2 file.
+
+    Raises:
+        FileNotFoundError: If the ``.idx`` file is absent.
+
+    Returns:
+        list[dict[str, str | int | None]]: Entries parsed from the .idx, in file order.
+    """
+    idx_path = grib2_path + ".idx"
+    try:
+        with open(idx_path) as f:
+            return _parse_idx(f.read())
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            f"Local .idx file not found: {idx_path}\nRe-run hrrr_download.py — it fetches the .idx alongside the grib2."
+        ) from None
+
+
+# ---------------------------------------------------------------------------
+# DataArray builders
+# ---------------------------------------------------------------------------
+
+
+def _to_float32(values: np.ndarray) -> np.ndarray:
+    """Return float32, replacing masked values with NaN.
+
+    Args:
+        values (np.ndarray): Values to convert, potentially a masked array.
+
+    Returns:
+        np.ndarray: Array with masked values filled with NaN and dtype float32.
+    """
+    if hasattr(values, "filled"):
+        # Pylance cannot currently handle the hasattr check for masked arrays, so we ignore the type issues here.
+        values = values.filled(np.nan)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType, reportAttributeAccessIssue]
+    return values.astype(np.float32)  # pyright: ignore[reportUnknownVariableType, reportUnknownMemberType]
+
+
+# ---------------------------------------------------------------------------
+# Validate the Dataset Request
+# ---------------------------------------------------------------------------
+
+
+def _validate_product_request(product_request: str) -> VALID_PRODUCTS:
+    """Validate the dataset request config, raising ValueError for invalid requests.
+
+    Args:
+        product_request (str): The HRRR product name from the config (e.g. "wrfprs", "wrfnat", "wrfsubh").
+
+    Raises:
+        ValueError: If the product is not recognized or mapped to a valid HRRR product.
+
+    Returns:
+        VALID_PRODUCTS: The validated HRRR product name.
+    """
+    # Convert to upper case for case-insensitive matching
+    product_request = product_request.lower()
+
+    if product_request not in get_args(VALID_PRODUCTS):
+        raise ValueError(f"Unknown HRRR product '{product_request}'. Valid products are: {get_args(VALID_PRODUCTS)}")
+
+    return product_request
+
+
+# ---------------------------------------------------------------------------
+# Dataset
+# ---------------------------------------------------------------------------
+
+
+class HRRRDataset(BaseDataset):
+    """CREDIT Dataset for HRRR GRIB2 data (wrfprs / wrfnat / wrfsubh).
+
+    Implements the same field-type semantics as BaseDataset:
+
+    * ``prognostic``      — input at step 0 and target (autoregressive rollout)
+    * ``dynamic_forcing`` — input at every step; never a target
+    * ``diagnostic``      — target only
+    * ``static``          — input at step 0; never a target, applies to all steps
+
+    Both modes use ``pygrib`` for GRIB2 decoding.  Remote mode fetches the
+    ``.idx`` sidecar and issues parallel HTTP Range requests — no full file
+    download required.
+
+    See module docstring for full output format, tensor shapes, and YAML
+    configuration examples.
+
+    Attributes:
+        dataset_type: Tensor key - `"HRRR"`
+        product: Active HRRR product (``"HRRR_PRS" / "wrfprs"``, ``"HRRR_NAT" / "wrfnat"``,
+            or ``"HRRR_SUBH" / "wrfsubh"``) with default value ``"HRRR_PRS"``.
+        datetimes: DatetimeIndex of valid initialization timestamps.
+        static_metadata: Dataset-level metadata for MultiSourceDataset.
+    """
+
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """Initialize HRRRDataset.
+
+        Args:
+            data_config (dict[str, Any]): Top-level ``data`` config dict.
+            return_target (bool): Whether to include a ``"target"`` key in each sample.
+        """
+        super().__init__(data_config=data_config, return_target=return_target)
+
+        if "dataset_type" not in self.curr_source_cfg:
+            raise ValueError(
+                f"Missing 'dataset_type' in config['source']['{self.curr_source_name}']. "
+                + f"Expected one of: {get_args(VALID_PRODUCTS)}"
+            )
+        self.dataset_type = self.curr_source_cfg["dataset_type"]
+
+        # The default product is "wrfprs" if not specified in the config.
+        product_request = self.curr_source_cfg.get("product", "wrfprs")
+        # Validate the product request.
+        self.product: VALID_PRODUCTS = _validate_product_request(product_request)
+
+        self.mode: str = self.curr_source_cfg.get("mode", "local")
+        # Resolve the path to allow for $USER or $SCRATCH or ~ in config
+        raw_base_path = self.curr_source_cfg.get("base_path", None)
+        self.base_path: str | None = (
+            os.path.expanduser(os.path.expandvars(raw_base_path)) if raw_base_path is not None else None
+        )
+        self.forecast_hour: int = int(self.curr_source_cfg.get("forecast_hour", 0))
+        self.extent: list[float] | None = self.curr_source_cfg.get("extent", None)
+        self.global_levels: list[int] | None = self.curr_source_cfg.get("levels", None)
+        # self.num_fetch_workers: int = int(self.curr_source_cfg.get("num_fetch_workers", _MAX_REMOTE_WORKERS))
+        self.num_decompress_workers: int = int(
+            self.curr_source_cfg.get("num_decompress_workers", _MAX_DECOMPRESS_WORKERS)
+        )
+
+        if self.mode == "local" and self.base_path is None:
+            raise ValueError(
+                f"Missing 'base_path'. A config['source']['{self.curr_source_name}']['base_path'] is required for local mode"
+            )
+
+        super().init_register_all_fields()
+
+        self.static_metadata: dict[str, Any] = {
+            "levels": self.global_levels,
+            "forecast_hour": self.forecast_hour,
+            "datetime_fmt": "unix_ns",
+        }
+
+        # Caches — all created lazily so they are fork-safe when DataLoader
+        # spins up worker processes after __init__.
+        self._idx_cache: dict[str, list[dict[str, str | int | None]]] = {}
+        self._obstore = None
+        self._spatial_slice: tuple[slice, slice] | None = None  # extent → (row, col) slices
+
+    # ------------------------------------------------------------------
+    # Dataset interface
+    # ------------------------------------------------------------------
+
+    def _get_spatial_slice(self, lats: np.ndarray, lons: np.ndarray) -> tuple[slice, slice]:
+        """Return ``(row_slice, col_slice)`` for ``self.extent``, computed once.
+
+        The HRRR grid is fixed (Lambert Conformal Conic, ~1059 × 1799), so the
+        bounding-box row/col indices for a given ``extent`` are identical for
+        every message and every timestep.  The result is cached after the first
+        call so subsequent samples pay no recomputation cost.
+
+        Args:
+            lats (np.ndarray): 2D latitude array from a decoded pygrib message.
+            lons (np.ndarray): 2D longitude array from a decoded pygrib message.
+
+        Raises:
+            ValueError: If ``self.extent`` does not intersect the HRRR domain.
+
+        Returns:
+            ``(row_slice, col_slice)`` ready for direct numpy indexing.
+            Both slices are ``slice(None)`` when ``self.extent`` is ``None``.
+        """
+        if self._spatial_slice is not None:
+            return self._spatial_slice
+
+        if self.extent is None:
+            self._spatial_slice = (slice(None), slice(None))
+        else:
+            if len(lats.shape) != 2 or len(lons.shape) != 2:
+                raise ValueError(f"Expected 2D lat/lon arrays, got shapes {lats.shape} and {lons.shape}")
+
+            if lats.shape != lons.shape:
+                raise ValueError(f"Latitude and longitude arrays have different shapes: {lats.shape} vs {lons.shape}")
+
+            min_lon, max_lon, min_lat, max_lat = self.extent
+            min_lon = (min_lon + 180.0) % 360.0 - 180.0
+            max_lon = (max_lon + 180.0) % 360.0 - 180.0
+            lon_norm = (lons + 180.0) % 360.0 - 180.0
+
+            mask = (lats >= min_lat) & (lats <= max_lat) & (lon_norm >= min_lon) & (lon_norm <= max_lon)
+
+            rows = np.where(mask.any(axis=1))[0]
+            cols = np.where(mask.any(axis=0))[0]
+
+            if rows.size == 0 or cols.size == 0:
+                raise ValueError(f"extent {self.extent} does not intersect the HRRR CONUS domain.")
+
+            self._spatial_slice = (
+                slice(int(rows[0]), int(rows[-1]) + 1),
+                slice(int(cols[0]), int(cols[-1]) + 1),
+            )
+
+        # Reached exactly once per instance (the guard above short-circuits every
+        # later call) — debugging aid, not necessarily the grid actually written
+        # to output; a regridding preblock downstream may change that, see
+        # credit.datasets.gen_2.grid_utils.
+        grid = {
+            "grid_type": "curvilinear",
+            "lat": lats[self._spatial_slice],
+            "lon": lons[self._spatial_slice],
+        }
+        self.static_metadata["grid"] = grid
+        write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+        return self._spatial_slice
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, list[str] | None] | None) -> None:
+        """Extends the _register_field method of BaseDataset to include levels and checking with HRRR VAR_REGISTRY.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            field_config (dict[str, list[str]  |  None] | None): Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If a variable in the field config is not in the HRRR VAR_REGISTRY.
+        """
+        super()._register_field(field_type, field_config)
+
+        # Add the levels to the var_dict entry
+        if field_config is not None:
+            vars_3d: list[str] = field_config.get("vars_3D") or []
+            vars_2d: list[str] = field_config.get("vars_2D") or []
+            for vname in vars_3d + vars_2d:
+                if vname not in VAR_REGISTRY:
+                    raise KeyError(f"Variable '{vname}' is not in VAR_REGISTRY. Available: {sorted(VAR_REGISTRY)}")
+
+            levels = field_config.get("levels", self.curr_source_cfg.get("levels", None))
+            self.var_dict[field_type]["levels"] = levels
+
+    def _extract_field(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t: pd.Timestamp,
+        sample: dict[str, Any],
+    ) -> None:
+        """Replace the _extract_field method of BaseDataset to implement the
+        HRRR-specific file resolution and fetching logic.
+
+        Load all variables for *field_type* at time *t* into *sample*.
+
+        Resolves the file path / URI, loads the ``.idx`` (cached), then
+        delegates to :meth:`_extract_from_idx` with the appropriate byte
+        fetcher for the current mode.
+
+        For ``wrfsubh``, *t* is a 15-min-resolution timestamp.  This method
+        derives the HRRR init time and FF file number automatically:
+
+        * ``init_hour = t.floor("1h")``
+        * ``step_min  = minutes since init`` (15, 30, 45, 60, …)
+        * ``ff        = ceil(step_min / 60)`` (file number within the run)
+        * If *t* is exactly on the hour, it is treated as the 60-min step of
+          the previous hour's run (``init_hour -= 1h``, ``step_min = 60``).
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            t (pd.Timestamp): Initialization timestamp (UTC).  For ``wrfsubh``, this is a
+                15-min-resolution timestamp like ``2024-01-01T00:15:00Z``.
+            sample (dict[str, Any]): The sample dict being built in __getitem__
+        """
+        vd = self.var_dict.get(field_type)
+        if not vd:
+            return
+
+        # ------------------------------------------------------------------
+        # Compute effective init time, FF file number, and sub-step for subhf
+        # ------------------------------------------------------------------
+        if self.product == "wrfsubh":
+            file_t, ff, step_min = _resolve_subh_timestamp(t)
+        else:
+            file_t = t
+            ff = self.forecast_hour
+            step_min = None
+
+        if self.mode == "remote":
+            # Initialize Obstore if not done yet
+            if self._obstore is None:
+                self._obstore = _start_s3_obstore(_S3_BUCKET)
+
+            s3_entry_name = _hrrr_s3_entry_name(file_t, ff, self.product)
+            if s3_entry_name not in self._idx_cache:
+                self._idx_cache[s3_entry_name] = _fetch_obstore_idx(self._obstore, s3_entry_name)
+            idx_entries = self._idx_cache[s3_entry_name]
+
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_obstore_messages(self._obstore, s3_entry_name, entries)
+
+        else:
+            assert self.base_path is not None
+            path = _hrrr_local_path(self.base_path, file_t, ff, self.product)
+            if path not in self._idx_cache:
+                self._idx_cache[path] = _load_idx_local(path)
+            idx_entries = self._idx_cache[path]
+
+            def _batch_fetcher(entries: list[dict[str, str | int | None]]) -> list[bytes]:
+                return _fetch_bytes_local_batch(path, entries)
+
+        self._extract_from_idx(field_type, idx_entries, _batch_fetcher, vd, sample, step_min=step_min)
+
+    def _extract_from_idx(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        idx_entries: list[dict[str, str | int | None]],
+        fetcher: Callable[[list[dict[str, str | int | None]]], list[bytes]],
+        vd: dict[str, list[str | int]],
+        sample: dict[str, Any],
+        step_min: int | None = None,
+    ) -> None:
+        """Shared fetch-plan → parallel byte fetch → decode → tensor pipeline.
+
+        Used by both local and remote modes.  The only difference between modes
+        is the *fetcher* callable that maps an idx entry to raw GRIB bytes.
+        Product-specific level dispatch (pressure vs hybrid-sigma vs sub-hourly)
+        is handled here based on ``self.product``.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            idx_entries (list[dict[str, str  |  int  |  None]]): Parsed ``.idx`` entries for the target file.
+            fetcher: Callable ``(entry: dict) -> bytes`` that fetches the raw
+                GRIB message for a given idx entry.
+            vd (dict[str, list[str | int]]): Variable dict (``vars_3D``, ``vars_2D``, ``levels``).
+            sample (dict[str, Any]): Output dict to populate in-place.
+            step_min (int | None): Sub-hourly step in minutes (15, 30, 45, 60, …).  Only
+                used when ``self.product == "wrfsubh"``.
+        """
+        try:
+            import pygrib  # noqa: PLC0415 # pyright: ignore[reportMissingTypeStubs]
+        except ImportError as exc:
+            raise ImportError("pygrib is required: pip install pygrib") from exc
+
+        t_start_idx = time.perf_counter()
+
+        levels = vd["levels"]
+
+        # ------------------------------------------------------------------
+        # wrfsubh — surface-only product, 3D vars not supported
+        # ------------------------------------------------------------------
+        if self.product == "wrfsubh":
+            if vd["vars_3D"]:
+                raise ValueError(f"wrfsubh is a surface-only product; vars_3D is not supported. Got: {vd['vars_3D']}")
+            if step_min is None:
+                raise ValueError("step_min is required for wrfsubh extraction")
+
+        # ------------------------------------------------------------------
+        # Build fetch plan: list of (var_name, is_3d, level_value|None, entry)
+        # ------------------------------------------------------------------
+        fetch_plan: list[tuple[str, bool, int | None, dict[str, str | int | None]]] = []
+
+        for vname in vd["vars_3D"]:
+            reg = VAR_REGISTRY[vname]
+            if self.product == "wrfnat":
+                nat_map = _build_nat_entry_map(idx_entries, reg["idx_name"])
+                for lv in _resolve_nat_levels(levels, nat_map, vname):
+                    fetch_plan.append((vname, True, lv, nat_map[lv]))
+            else:
+                # wrfprs (default pressure-level path)
+                prs_map = _build_prs_entry_map(idx_entries, reg["idx_name"])
+                for lv in _resolve_pressure_levels(levels, prs_map, vname):
+                    fetch_plan.append((vname, True, lv, prs_map[lv]))
+
+        for vname in vd["vars_2D"]:
+            reg = VAR_REGISTRY[vname]
+            if self.product == "wrfsubh":
+                entry = _find_subhf_entry(
+                    idx_entries,
+                    reg["idx_name"],
+                    reg["idx_level"],
+                    step_min,  # type: ignore[arg-type]
+                )
+            else:
+                matching = [e for e in idx_entries if e["var"] == reg["idx_name"] and e["level"] == reg["idx_level"]]
+                if not matching:
+                    raise KeyError(
+                        f"No .idx entry for '{vname}' (idx_name='{reg['idx_name']}', idx_level='{reg['idx_level']}')"
+                    )
+                entry = matching[0]
+            fetch_plan.append((vname, False, None, entry))
+
+        # ------------------------------------------------------------------
+        # Fetch all messages, then decode.
+        #
+        # Remote mode: ThreadPoolExecutor issues HTTP Range requests in
+        #   parallel.  Each request has ~200 ms network latency, so parallelism
+        #   provides a large speedup (30 sequential = ~6 s vs ~200 ms parallel).
+        #
+        # Local mode: disk seeks + reads are cheap and largely sequential at
+        #   the OS level.  Thread overhead outweighs any gain, so we read
+        #   sequentially.  Note that DataLoader num_workers already provides
+        #   process-level parallelism across samples in local mode.
+        # ------------------------------------------------------------------
+        t_start_fetch = time.perf_counter()
+        entries = [task[3] for task in fetch_plan]
+        raw_messages = fetcher(entries)
+        t_end_fetch = time.perf_counter()
+
+        t_start_decode = time.perf_counter()
+        decoded = [pygrib.fromstring(raw) for raw in raw_messages]
+        t_end_decode = time.perf_counter()
+
+        # ------------------------------------------------------------------
+        # Compute the spatial slice once from the first message's lat/lon grid.
+        # The HRRR grid is fixed, so this result is cached for subsequent calls.
+        # ------------------------------------------------------------------
+        t_start_slice = time.perf_counter()
+        if self._spatial_slice is None:
+            lats, lons = decoded[0].latlons()
+            row_sl, col_sl = self._get_spatial_slice(lats, lons)
+        else:
+            row_sl, col_sl = self._spatial_slice
+        t_end_slice = time.perf_counter()
+
+        # ------------------------------------------------------------------
+        # Group decoded arrays by variable name and build tensors
+        # ------------------------------------------------------------------
+        t_start_decompress = time.perf_counter()
+        arrs_3d: dict[str, list[np.ndarray]] = defaultdict(list)
+        lvls_3d: dict[str, list] = defaultdict(list)
+        arr_2d: dict[str, np.ndarray] = {}
+
+        def _decompress_one_variable(plan_data_pair):
+            (vname, is_3d, lv, _), msg = plan_data_pair
+            arr = _to_float32(msg.values[row_sl, col_sl])
+            return vname, is_3d, lv, arr
+
+        n_workers = min(len(fetch_plan), self.num_decompress_workers)
+        if n_workers == 1:
+            logger.debug("Only 1 worker available for decompressing, skipping multithreading.")
+            results = [_decompress_one_variable(pair) for pair in zip(fetch_plan, decoded)]
+        else:
+            with ThreadPoolExecutor(max_workers=n_workers) as executor:
+                results = list(executor.map(_decompress_one_variable, zip(fetch_plan, decoded)))
+
+        for vname, is_3d, lv, arr in results:
+            if is_3d:
+                arrs_3d[vname].append(arr)
+                lvls_3d[vname].append(lv)
+            else:
+                arr_2d[vname] = arr
+        t_end_decompress = time.perf_counter()
+
+        t_start_tensor = time.perf_counter()
+        for vname in vd["vars_3D"]:
+            stacked = np.stack(arrs_3d[vname])  # (n_levels, y, x)
+            vname_key = self._get_field_name(field_type, "3d", vname)
+            sample[vname_key] = torch.tensor(stacked, dtype=torch.float32).unsqueeze(1)
+
+        for vname in vd["vars_2D"]:
+            vname_key = self._get_field_name(field_type, "2d", vname)
+            sample[vname_key] = torch.tensor(arr_2d[vname], dtype=torch.float32).unsqueeze(0).unsqueeze(0)
+        t_end_tensor = time.perf_counter()
+
+        t_end_idx = time.perf_counter()
+        logger.debug(
+            f"[PROFILE] _extract_from_idx for {vname_key} ({field_type}, mode={self.mode}):\n        "
+            f"plan={t_start_fetch - t_start_idx:.3f}s | "
+            f"fetch={t_end_fetch - t_start_fetch:.3f}s | "
+            f"decode={t_end_decode - t_start_decode:.3f}s | "
+            f"slice={t_end_slice - t_start_slice:.3f}s | "
+            f"decompress={t_end_decompress - t_start_decompress:.3f}s | "
+            f"tensor={t_end_tensor - t_start_tensor:.3f}s | "
+            f"total={t_end_idx - t_start_idx:.3f}s"
+        )

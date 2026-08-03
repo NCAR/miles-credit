@@ -32,6 +32,7 @@ from credit.cli import (
     _build_rollout_pbs_script,
     _print_ensemble_rollout_plan,
     _find_torchrun,
+    _resolve_torchrun,
     _is_ncar_system,
     _build_channel_map,
     _agent_read_file,
@@ -446,6 +447,30 @@ class TestBuildPbsScript:
         args = _casper_args(torchrun="/usr/bin/torchrun")
         script = _build_pbs_script(args, "/cfg.yml", "/my/repo")
         assert "/my/repo" in script
+
+
+# ===========================================================================
+# TestResolveTorchrun
+# ===========================================================================
+
+
+class TestResolveTorchrun:
+    def test_bare_name_resolves_via_conda_base(self):
+        # A bare env name must NOT be treated as a CWD-relative directory
+        # (the repo's ``credit/`` package dir made ``conda: credit`` yield a
+        # bogus ``credit/bin/torchrun``); it resolves at runtime instead.
+        assert _resolve_torchrun("credit") == "$(conda info --base)/envs/credit/bin/torchrun"
+
+    def test_bare_name_ignores_matching_cwd_dir(self, monkeypatch, tmp_path):
+        (tmp_path / "credit").mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_torchrun("credit") == "$(conda info --base)/envs/credit/bin/torchrun"
+
+    def test_full_path_used_directly(self):
+        assert _resolve_torchrun("/opt/envs/credit") == "/opt/envs/credit/bin/torchrun"
+
+    def test_none_falls_back_to_find_torchrun(self):
+        assert _resolve_torchrun(None) == _find_torchrun()
 
 
 # ===========================================================================

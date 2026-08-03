@@ -6,7 +6,7 @@ CONUS 404-based and FastEddy-based limited area models have been added to credit
 
 ## RAL GWC AI model updates
 
-* The following scripts are added to `credit.datasets`
+* The following scripts are added to `credit.datasets.gen_1`
 ```
 les_singlestep.py # single-step training  / inference datasets for FastEddy data
 wrf_singlestep.py # single-step training / inference datasets for the CONUS 404 data

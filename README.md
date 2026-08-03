@@ -22,13 +22,14 @@ to be under active development. Please contact [the MILES group](mailto:milescor
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads your
 files, runs shell commands, iterates until it has a confident answer) when an Anthropic key
-is available, or falls back to simple chat (Groq/Gemini/OpenAI) otherwise.
+is available, or falls back to simple chat (Groq, OpenRouter, Gemini, or OpenAI) otherwise.
 
 ```bash
 pip install "miles-credit[ask]"
 
-# Free — no card needed
-export GROQ_API_KEY=gsk_...        # https://console.groq.com
+# Free — no card needed (pick either)
+export GROQ_API_KEY=gsk_...          # https://console.groq.com
+export OPENROUTER_API_KEY=sk-or-...  # https://openrouter.ai
 
 # Or use your own Anthropic key for full agent mode (~$0.01–0.05/session)
 export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
@@ -36,6 +37,16 @@ export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
 credit ask "why is my loss not decreasing?"
 credit ask -c my_run.yml "why did my training run crash?"
 ```
+
+The assistant picks the first provider with an available API key. Supported keys:
+
+| Env var | Provider / model | Mode |
+|---------|------------------|------|
+| `ANTHROPIC_API_KEY` | Anthropic (Claude) | full agent mode |
+| `GROQ_API_KEY` | Groq (Llama 3, free) | simple chat |
+| `OPENROUTER_API_KEY` | OpenRouter (Qwen3-Next-80B, free) | simple chat |
+| `GOOGLE_API_KEY` | Google (Gemini) | simple chat |
+| `OPENAI_API_KEY` | OpenAI (GPT-4o) | simple chat |
 
 See the [AI Assistant documentation](https://miles-credit.readthedocs.io/en/latest/agent.html) for the full reference.
 

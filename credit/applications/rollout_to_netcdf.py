@@ -32,8 +32,8 @@ import pandas as pd
 import torch
 import xarray as xr
 
-from credit.datasets.local import LocalDataset
-from credit.datasets.channel_layout import build_channel_layout, update_x
+from credit.datasets.gen_2.local import LocalDataset
+from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -224,7 +224,7 @@ def predict(rank, world_size, conf, p):
     forecast_steps = conf["predict"].get("forecast_steps", conf["predict"].get("days", 1) * (24 // lead_time_periods))
 
     # ---- Preblocks ----
-    preblocks = build_preblocks(conf.get("preblocks", {}))
+    preblocks = build_preblocks(conf)
 
     # ---- Inverse normalization ----
     denorm_mean, denorm_std = _build_output_denorm(conf, device)

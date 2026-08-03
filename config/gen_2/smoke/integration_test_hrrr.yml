@@ -17,7 +17,6 @@ seed: 1000
 
 
 # ---- USER SETTINGS: training data ---- #
-# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
 data:
   source:
     Example_HRRR:
@@ -42,6 +41,7 @@ data:
         # Static: time-invariant inputs (not predicted)
         static:
           vars_2D: [ 'orog' ]
+      
       # [lon_min, lon_max, lat_min, lat_max]
       extent: [-106.0, -104.5, 39.5, 41.0]  # Prime numbers of data points: 59 lat × 47 lon
 
@@ -59,18 +59,13 @@ data:
       # Extent to match the one above
       extent: [-106.0, -104.5, 39.5, 41.0]
 
+  # Dates follow ISO 8601: "YYYY-MM-DD".
   start_datetime: "2025-01-01"
   end_datetime: "2025-01-02"
   timestep: "1h"
 
   # history_len: 1            # number of past states fed as input
   forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
-
-  # one_shot: True
-  # lead_time_periods: 1
-  # skip_periods: null
-  # static_first: True
-  # scaler_type: 'std_new'
 
 
 # ---- USER SETTINGS: validation data ---- #
@@ -82,38 +77,52 @@ validation_data:
 # ---- USER SETTINGS: preblocks/postblocks before/after passed to model ---- #
 
 preblocks:
-
-  pressure_log_transform:
-    type: "log_transform"
-    args:
-      variables:
-        - 'Example_HRRR/prognostic/2d/sp'
-      data_types:
-        - 'input'
-        - 'target'
-
-  q_sqrt_transform:
-      type: "sqrt_transform"
+  per_step:
+    pressure_log_transform:
+      type: "log_transform"
       args:
-          variables:
-                - 'Example_HRRR/prognostic/3d/Q'
-          data_types:
-            - 'input'
-            - 'target'
+        variables:
+          - 'Example_HRRR/prognostic/2d/sp'
+        data_types:
+          - 'input'
+          - 'target'
 
-  vars_concat:
-    type: "concat"
+    q_sqrt_transform:
+        type: "sqrt_transform"
+        args:
+            variables:
+                  - 'Example_HRRR/prognostic/3d/Q'
+            data_types:
+              - 'input'
+              - 'target'
+
+    scaler:
+      # please run `credit preprocess` before `credit train`
+      type: "bridgescaler_transform"
+      args:
+        variables: []
+        scaler_path: "/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/scaler_quantile.json"
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+
+    vars_concat:
+      type: "concat"
 
 postblocks:
-  reconstruct:
-    type: "reconstruct"
+  per_step:
+    reconstruct:
+      type: "reconstruct"
 
 # ---- USER SETTINGS: training hyperparameters ---- #
 trainer:
-  type: era5-gen2           # use the v2 trainer (new nested data schema)
+  type: gen2                # use the v2 trainer (new nested data schema)
 
-  mode: "none"              # none | ddp | fsdp  (ddp recommended for multi-GPU)
-  cpu_offload: False
+  parallelism:
+    data: none              # none | ddp | fsdp2
+    tensor: 1
+    domain: 1
+
   activation_checkpoint: True
 
   load_weights: False     # set True to resume from checkpoint
@@ -122,7 +131,7 @@ trainer:
   load_scheduler: False
   reload_epoch: False
 
-  skip_validation: False
+  skip_validation: True
   update_learning_rate: False
 
   save_backup_weights: True
@@ -134,13 +143,13 @@ trainer:
   train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
   valid_batch_size: 8
 
-  batches_per_epoch: 0    # 0 = use full dataset each epoch
+  batches_per_epoch: 5    # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 2            # epochs per qsub job (checkpoint after each)
-  epochs: &epochs 70      # total training target
+  # num_epoch: 2            # epochs per qsub job (checkpoint after each)
+  epochs: &epochs 3      # total training target
 
   use_tensorboard: True
   use_ema: True           # exponential moving average of weights for validation
@@ -221,29 +230,55 @@ loss:
   use_variable_weights: False
 
 
-# ---- Inference / predict (used by predict scripts, not training) ---- #
-predict:
-  mode: ddp
-  batch_size: 8
-  ensemble_size: 1
-  forecasts:
-    type: "custom"
-    start_year: 2025
-    start_month: 1
-    start_day: 1
-    start_hours: [ 0, 12 ]
-    duration: 1
-    days: 1
-  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
-  use_laplace_filter: False
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: single                   # batch | single
+  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/gen2_integration_test_hrrr/rollout/'
+  num_save_workers: 4               # async write pool size (0 = synchronous)
 
-pbs: #derecho
-  conda: "credit-derecho"
+  batch_forecast:                   # active when run_mode: batch
+    length: "1d"                    # forecast duration per init (e.g. "10d", "1m", "1y")
+    initialization:
+      start_date: "2025-01-01"      # first init date (inclusive), ISO 8601
+      end_date: "2025-01-01"        # last init date (inclusive)
+      date_interval: "1d"           # step between init dates (e.g. "1d", "7d")
+      times: ["00:00", "12:00"]     # UTC init times each day (HH:MM)
+
+  single_forecast:                  # active when run_mode: single
+    length: "3d"                   # forecast duration
+    start_datetime: "2025-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_freq: null               # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      default:                      # applies to all variables
+        dtype: float32
+        zlib: true
+        complevel: 4                # 1 (fast) to 9 (small)
+
+# pbs: #derecho
+#   conda: "credit-derecho"
+#   project: "NAML0001"
+#   job_name: "credit_integration_test_hrrr_gen2"
+#   walltime: "01:00:00"
+#   nodes: 8
+#   ncpus: 64
+#   ngpus: 4
+#   mem: '480GB'
+#   queue: 'main'
+
+pbs: #casper
+  conda: "credit"
   project: "NAML0001"
   job_name: "credit_integration_test_hrrr_gen2"
-  walltime: "01:00:00"
-  nodes: 8
-  ncpus: 64
-  ngpus: 4
-  mem: '480GB'
+  walltime: "08:00:00"
+  nodes: 1
+  ngpus: 1
+  ncpus: 4
+  mem: '12GB'
   queue: 'main'

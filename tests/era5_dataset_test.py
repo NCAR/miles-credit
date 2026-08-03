@@ -1,7 +1,7 @@
 """
 era5_dataset_test.py
 --------------------
-Tests for LocalDataset (credit.datasets.local) and ARCOERA5Dataset (credit.datasets.era5).
+Tests for LocalDataset (credit.datasets.gen_2.local) and ARCOERA5Dataset (credit.datasets.gen_2.era5).
 
 Dataset output format
 ---------------------------------
@@ -27,9 +27,15 @@ import pytest
 import torch
 from torch.utils.data import DataLoader
 
-from credit.datasets.local import LocalDataset
-from credit.datasets.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
+from credit.datasets.gen_2.local import LocalDataset
+from credit.datasets.gen_2.era5 import ARCOERA5Dataset, WeatherBench2ERA5Dataset
+from credit.datasets.gen_2.grid_utils import GridSchema
 from credit.samplers import DistributedMultiStepBatchSampler
+
+# Captured at import time, before any test monkeypatches xr.open_dataset — used
+# to read back real files (e.g. GridSchema.load) from within a test that also
+# fakes xr.open_dataset for the dataset's own fake in-memory files.
+_REAL_OPEN_DATASET = xr.open_dataset
 
 
 # ---------------------------------------------------------------------------
@@ -89,11 +95,11 @@ def patch_era5_io_multiyear(
     """
 
     def fake_glob(pattern: str) -> list[str]:
-        if pattern == "/fake/*.zarr":
+        if pattern == "/fake/era5_*.zarr":
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
-    monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset.glob", fake_glob)
 
     def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
@@ -115,11 +121,11 @@ def patch_refactor_io_multiyear(
     """
 
     def fake_glob(pattern: str) -> list[str]:
-        if pattern == "/fake/*.zarr":
+        if pattern == "/fake/era5_*.zarr":
             return ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"]
         raise ValueError(f"Unexpected glob pattern: {pattern}")
 
-    monkeypatch.setattr("credit.datasets.base_dataset.glob", fake_glob)
+    monkeypatch.setattr("credit.datasets.gen_2.base_dataset.glob", fake_glob)
 
     def fake_open_dataset(path: str) -> xr.Dataset:
         for year in (2022, 2023):
@@ -148,19 +154,19 @@ def minimal_config() -> dict[str, Any]:
                     "prognostic": {
                         "vars_3D": ["T", "U"],
                         "vars_2D": ["SP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "dynamic_forcing": {
                         "vars_2D": ["tsi"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "static": {
                         "vars_2D": ["LSM"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                     "diagnostic": {
                         "vars_2D": ["TP"],
-                        "path": "/fake/*.zarr",
+                        "path": "/fake/era5_%Y.zarr",
                     },
                 },
             }
@@ -403,6 +409,126 @@ def test_refactor_static_metadata(minimal_config: dict[str, Any], patch_refactor
     assert hasattr(ds, "static_metadata")
     assert ds.static_metadata["levels"] == minimal_config["source"]["Test_ERA5"]["levels"]
     assert ds.static_metadata["datetime_fmt"] == "unix_ns"
+
+
+def test_static_metadata_grid_found_from_real_coords(
+    minimal_config: dict[str, Any],
+    patch_refactor_io_multiyear: dict[int, xr.Dataset],
+    monkeypatch: pytest.MonkeyPatch,
+    annual_xr_dataset: dict[int, xr.Dataset],
+):
+    """LocalDataset._find_grid should populate static_metadata['grid'] from the
+    real (rectilinear) lat/lon in the source files — not fabricated."""
+    # _find_grid uses local.py's own `glob` binding (`from glob import glob`),
+    # separate from base_dataset.glob patched by patch_refactor_io_multiyear.
+    monkeypatch.setattr(
+        "credit.datasets.gen_2.local.glob",
+        lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"],
+    )
+
+    # _find_grid passes engine=... (may be None); the fixture's fake_open_dataset
+    # only accepts a bare path, so re-patch with a kwarg-tolerant wrapper.
+    def fake_open_dataset(path: str, **kwargs) -> xr.Dataset:
+        for year in (2022, 2023):
+            if str(year) in path:
+                return annual_xr_dataset[year]
+        raise ValueError(f"Unexpected path: {path}")
+
+    monkeypatch.setattr(xr, "open_dataset", fake_open_dataset)
+
+    ds: LocalDataset = LocalDataset(minimal_config, return_target=False)
+
+    grid = ds.static_metadata["grid"]
+    assert grid is not None
+    assert grid["grid_type"] == "rectilinear"
+    np.testing.assert_allclose(grid["lat"], annual_xr_dataset[2022]["latitude"].values)
+    np.testing.assert_allclose(grid["lon"], annual_xr_dataset[2022]["longitude"].values)
+
+
+@pytest.mark.parametrize(
+    ("grid_layout", "expected_grid_type"),
+    [("shared_dim", "unstructured"), ("same_length_fallback", "unstructured")],
+)
+def test_local_find_grid_detects_unstructured_layout(tmp_path, monkeypatch, grid_layout, expected_grid_type):
+    """_find_grid detects both the shared-dimension and weaker same-length paths."""
+    path = tmp_path / f"{grid_layout}.nc"
+    values = np.arange(4, dtype=np.float32)
+    if grid_layout == "shared_dim":
+        ds = xr.Dataset(
+            {"T": ("ncol", values)},
+            coords={"lat": ("ncol", [10.0, 20.0, 30.0, 40.0]), "lon": ("ncol", values)},
+        )
+    else:
+        ds = xr.Dataset(
+            {"T": (("lat_dim", "lon_dim"), np.arange(16, dtype=np.float32).reshape(4, 4))},
+            coords={
+                "lat": ("lat_dim", [10.0, 20.0, 30.0, 40.0]),
+                "lon": ("lon_dim", values),
+            },
+        )
+    ds.to_netcdf(path)
+
+    monkeypatch.setattr("credit.datasets.gen_2.local.glob", lambda pattern: [str(path)])
+    dataset = LocalDataset.__new__(LocalDataset)
+    dataset.curr_source_name = "Test_Local"
+    dataset.save_loc = None
+    dataset.level_coord = "level"
+    dataset.levels = None
+
+    grid = dataset._find_grid({"variables": {"prognostic": {"path": str(path)}}})
+
+    assert grid["grid_type"] == expected_grid_type
+    np.testing.assert_array_equal(grid["lat"], [10.0, 20.0, 30.0, 40.0])
+
+
+def test_local_read_3d_array_rejects_nonleading_level_dimension():
+    """_read_3d_array rejects variables whose level dimension is not first."""
+    dataset = LocalDataset.__new__(LocalDataset)
+    dataset.curr_source_name = "Test_Local"
+    dataset.level_coord = "level"
+    dataset.levels = [1000, 500]
+    dataset.static_metadata = {}
+    ds = xr.Dataset(
+        {"T": (("lat", "level", "lon"), np.zeros((2, 2, 3), dtype=np.float32))},
+        coords={"level": [1000, 500], "lat": [0.0, 1.0], "lon": [0.0, 1.0, 2.0]},
+    )
+
+    with pytest.raises(ValueError, match="must be first"):
+        dataset._read_3d_array(ds, "T")
+
+
+def test_grid_schema_written_to_save_loc(
+    minimal_config: dict[str, Any],
+    patch_refactor_io_multiyear: dict[int, xr.Dataset],
+    monkeypatch: pytest.MonkeyPatch,
+    annual_xr_dataset: dict[int, xr.Dataset],
+    tmp_path,
+):
+    """LocalDataset should best-effort persist its native grid to
+    {save_loc}/{source}_grid_schema.nc the moment it's found — this is what
+    makes the file reliably available regardless of DataLoader num_workers."""
+    monkeypatch.setattr(
+        "credit.datasets.gen_2.local.glob",
+        lambda pattern: ["/fake/era5_2022.zarr", "/fake/era5_2023.zarr"],
+    )
+
+    def fake_open_dataset(path, **kwargs) -> xr.Dataset:
+        for year in (2022, 2023):
+            if isinstance(path, str) and str(year) in path:
+                return annual_xr_dataset[year]
+        return _REAL_OPEN_DATASET(path, **kwargs)  # real file (e.g. GridSchema.load below)
+
+    monkeypatch.setattr(xr, "open_dataset", fake_open_dataset)
+
+    cfg = {**minimal_config, "save_loc": str(tmp_path)}
+    LocalDataset(cfg, return_target=False)
+
+    path = tmp_path / "Test_ERA5_grid_schema.nc"
+    assert path.is_file()
+    schema = GridSchema.load(str(path))
+    assert schema.grid_type == "rectilinear"
+    np.testing.assert_allclose(schema.lat, annual_xr_dataset[2022]["latitude"].values)
+    np.testing.assert_allclose(schema.lon, annual_xr_dataset[2022]["longitude"].values)
 
 
 def test_refactor_null_diagnostic(

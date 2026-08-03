@@ -3,7 +3,7 @@ import xarray as xr
 import numpy as np
 import logging
 
-from credit.losses.base_losses import base_losses
+from credit.losses import _instantiate_loss
 from credit.losses.spectral import SpectralLoss2D
 from credit.losses.power import PSDLoss
 
@@ -28,7 +28,7 @@ def latitude_weights(conf):
     """
     # Open the dataset and extract latitude and longitude information
     ds = xr.open_dataset(conf["loss"]["latitude_weights"])
-    lat = torch.from_numpy(ds["latitude"].values).float()
+    lat = torch.tensor(ds["latitude"].values, dtype=torch.float32)
     lon_dim = ds["longitude"].shape[0]
 
     # Calculate weights using PyTorch operations
@@ -153,7 +153,8 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         self.lat_weights = None
         if conf["loss"]["use_latitude_weights"]:
-            logger.info("Using latitude weights in loss calculations")
+            mode = "validation" if validation else "train"
+            logger.info("Using latitude weights in loss calculations (%s)", mode)
             self.lat_weights = latitude_weights(conf)[:, 10].unsqueeze(0).unsqueeze(-1)
 
         # ------------------------------------------------------------- #
@@ -186,14 +187,30 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         self.validation = validation
         if conf["loss"]["training_loss"] == "KCRPS":  # for ensembles, load same loss for train and valid
-            self.loss_fn = base_losses(conf, reduction="none", validation=False)
+            self.loss_fn = _instantiate_loss(conf, reduction="none", validation=False)
         elif self.validation:
             if "validation_loss" in conf["loss"]:
-                self.loss_fn = base_losses(conf, reduction="none", validation=True)
+                self.loss_fn = _instantiate_loss(conf, reduction="none", validation=True)
             else:
                 self.loss_fn = torch.nn.L1Loss(reduction="none")
         else:
-            self.loss_fn = base_losses(conf, reduction="none", validation=False)
+            self.loss_fn = _instantiate_loss(conf, reduction="none", validation=False)
+
+    def _lat_weights_for_target(self, target):
+        """Sharded, device-resident latitude weights, cached per (H, device).
+
+        The shard and the host-to-device copy are invariant for a run, so
+        caching avoids re-doing both on every criterion call.
+        """
+        if self.lat_weights is None:
+            return None
+        from credit.parallel.domain import shard_lat_weights
+
+        key = (target.shape[-2], target.device)
+        if getattr(self, "_lat_w_key", None) != key:
+            self._lat_w_cached = shard_lat_weights(self.lat_weights, target.shape[-2]).to(device=target.device)
+            self._lat_w_key = key
+        return self._lat_w_cached
 
     def forward(self, target, pred):
         """Calculate the total loss for the given target and prediction.
@@ -212,17 +229,21 @@ class VariableTotalLoss2D(torch.nn.Module):
         """
         # User defined loss
         loss = self.loss_fn(target, pred)
+        lat_weights = self._lat_weights_for_target(target)
+        if lat_weights is not None:
+            lat_weights = lat_weights.to(dtype=loss.dtype)
+        var_weights = self.var_weights.to(target.device) if self.var_weights is not None else None
 
         # Latitutde and variable weights
         loss_dict = {}
         for i, var in enumerate(self.vars):
             var_loss = loss[:, i]
 
-            if self.lat_weights is not None:
-                var_loss = torch.mul(var_loss, self.lat_weights.to(target.device))
+            if lat_weights is not None:
+                var_loss = torch.mul(var_loss, lat_weights)
 
-            if self.var_weights is not None:
-                var_loss *= self.var_weights[i].to(target.device)
+            if var_weights is not None:
+                var_loss *= var_weights[i]
 
             loss_dict[f"loss_{var}"] = var_loss.mean()
 
@@ -230,9 +251,9 @@ class VariableTotalLoss2D(torch.nn.Module):
 
         # Add the spectral loss
         if not self.validation and self.use_power_loss:
-            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=self.lat_weights)
+            loss += self.power_lambda_reg * self.power_loss(target, pred, weights=lat_weights)
 
         if not self.validation and self.use_spectral_loss:
-            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=self.lat_weights).mean()
+            loss += self.spectral_lambda_reg * self.spectral_loss_surface(target, pred, weights=lat_weights).mean()
 
         return loss

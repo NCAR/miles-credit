@@ -198,6 +198,302 @@ class TestDerechoMultiNode:
 
 
 # ---------------------------------------------------------------------------
+# SLURM script generation
+# ---------------------------------------------------------------------------
+
+
+def _slurm_args(nodes=1, gpus=4, **kw):
+    from credit.cli import _resolve_slurm_opts
+
+    defaults = dict(
+        cluster="genericslurm",
+        scheduler="slurm",
+        nodes=nodes,
+        gpus=gpus,
+        cpus=None,
+        mem=None,
+        walltime=None,
+        queue=None,
+        gpu_type=None,
+        constraint=None,
+        qos=None,
+        torchrun=None,
+        conda_env=None,
+        account=None,
+    )
+    slurm_cfg = kw.pop("slurm_cfg", {"conda": "/my/env", "project": FAKE_ACCOUNT, "partition": "gpu"})
+    defaults.update(kw)
+    return _resolve_slurm_opts(argparse.Namespace(**defaults), slurm_cfg)
+
+
+def _slurm_script(nodes=1, depend_on=None, **kw):
+    from credit.cli import _build_slurm_script
+
+    return _build_slurm_script(
+        _slurm_args(nodes=nodes, **kw),
+        FAKE_CONFIG,
+        FAKE_REPO,
+        depend_on=depend_on,
+    )
+
+
+class TestSlurmScript:
+    def test_shebang_and_sbatch_directives(self):
+        script = _slurm_script()
+        assert script.startswith("#!/bin/bash -l")
+        assert "#SBATCH --job-name=" in script
+        assert "#SBATCH --partition=gpu" in script
+        assert "#SBATCH --time=" in script
+        assert "#PBS" not in script
+
+    def test_account_from_config(self):
+        assert f"#SBATCH --account={FAKE_ACCOUNT}" in _slurm_script()
+
+    def test_no_account_directive_when_unset(self):
+        script = _slurm_script(slurm_cfg={"conda": "/my/env", "partition": "gpu"})
+        assert "#SBATCH --account=" not in script
+
+    def test_gres_default_no_type(self):
+        assert "#SBATCH --gres=gpu:2" in _slurm_script(gpus=2)
+
+    def test_gres_with_gpu_type(self):
+        script = _slurm_script(slurm_cfg={"conda": "/my/env", "gpu_type": "a100", "ngpus": 4, "partition": "gpu"})
+        assert "#SBATCH --gres=gpu:a100:4" in script
+
+    def test_single_node_uses_standalone(self):
+        script = _slurm_script(nodes=1)
+        assert "--standalone" in script
+        assert "srun" not in script
+
+    def test_multi_node_uses_srun_and_rendezvous(self):
+        script = _slurm_script(nodes=2)
+        assert "--standalone" not in script
+        assert "srun " in script
+        assert "--rdzv-backend=c10d" in script
+        assert "scontrol show hostnames" in script
+        assert "#SBATCH --nodes=2" in script
+
+    def test_config_path_in_script(self):
+        assert FAKE_CONFIG in _slurm_script()
+
+    def test_conda_activate_in_script(self):
+        assert "conda activate /my/env" in _slurm_script()
+
+    def test_modules_loaded_when_configured(self):
+        script = _slurm_script(slurm_cfg={"conda": "/my/env", "partition": "gpu", "modules": ["cuda/12.3", "gcc"]})
+        assert "module load cuda/12.3 gcc" in script
+
+    def test_depends_line_present_when_provided(self):
+        script = _slurm_script(depend_on="12345")
+        assert "#SBATCH --dependency=afterok:12345" in script
+
+    def test_depends_line_absent_when_none(self):
+        assert "dependency=afterok" not in _slurm_script(depend_on=None)
+
+
+class TestSlurmRealtimeAndPreprocess:
+    def test_realtime_has_init_and_steps(self):
+        from credit.cli import _build_realtime_slurm_script
+
+        script = _build_realtime_slurm_script(_slurm_args(), FAKE_CONFIG, FAKE_REPO, "2024-01-15T00", 40)
+        assert "--init-time 2024-01-15T00" in script
+        assert "--steps 40" in script
+        assert "rollout_realtime_gen2.py" in script
+
+    def test_preprocess_targets_preprocess_app(self):
+        from credit.cli import _build_preprocess_slurm_script
+
+        script = _build_preprocess_slurm_script(_slurm_args(), FAKE_CONFIG, FAKE_REPO)
+        assert "preprocess.py" in script
+        assert "#SBATCH" in script
+
+    def test_rollout_job_name_includes_subset(self):
+        from credit.cli import _build_rollout_slurm_script
+
+        script = _build_rollout_slurm_script(_slurm_args(), FAKE_CONFIG, FAKE_REPO, subset=3, n_subsets=10)
+        assert "03of10" in script
+        assert "rollout_gen2.py" in script
+
+
+class TestResolveSlurmOpts:
+    def _base(self, **kw):
+        defaults = dict(
+            cluster="genericslurm",
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            constraint=None,
+            qos=None,
+            torchrun=None,
+            conda_env=None,
+            account=None,
+        )
+        defaults.update(kw)
+        return argparse.Namespace(**defaults)
+
+    def test_defaults_filled(self):
+        from credit.cli import _resolve_slurm_opts
+
+        args = _resolve_slurm_opts(self._base(), {})
+        assert args.gpus == 4
+        assert args.cpus == 8
+        assert args.mem == "128GB"
+        assert args.partition == "gpu"
+        assert args.walltime == "12:00:00"
+
+    def test_queue_maps_to_partition(self):
+        from credit.cli import _resolve_slurm_opts
+
+        args = _resolve_slurm_opts(self._base(queue="gpu-a100"), {})
+        assert args.partition == "gpu-a100"
+
+    def test_config_partition_used(self):
+        from credit.cli import _resolve_slurm_opts
+
+        args = _resolve_slurm_opts(self._base(), {"partition": "regular"})
+        assert args.partition == "regular"
+
+    def test_cli_flag_overrides_config(self):
+        from credit.cli import _resolve_slurm_opts
+
+        args = _resolve_slurm_opts(self._base(gpus=8, queue="fast"), {"ngpus": 2, "partition": "slow"})
+        assert args.gpus == 8
+        assert args.partition == "fast"
+
+
+class TestSlurmPerlmutter:
+    """Perlmutter (NERSC) needs -C gpu / -q / --gpus-per-node instead of --gres."""
+
+    def _pm_args(self, **kw):
+        from credit.cli import _resolve_slurm_opts
+
+        defaults = dict(
+            cluster="perlmutter",
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            constraint=None,
+            qos=None,
+            torchrun=None,
+            conda_env=None,
+            account="m1234",
+        )
+        slurm_cfg = kw.pop("slurm_cfg", {"conda": "/my/env"})
+        defaults.update(kw)
+        return _resolve_slurm_opts(argparse.Namespace(**defaults), slurm_cfg)
+
+    def test_defaults_are_perlmutter_specific(self):
+        args = self._pm_args()
+        assert args.constraint == "gpu"
+        assert args.qos == "regular"
+        assert args.partition is None
+        assert args.mem is None
+        assert args.cpus == 64
+
+    def test_account_gets_g_suffix(self):
+        assert self._pm_args(account="m1234").account == "m1234_g"
+
+    def test_account_g_suffix_not_doubled(self):
+        assert self._pm_args(account="m1234_g").account == "m1234_g"
+
+    def test_script_uses_gpus_per_node_not_gres(self):
+        from credit.cli import _build_slurm_script
+
+        script = _build_slurm_script(self._pm_args(gpus=4), FAKE_CONFIG, FAKE_REPO)
+        assert "#SBATCH --constraint=gpu" in script
+        assert "#SBATCH --qos=regular" in script
+        assert "#SBATCH --gpus-per-node=4" in script
+        assert "#SBATCH --gres=" not in script
+        assert "#SBATCH --partition=" not in script
+        assert "#SBATCH --mem=" not in script
+        assert "#SBATCH --account=m1234_g" in script
+
+
+class TestLoadSlurmConfig:
+    def test_reads_slurm_section(self, tmp_path):
+        import yaml
+        from credit.cli import _load_slurm_config
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"slurm": {"partition": "gpu", "conda": "/my/env"}, "trainer": {}}))
+        result = _load_slurm_config(str(cfg))
+        assert result["partition"] == "gpu"
+
+    def test_falls_back_to_pbs_section(self, tmp_path):
+        import yaml
+        from credit.cli import _load_slurm_config
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"pbs": {"queue": "casper", "conda": "/my/env"}, "trainer": {}}))
+        result = _load_slurm_config(str(cfg))
+        assert result["conda"] == "/my/env"
+
+    def test_exits_when_no_conda(self, tmp_path):
+        import yaml
+        from credit.cli import _load_slurm_config
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(yaml.dump({"slurm": {"partition": "gpu"}, "trainer": {}}))
+        with pytest.raises(SystemExit):
+            _load_slurm_config(str(cfg))
+
+
+class TestSubmitSlurmDryRun:
+    def _submit_args(self, **kw):
+        defaults = dict(
+            cluster="perlmutter",
+            scheduler="slurm",
+            submit_mode="train",
+            gpus=4,
+            nodes=1,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            torchrun=None,
+            conda_env=None,
+            account=None,
+            chain=1,
+            dry_run=True,
+            reload=False,
+            config=None,
+        )
+        defaults.update(kw)
+        return argparse.Namespace(**defaults)
+
+    def test_dry_run_prints_sbatch_script(self, tmp_path, capsys):
+        import yaml
+        from credit.cli import _submit
+
+        cfg = tmp_path / "conf.yml"
+        cfg.write_text(
+            yaml.dump(
+                {
+                    "save_loc": str(tmp_path),
+                    "trainer": {"epochs": 5, "num_epoch": 5},
+                    "slurm": {"conda": "/fake/env", "partition": "gpu", "project": "NAML0001"},
+                }
+            )
+        )
+        args = self._submit_args()
+        args.config = str(cfg)
+        _submit(args)
+        out = capsys.readouterr().out
+        assert "Job 1/1" in out
+        assert "#SBATCH" in out
+        assert "#PBS" not in out
+
+
+# ---------------------------------------------------------------------------
 # _write_reload_config
 # ---------------------------------------------------------------------------
 

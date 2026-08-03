@@ -18,7 +18,7 @@ import torch
 # ---------- #
 # credit
 
-from credit.datasets.load_dataset_and_dataloader import load_dataset, load_dataloader
+from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load_dataloader
 from credit.distributed import distributed_model_wrapper, get_rank_info, setup
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler

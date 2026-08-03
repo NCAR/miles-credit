@@ -24,8 +24,8 @@ from credit.models import load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info
 from credit.datasets import setup_data_loading
-from credit.datasets.realtime_predict import RealtimePredictDataset
-from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
+from credit.datasets.gen_1.realtime_predict import RealtimePredictDataset
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
 from credit.data import concat_and_reshape, reshape_only
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.pbs import launch_script, launch_script_mpi

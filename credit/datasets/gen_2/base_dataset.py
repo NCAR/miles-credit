@@ -1,0 +1,1120 @@
+"""
+base_dataset.py
+-------------------------------------------------------
+AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
+1. Type hinting and annotations throughout CREDIT
+2. Scaffolding the development of future datasets
+3. Provide a minimal implementation of a Dataset for testing
+4. Avoid redundant code across dataset classes
+
+BaseDataset handles configuration, sampling clocks, field registration, file
+mapping, history windows, metadata, and input/target sample assembly for a
+single data source. Subclasses customize file discovery and field extraction;
+MultiSourceDataset coordinates multiple BaseDataset instances.
+
+Temporal behavior is selected with the source-level ``temporal_mode`` option:
+
+* ``exact`` (default): require source timestamps to match the master clock.
+* ``persist``: use the latest source timestamp at or before each master-clock
+  timestamp, which is useful for coarser-resolution data.
+* ``cyclic``: map each timestamp onto a representative ``cycle_year`` and
+  resolve it within a repeating annual cycle, which is useful for climatology
+  or seasonal forcing. February 29 is clamped to February 28 when the source
+  calendar or cycle year has no leap day.
+
+Sources may use standard pandas calendars or supported CF calendars such as
+``noleap``, ``all_leap``, and ``julian``. The sampling clock can use either a
+continuous ``start_datetime``/``end_datetime`` interval or non-contiguous
+``date_ranges``; history and forecast margins are applied to each range.
+
+"""
+
+import logging
+from glob import glob
+from typing import Any, Literal, get_args
+
+import cftime
+import pandas as pd
+import torch
+from torch.utils.data import Dataset
+
+from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
+    _extract_time_fmt,
+    _map_files,
+    _path_template_to_glob,
+    build_time_index,
+    build_time_index_multi,
+    encode_time,
+    is_standard_calendar,
+    normalize_calendar,
+    to_calendar,
+    to_cycle_year,
+)
+
+logger = logging.getLogger(__name__)
+
+# Expected types of fields
+# * ``prognostic``      — input at step 0 and target (autoregressive rollout)
+# * ``dynamic_forcing`` — input at every step; never a target
+# * ``diagnostic``      — target only
+# * ``static``          — input at step 0; never a target, applies to all steps
+VALID_FIELD_TYPES = Literal["prognostic", "dynamic_forcing", "static", "diagnostic"]
+
+
+class AbstractBaseDataset(Dataset[Any]):
+    """Abstract base dataset class based on PyTorch Dataset class for CREDIT.
+
+    This class defines the expected methods and attributes for any dataset in CREDIT,
+    but does not provide any implementation. The BaseDataset class inherits from this
+    class and provides a minimal implementation. Any future dataset should inherit from
+    either AbstractBaseDataset or BaseDataset depending on the level of functionality needed.
+
+    For generality, the inheritance is from torch.utils.data.Dataset[Any], however
+    there may be benefits to stricter typing than Any for consistency in the
+    get item return, especially if torch supports dataset type accelerations in future
+    releases.
+    """
+
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        # The name of this source in the config
+        self.curr_source_name: str
+        self.dataset_type: str
+
+        # Setting the clock for sampling
+        self.dt: pd.Timedelta
+        self.num_forecast_steps: int
+        self.history_len: int
+        self.start_datetime: pd.Timestamp
+        self.end_datetime: pd.Timestamp
+        # CF calendar of the clock; timestamps in `datetimes` are pd.Timestamps
+        # for standard-family calendars, cftime.datetime otherwise (CFTimeIndex)
+        self.calendar: str
+        self.datetimes: pd.Index  # pd.DatetimeIndex or xr.CFTimeIndex
+
+        # Getting the data
+        self.return_target: bool
+        self.mode: str
+        self.file_dict: dict[str, Any]
+        self.var_dict: dict[str, Any]
+
+        # Placeholder for static metadata
+        self.static_metadata: dict[str, Any]
+
+    def __len__(self) -> int:
+        raise NotImplementedError
+
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def _build_timestamps(self) -> pd.DatetimeIndex:
+        raise NotImplementedError
+
+    def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
+        raise NotImplementedError
+
+    def init_register_all_fields(self) -> None:
+        raise NotImplementedError
+
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
+        raise NotImplementedError
+
+    def _get_file_source(
+        self, field_config: dict[str, Any]
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
+        raise NotImplementedError
+
+    def _extract_field(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t: pd.Timestamp,
+        sample: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
+
+    def _extract_field_window(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
+
+
+class BaseDataset(AbstractBaseDataset):
+    """PyTorch Dataset class for CREDIT that  enables:
+    1. Type hinting and annotations throughout CREDIT
+    2. Scaffolding the development of future datasets
+    3. Provide a minimal implementation of a Dataset for testing
+
+    Minimal YAML config for a dataset will have the following stucture:
+
+    ```yaml
+        data:
+          source:
+            Example_Base:  # User-provided name (arbitrary key)
+              # PARAMETERS FOR THIS DATASET TYPE
+              # Ex: levels: [10, 20, 30]
+              dataset_type: "base"  # Needs to match per type of dataset!
+              variables:
+                prognostic: null
+                #  vars_3D: ['T', 'U', 'V', 'Q'] # Your 3D variables
+                #  vars_2D: ['SP', 't2m'] # Your 2D variables
+                # dynamic_forcing: null
+                #  vars_3D: ...
+                #  vars_2D: ...
+                # static: null
+                #  vars_3D: ...
+                #  vars_2D: ...
+                # diagnostic: null
+                #  vars_3D: ...
+                #  vars_2D: ...
+              # OPTIONAL: Override the clock bounds for this dataset
+              start_datetime: "2012-04-03T00:00Z"
+
+            # <YourName2>_<DatasetType2>: # Multiple datasets (see multi_source)
+
+          # These parameters set the overall clock of the sampler
+          start_datetime: "2000-01-01T00:00:00Z" # The earliest datetime across datasets
+          end_datetime: "2020-12-31T23:00:00Z" # The latest datetime across datasets
+          timestep: "12h" # The smallest time interval for the clock
+          forecast_len: 1 # The number of timesteps forward that need to be rolled out per sample
+    ```
+    """
+
+    def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
+        """
+        This initializes the BaseDataset class, which is designed to provide base functionality for datasets in CREDIT.
+        For most datasets, you should inherit from this class and include a super().__init__(data_config, return_target)
+        call in your __init__ and self.init_register_all_fields() to take advantage of the base functionality.
+
+        _However_, you do not want to use super().__init__ if you need to handle multiple sources in your dataset, since
+        the init for BaseDataset is designed to handle one source. For multisource, you should inherit from
+        AbstractBaseDataset for type hinting and annotations.
+
+        Depending on your dataset you will likely want to override or extend the following methods:
+        1. _get_file_source:
+                This method tells the dataset how to find the actual data, which is generally different for different datasets
+                and modes (e.g., local vs. remote).
+        2. _extract_field:
+                This method tells the dataset how to extract the data from the files and organize them accordingly. To
+                match dictionary key conventions across datasets, we suggest using the _get_field_name helper to create
+                the keys for the extracted data.
+        3. _build_timestamps:
+                If you would like to apply Quality Control checks that limit the datetimes from which to sample from.
+                You may also want to enforce time bounds automatically for your dataset here.
+
+        Args:
+            data_config: Dict containing the configuration for the dataset. See class docstring for expected structure.
+            return_target: Whether to return the target (t+1) in addition to the input (t). This is used for prognostic and diagnostic fields.
+
+        """
+        super().__init__(data_config, return_target)
+        # Enforce types
+        if not isinstance(data_config, dict):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise TypeError(f"Expected data_config to be a dict, but got {type(data_config)}")
+        if not isinstance(return_target, bool):  # pyright: ignore[reportUnnecessaryIsInstance]
+            raise TypeError(f"Expected return_target to be a bool, but got {type(return_target)}")
+
+        # The config for the data source
+        if "source" not in data_config:
+            raise KeyError(
+                "Expected 'source' key in data_config, but it was not found. Likely you provided "
+                + "a subconfig or a higher level config. Checks: "
+                + f" 'data' in config: {'data' in data_config}, "
+                + f" Full data_config provided: \n{data_config}"
+            )
+        # Ensure source is not empty
+        if not data_config["source"]:
+            raise ValueError(
+                "Expected 'source' key in data_config to be non-empty, but it was empty. "
+                + "Likely you provided a subconfig or a higher level config. Checks: "
+                + f" 'data' in config: {'data' in data_config}, "
+                + f" Full data_config provided: \n{data_config}\n"
+                + f" Full source config: \n{data_config['source']}"
+            )
+
+        # Notice from above that the dictionary structure from the config goes:
+        # data:
+        #   source:
+        #     <current_source_name>:
+        #       # parameters for this source
+        #       dataset_type: ...
+        #       variables: ...
+        # Unless we are parsing through a multi-source config (for which you should not inherit from BaseDataset),
+        # we expect only one source to be defined in the config. To be pythonic, we can use next & iter to get this
+        # source entry.
+        self.curr_source_name = next(iter(data_config["source"]))
+        if len(data_config["source"]) > 1:
+            raise ValueError(
+                f"Multiple sources found in config for class {self.__class__.__name__}, but BaseDataset is only designed to handle one source. "
+                + f"Using the first source found: {self.curr_source_name}. If you would like to use multiple sources, you should reference multisource "
+                + "dataset class that inherits from BaseDataset and **overrides** the __init__ method to handle multiple sources. \n"
+                + f"Full data_config provided: \n{data_config}\n"
+                + f"Full source config: \n{data_config['source']}\n"
+                + f"Curr source config: \n{data_config['source'][self.curr_source_name]}"
+            )
+        self.curr_source_cfg = data_config["source"][self.curr_source_name]
+
+        # Where per-source grid files (and other run artifacts) get written, if at
+        # all — None for standalone dataset usage outside the full CREDIT pipeline,
+        # in which case writing them out is a no-op rather than an error. Forwarded
+        # into data_config by MultiSourceDataset.make_single_source_subconfig.
+        self.save_loc: str | None = data_config.get("save_loc")
+
+        # You should definitely change this in an inherited dataset
+        if type(self) is BaseDataset:
+            self.dataset_type = "base"
+
+        # Now we start loading the parameters for the dataset, starting with the clock parameters.
+        self.dt: pd.Timedelta = self._load_dt(data_config, self.curr_source_cfg)
+        self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, self.curr_source_cfg)
+        self.history_len: int = self._load_history_len(data_config, self.curr_source_cfg)
+
+        # date_ranges is an optional alternative to start_datetime/end_datetime:
+        # a list of non-contiguous (start, end) blocks (e.g. train on
+        # 1950-1965 + 1970-1985, skipping 1966-1969). Mutually exclusive with
+        # start_datetime/end_datetime *at the same level* -- but an explicit
+        # source-level start_datetime/end_datetime always wins over a data-level
+        # date_ranges (not a conflict): this is the normal case for persist/cyclic
+        # sources, which almost always define their own independent coverage
+        # regardless of what the overall run's date_ranges looks like.
+        temporal_mode = self.curr_source_cfg.get("temporal_mode", "exact")
+        if temporal_mode == "cyclic":
+            # A cyclic source's own coverage is always self-contained -- its
+            # own single representative cycle, either explicit
+            # (start_datetime/end_datetime) or inferred from its data (see
+            # LocalDataset._load_start_datetime/_load_end_datetime) -- never
+            # date_ranges, which describes the overall run's real multi-year
+            # span, a different concept entirely that a cyclic source must not
+            # accidentally inherit from the data level.
+            if "date_ranges" in self.curr_source_cfg:
+                raise ValueError(
+                    f"Source '{self.curr_source_name}': temporal_mode: cyclic cannot be combined with "
+                    "date_ranges -- its own start_datetime/end_datetime (explicit or inferred) already "
+                    "describes its single representative cycle."
+                )
+            self.date_ranges = None
+            self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+            self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        else:
+            has_source_date_range = self._in_source_config(data_config, self.curr_source_cfg, "start_datetime") or (
+                self._in_source_config(data_config, self.curr_source_cfg, "end_datetime")
+            )
+            source_has_date_ranges = "date_ranges" in self.curr_source_cfg
+            if has_source_date_range and source_has_date_ranges:
+                raise ValueError(
+                    f"Source '{self.curr_source_name}': date_ranges cannot be combined with "
+                    "start_datetime/end_datetime in the same source config -- use one or the other."
+                )
+
+            if has_source_date_range:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+            elif source_has_date_ranges:
+                self.date_ranges = self.curr_source_cfg["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            elif "date_ranges" in data_config:
+                if "start_datetime" in data_config or "end_datetime" in data_config:
+                    raise ValueError(
+                        "date_ranges cannot be combined with start_datetime/end_datetime at the data level "
+                        "-- use one or the other."
+                    )
+                self.date_ranges = data_config["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            else:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+
+        # CF calendar of this source's clock. Resolved from config (source-level
+        # `calendar:` key, then data-level) with a subclass hook for finding it in
+        # the data files (see LocalDataset). Standard-family calendars keep the plain
+        # pandas path; non-standard calendars build a CFTimeIndex clock.
+        self.calendar: str = self._resolve_calendar(data_config, self.curr_source_cfg) or "standard"
+
+        self.datetimes: pd.Index = self._build_timestamps()
+
+        # Set the return target flag based on the argument passed to init.
+        self.return_target: bool = return_target
+
+        # Select if the data is being loaded from local files or remote files.
+        self.mode = "local"
+        if "mode" in self.curr_source_cfg:
+            self.mode = self.curr_source_cfg["mode"]
+
+        # temporal_mode: "exact" (default, exact timestamp match required),
+        # "persist" (snap to last native timestamp via asof(); used for coarser
+        # sources), or "cyclic" (map any real timestamp onto this source's single
+        # cycle_year via to_cycle_year + asof; used for climatology/seasonal
+        # forcing that repeats every cycle without duplicating data across real
+        # years -- see _resolve_cyclic_timestamp).
+        self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
+        self._persist_cache: dict = {}
+
+        # cycle_year: the single representative year a cyclic source's data lives
+        # in (e.g. 2000). Any year works -- to_cycle_year clamps Feb 29 to Feb 28
+        # when cycle_year doesn't have one, rather than requiring a leap year.
+        # Config wins if given; subclasses (e.g. LocalDataset) may override
+        # _load_cycle_year to infer it from the data instead.
+        self.cycle_year: int | None = self._load_cycle_year(data_config, self.curr_source_cfg)
+        if self.temporal_mode == "cyclic" and self.cycle_year is None:
+            raise ValueError(
+                f"Source '{self.curr_source_name}': temporal_mode: cyclic requires 'cycle_year' "
+                "(the single representative year this source's climatology data lives in) "
+                "to be set in the source config."
+            )
+
+        # Placeholder for static metadata. `datetime_fmt` tells metadata consumers
+        # how to decode the input/target_datetime ints (see _utils.decode_time):
+        # plain unix ns for standard calendars, ns-in-calendar otherwise.
+        self.static_metadata: dict[str, Any] = {
+            "calendar": self.calendar,
+            "datetime_fmt": "unix_ns" if is_standard_calendar(self.calendar) else f"cf_ns:{self.calendar}",
+        }
+
+        # If the engine argument for xr.open_dataset needs to be specified, add the engine option to your data source config
+        if "engine" in self.curr_source_cfg:
+            self.engine = self.curr_source_cfg["engine"]
+        else:
+            self.engine = None
+
+        # By default, we suggest that the inherited dataset use both file_dict and var_dict.
+        # file_dict maps each field_type to a sorted list of (start_time, end_time, file_path)
+        #   tuples produced by _map_files. _extract_field can then use the list to find the
+        #   appropriate file for a given timestamp.
+        # var_dict maps each field_type to {"vars_3D": [...], "vars_2D": [...]}. _extract_field
+        #   can then use this to know which variables to extract for each field type from the file.
+        self.file_dict: dict[str, Any] = {}
+        self.var_dict: dict[str, Any] = {}
+
+        # Only if this is __NOT__ an inherited class, we will immediately run init_register_all_fields.
+        # In an inherited class, you should call super().init_register_all_fields() at the end of your
+        # __init__ method after you have set up any additional parameters needed for your dataset.
+        if type(self) is BaseDataset:
+            self.init_register_all_fields()
+
+    def __len__(self) -> int:
+        """For a CREDIT dataset, the length is the number of unique datetimes that can be sampled from.
+
+        Returns:
+            int: Dataset length
+        """
+        return len(self.datetimes)
+
+    def __getitem__(self, args: tuple[pd.Timestamp, int]) -> dict[str, Any]:
+        """Return a nested input/target sample dict.
+
+        When ``temporal_mode == "persist"``, the requested timestamp *t* is
+        snapped to the last native timestamp at-or-before *t* via
+        ``pd.DatetimeIndex.asof()``.  The result is cached so that multiple
+        fine-resolution master-clock ticks within the same native interval
+        only trigger a single file read.
+
+        Args:
+            args: ``(t, i)`` where *t* is the current timestamp (nanoseconds
+                or pd.Timestamp) and *i* is the within-sequence step index
+                produced by the sampler. When ``i == 0`` prognostic and static
+                fields are loaded in addition to dynamic forcing.
+
+        Returns:
+            Dict with keys ``"input"``, ``"metadata"``, and optionally
+            ``"target"`` (when ``return_target=True``). Both ``"input"`` and
+            ``"target"`` are dicts of per-variable tensors keyed by
+            ``"{source}/{field_type}/{dim}/{varname}"``.
+        """
+        t, i = args
+        # Calendar-native timestamps pass through untouched; everything else
+        # (datetime64, int ns, str) is normalized to pd.Timestamp as before.
+        if not isinstance(t, cftime.datetime):
+            t = pd.Timestamp(t)
+
+        if self.temporal_mode == "persist":
+            t_resolved = self._resolve_persist_timestamp(t)
+            cache_key = (t_resolved, i == 0)
+            if cache_key not in self._persist_cache:
+                # Evict entries from previous native intervals to keep cache small
+                stale = [k for k in self._persist_cache if k[0] != t_resolved]
+                for k in stale:
+                    del self._persist_cache[k]
+                self._persist_cache[cache_key] = self._load_sample(t_resolved, i)
+            return self._persist_cache[cache_key]
+
+        return self._load_sample(t, i)
+
+    def _resolve_persist_timestamp(self, t: pd.Timestamp) -> pd.Timestamp:
+        """Snap *t* to the last native timestamp at or before *t*.
+
+        Uses ``pd.DatetimeIndex.asof()`` so non-uniform or non-zero-aligned
+        cadences are handled correctly.
+
+        Args:
+            t: Master-clock timestamp to resolve.
+
+        Returns:
+            The last native timestamp ``<= t``.
+
+        Raises:
+            ValueError: If *t* is before the first native timestamp.
+        """
+        resolved = self.datetimes.asof(t)
+        if pd.isna(resolved):
+            raise ValueError(
+                f"Persist source '{self.curr_source_name}': timestamp {t} is before "
+                f"the first available native timestamp {self.datetimes[0]}."
+            )
+        return resolved
+
+    def _resolve_cyclic_timestamp(self, t: pd.Timestamp | cftime.datetime) -> pd.Timestamp | cftime.datetime:
+        """Map *t* onto this source's single ``cycle_year``, then snap to the
+        last native timestamp at or before that point.
+
+        Same "last available, not nearest" semantics as ``_resolve_persist_timestamp``
+        (``asof``), applied within one cycle instead of across the whole run. Unlike
+        persist, this never raises: a point before the cycle's first native timestamp
+        (e.g. the file starts at 06:00 on Jan 1 and the remapped point lands at 00:00)
+        wraps to the cycle's *last* entry instead -- this is periodic, not a bounded
+        series, so "before the start" really means "just after the end."
+
+        Args:
+            t: Real timestamp to resolve (any real year).
+
+        Returns:
+            The resolved native timestamp within ``cycle_year``.
+        """
+        t_cycle = to_cycle_year(t, self.cycle_year, self.calendar)
+        resolved = self.datetimes.asof(t_cycle)
+        if pd.isna(resolved):
+            resolved = self.datetimes[-1]
+        return resolved
+
+    def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
+        """Build and return the sample dict for timestamp *t* and step index *i*.
+
+        This is the inner implementation called by ``__getitem__``, separated
+        so the persist cache can call it without re-entering the dispatch logic.
+
+        When ``self.history_len > 1`` and ``i == 0``, prognostic, dynamic_forcing,
+        and static fields are loaded as a ``history_len``-step window ending at
+        ``t`` (inclusive), i.e. ``[t - (H-1)*dt, ..., t]``. At rollout steps
+        (``i > 0``) only the newest dynamic_forcing step (at ``t``) is loaded;
+        prior history is carried forward by the trainer's rollout sliding
+        window. With ``history_len == 1`` behaviour is identical to the original.
+
+        Args:
+            t: Timestamp to load (already resolved for persist sources; the real,
+                un-remapped master timestamp for cyclic sources -- see the
+                cyclic lookup-remapping below).
+            i: Within-sequence step index (0 = initial step).
+
+        Returns:
+            Sample dict with ``"input"``, ``"metadata"``, and optionally ``"target"``.
+        """
+        t_target = t + self.dt
+        input_data: dict[str, Any] = {}
+
+        # History window ending at t (inclusive). Used only at i == 0 for
+        # fields that need a multi-step history. Always length history_len.
+        # When history_len > 1 the window is loaded via _extract_field_window,
+        # whose default implementation simply calls the subclass's single-step
+        # _extract_field once per timestamp and stacks along the time dim, so
+        # datasets get multi-step reading for free without changing their
+        # single-step _extract_field. Subclasses may override
+        # _extract_field_window to batch file reads (see LocalDataset).
+        use_history_window = self.history_len > 1
+        if use_history_window:
+            # build_time_index (not pd.date_range) so this is calendar-correct
+            # for non-standard calendars too — t may be a cftime.datetime, which
+            # pd.date_range cannot consume.
+            t_history = build_time_index(t - (self.history_len - 1) * self.dt, t, self.dt, self.calendar)
+
+        # Cyclic sources: t / t_target / t_history above are real, monotonic
+        # master-clock timestamps -- computed exactly as for any other source,
+        # never wrapping. Only the *lookup* keys actually handed to the read
+        # calls below are remapped onto this source's single cycle_year, via
+        # _resolve_cyclic_timestamp, independently per timestamp (so a history
+        # window or target that crosses a real year boundary needs no special
+        # handling: each point is resolved on its own, regardless of how far
+        # apart its neighbors are in real time). Non-cyclic sources are
+        # unaffected -- the lookup values are just t / t_target / t_history
+        # themselves, no extra work.
+        is_cyclic = self.temporal_mode == "cyclic"
+        t_lookup = self._resolve_cyclic_timestamp(t) if is_cyclic else t
+        t_target_lookup = self._resolve_cyclic_timestamp(t_target) if is_cyclic else t_target
+        if use_history_window:
+            t_history_lookup = [self._resolve_cyclic_timestamp(x) for x in t_history] if is_cyclic else t_history
+
+        # Dynamic forcing is loaded at every step.
+        # At i == 0 we need the full history window so the trainer's x has H
+        # time steps; at i > 0 we only need the newest step (the trainer slides
+        # the previous history forward during rollout).
+        if "dynamic_forcing" in self.var_dict:
+            if i == 0 and use_history_window:
+                self._extract_field_window("dynamic_forcing", t_history_lookup, input_data)
+            else:
+                self._extract_field("dynamic_forcing", t_lookup, input_data)
+
+        # Prognostic + static are only needed at the initial step.
+        # Both are loaded over the full history window so x starts with H steps.
+        if i == 0:
+            if "static" in self.var_dict:
+                if use_history_window:
+                    self._extract_field_window("static", t_history_lookup, input_data)
+                else:
+                    self._extract_field("static", t_lookup, input_data)
+            if "prognostic" in self.var_dict:
+                if use_history_window:
+                    self._extract_field_window("prognostic", t_history_lookup, input_data)
+                else:
+                    self._extract_field("prognostic", t_lookup, input_data)
+
+        sample: dict[str, Any] = {
+            "input": input_data,
+            "metadata": {"input_datetime": encode_time(t)},
+        }
+
+        # Optionally load t+1 as the supervised target. The target is always a
+        # single step at t+dt and never depends on history_len.
+        if self.return_target:
+            target_data: dict[str, Any] = {}
+            for field_type in ("prognostic", "diagnostic"):
+                if field_type in self.var_dict:
+                    self._extract_field(field_type, t_target_lookup, target_data)
+
+            sample["target"] = target_data
+            sample["metadata"]["target_datetime"] = encode_time(t_target)
+
+        return sample
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+
+    # ---------------
+    # 1. Clock Parameters: dt, num_forecast_steps, start_datetime, end_datetime
+    # Likely you will not need to change these for a new dataset. You may
+    # need to make a new helper if:
+    # 1. You would like to apply Quality Control checks that limit the datetimes
+    #    from which to sample from (see _build_timestamps below)
+    # 2. You would like to enforce time bounds automatically for your dataset.
+    #    You may want to do this with super() to have base functionality.
+    #
+    # Note we have a separate _load_... function for each variable in an effort
+    # to have a more specific warning message.
+
+    def _check_in_data_config(self, data_config: dict[str, Any], key: str) -> None:
+        """Check that a key is in the data config. If not, raise an error since this is required for any dataset.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            key (str): The key to check (e.g., "timestep")
+
+        Raises:
+            KeyError: When the key is not found in the data config
+        """
+        if key not in data_config:
+            raise KeyError(f"{key} must be specified in the config for any inheritance of Base Dataset.")
+
+    def _in_source_config(self, data_config: dict[str, Any], curr_source_cfg: dict[str, Any], key: str) -> bool:
+        """Helper to determine if a key is in the source config.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_cfg (dict[str, Any]): Portion of the config under a specific source
+            key (str): The key to check (e.g., "timestep")
+
+        Returns:
+            bool: True if the key is in the source config, False otherwise
+        """
+        return "source" in data_config and key in curr_source_cfg
+
+    def _load_dt(
+        self, data_config: dict[str, Any], curr_source_config: dict[str, Any], dt_key: str = "timestep"
+    ) -> pd.Timedelta:
+        """The timestep (dt) is a required parameter for any dataset, and is used to build the clock of the sampler.
+        In general, the timestep in the data config should be the smallest timestep across all sources.
+        The inherited dataset may need a coarser timestep (e.g., in the case of multi-source datasets).
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            dt_key (str, optional): The key for the timestep parameter. Defaults to "timestep".
+
+        Returns:
+            pd.Timedelta: The timestep for the dataset
+        """
+        has_source_dt = self._in_source_config(data_config, curr_source_config, dt_key)
+        if dt_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. a
+            # cyclic source whose timestep is inferred/declared independently
+            # of the overall run) -- the source-level value, if this source has
+            # its own, is authoritative on its own.
+            if not has_source_dt:
+                self._check_in_data_config(data_config, dt_key)  # raises with the standard message
+            return pd.Timedelta(curr_source_config[dt_key])
+
+        dt_in_data = pd.Timedelta(data_config[dt_key])
+
+        if has_source_dt:
+            dt_in_source = pd.Timedelta(curr_source_config[dt_key])
+            if dt_in_source < dt_in_data:
+                logger.warning(
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{dt_key} in source ({dt_in_source}) "
+                    + f"is smaller than {dt_key} in data ({dt_in_data}). "
+                    + f"Using {dt_in_source} as the timestep for this dataset. "
+                    + "Generally, the data timestep should be the smallest timestep across all sources."
+                )
+            return dt_in_source
+
+        return dt_in_data
+
+    def _load_num_forecast_steps(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        num_forecast_steps_key: str = "forecast_len",
+    ) -> int:
+        """The number of forecast steps (num_forecast_steps) is a required parameter for any dataset, and
+        is used in the sampler. In general, the number of forecast steps in the data config should be
+        the largest across all sources, since this determines how far forward the sampler needs to roll
+        out. The inherited dataset may not be able to rollout further.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            num_forecast_steps_key (str, optional): The key for the number of forecast steps parameter. Defaults to "forecast_len".
+
+        Returns:
+            int: The number of forecast steps (i.e., length ahead) for the dataset
+        """
+        self._check_in_data_config(data_config, num_forecast_steps_key)
+        num_forecast_steps_in_data = data_config[num_forecast_steps_key]
+
+        if self._in_source_config(data_config, curr_source_config, num_forecast_steps_key):
+            num_forecast_steps_in_source = curr_source_config[num_forecast_steps_key]
+            if num_forecast_steps_in_source > num_forecast_steps_in_data:
+                logger.warning(
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{num_forecast_steps_key} in source ({num_forecast_steps_in_source}) "
+                    + f"is greater than {num_forecast_steps_key} in data ({num_forecast_steps_in_data}). "
+                    + f"Using {num_forecast_steps_in_source} as the number of forecast steps for this dataset."
+                    + "Generally, the number of forecast steps in data should be the largest across all sources."
+                )
+            return num_forecast_steps_in_source
+
+        return num_forecast_steps_in_data
+
+    def _load_history_len(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        history_len_key: str = "history_len",
+    ) -> int:
+        """Load the number of history time steps fed into the model at each init step.
+
+        ``history_len == 1`` (the default) reproduces the original gen2 behaviour:
+        the dataset returns a single time step and the trainer feeds frames=1 to
+        the model. ``history_len > 1`` makes the dataset return a ``history_len``
+        time-step window at i == 0 and the trainer slides the window during
+        rollout at subsequent steps.
+
+        history_len is optional in the config; it is read from the source-level
+        config first and from the data-level config as a fallback. If neither
+        is present it defaults to 1 so that existing configs keep working.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            history_len_key (str, optional): The key name. Defaults to "history_len".
+
+        Returns:
+            int: history length, >= 1.
+
+        Raises:
+            ValueError: If history_len is not a positive integer.
+        """
+        if self._in_source_config(data_config, curr_source_config, history_len_key):
+            history_len = curr_source_config[history_len_key]
+        elif history_len_key in data_config:
+            history_len = data_config[history_len_key]
+        else:
+            history_len = 1
+
+        if not isinstance(history_len, int) or history_len < 1:
+            raise ValueError(f"{history_len_key} must be a positive int, got {history_len!r}")
+        return history_len
+
+    def _load_start_datetime(
+        self,
+        data_config: dict[str, Any],
+        curr_source_config: dict[str, Any],
+        start_datetime_key: str = "start_datetime",
+    ) -> pd.Timestamp:
+        """The start_datetime is a required parameter for any dataset, and is used in the sampler. In general,
+        the start_datetime in the data config should be the earliest across all sources, since this determines
+        the earliest point in time that the sampler can draw from. The inherited dataset may not be able to go
+        as far back.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            start_datetime_key (str, optional): The key for the start datetime parameter. Defaults to "start_datetime".
+
+        Returns:
+            pd.Timestamp: The start datetime for the dataset
+        """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, start_datetime_key)
+        if start_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, start_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[start_datetime_key])
+
+        start_datetime_in_data = pd.Timestamp(data_config[start_datetime_key])
+
+        if has_source_date_range:
+            start_datetime_in_source = pd.Timestamp(curr_source_config[start_datetime_key])
+            if start_datetime_in_source < start_datetime_in_data:
+                logger.warning(
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{start_datetime_key} in source ({start_datetime_in_source}) "
+                    + f"is earlier than {start_datetime_key} in data ({start_datetime_in_data}). "
+                    + f"Using {start_datetime_in_source} as the start_datetime for this dataset."
+                    + "Generally, the start_datetime in data should be the earliest across all sources."
+                )
+            return start_datetime_in_source
+
+        return start_datetime_in_data
+
+    def _load_end_datetime(
+        self, data_config: dict[str, Any], curr_source_config: dict[str, Any], end_datetime_key: str = "end_datetime"
+    ) -> pd.Timestamp:
+        """The end_datetime is a required parameter for any dataset, and is used in the sampler. In general,
+        the end_datetime in the data config should be the latest across all sources, since this determines
+        the latest point in time that the sampler can draw from. The inherited dataset may not be able to go
+        as far forward.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+            end_datetime_key (str, optional): The key for the end datetime parameter. Defaults to "end_datetime".
+
+        Returns:
+            pd.Timestamp: The end datetime for the dataset
+        """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, end_datetime_key)
+        if end_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, end_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[end_datetime_key])
+
+        end_datetime_in_data = pd.Timestamp(data_config[end_datetime_key])
+
+        if has_source_date_range:
+            end_datetime_in_source = pd.Timestamp(curr_source_config[end_datetime_key])
+            if end_datetime_in_source > end_datetime_in_data:
+                logger.warning(
+                    f"In loading for class {self.__class__.__name__}, "
+                    + f"{end_datetime_key} in source ({end_datetime_in_source}) "
+                    + f"is later than {end_datetime_key} in data ({end_datetime_in_data}). "
+                    + f"Using {end_datetime_in_source} as the end_datetime for this dataset."
+                    + "Generally, the end_datetime in data should be the latest across all sources."
+                )
+            return end_datetime_in_source
+
+        return end_datetime_in_data
+
+    def _load_cycle_year(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> int | None:
+        """Resolve a cyclic source's cycle_year from config, or None when unset.
+
+        Config always wins if given. Subclasses that can inspect their data
+        files (see LocalDataset) should override this and fall back to
+        inferring it from the data's own time coordinate when config gives no
+        answer; ``__init__`` raises if this is still None for a cyclic source.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+
+        Returns:
+            int | None: The configured cycle_year, or None if unset.
+        """
+        return curr_source_config.get("cycle_year")
+
+    def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
+        """Resolve this source's CF calendar from config, or None when unset.
+
+        Only the *source-level* ``calendar`` key is read here: it describes the
+        source's data files. The *data-level* ``calendar`` key configures the
+        master clock and is handled by MultiSourceDataset — letting it override
+        per-source calendars would mislabel a source's data and defeat the
+        mixed-calendar validation. Subclasses that can inspect their data files
+        should override this and fall back to finding the time coordinate when
+        config gives no answer (see LocalDataset); ``__init__`` applies the
+        final ``"standard"`` default.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+
+        Returns:
+            Normalized calendar name, or None when the config does not specify one.
+        """
+        cal = curr_source_config.get("calendar")
+        return normalize_calendar(cal) if cal else None
+
+    def _build_timestamps(self) -> pd.Index:
+        """Return timestamps for the dataset using the class parameters.
+        The timestamps should ensure that there are enough future timesteps to
+        rollout based on num_forecast_steps and the dt timestep length, enough
+        past timesteps to assemble a ``history_len``-step input window, and
+        should be at the configured timestep frequency.
+
+        The clock is built on ``self.calendar``: standard-family calendars give
+        exactly ``pd.date_range`` (unchanged behavior); non-standard CF calendars
+        give an ``xr.CFTimeIndex``. The forecast-horizon subtraction and the
+        history-window offset both happen *after* converting the bounds to the
+        target calendar so the arithmetic is calendar-correct (e.g. never lands
+        on a nonexistent Feb 29).
+
+        Note: Please override this method if you would like to apply Quality Control
+        checks that limit the datetimes from which to sample from, or if you would
+        like to enforce time bounds automatically for your dataset. You can use
+        super() to have base functionality in these cases.
+
+        When ``self.date_ranges`` is set (non-contiguous blocks, e.g. train on
+        1950-1965 + 1970-1985), the same history/forecast margin is applied to
+        each block independently and the per-block indices are concatenated
+        (see ``build_time_index_multi``) -- an init time drawn from anywhere in
+        the result can never produce a window that reaches outside its own
+        block, so nothing downstream needs to know blocks exist at all.
+
+        Returns:
+            pd.DatetimeIndex or xr.CFTimeIndex from ``start_datetime + (history_len-1)*dt``
+                to ``end_datetime`` minus the forecast horizon, at the configured
+                timestep frequency (or the per-block equivalent when ``date_ranges``
+                is set).
+        """
+        if self.date_ranges is not None:
+            return build_time_index_multi(
+                self.date_ranges,
+                self.dt,
+                self.calendar,
+                start_margin=(self.history_len - 1) * self.dt,
+                end_margin=self.num_forecast_steps * self.dt,
+            )
+        start = to_calendar(self.start_datetime, self.calendar) + (self.history_len - 1) * self.dt
+        end = to_calendar(self.end_datetime, self.calendar) - self.num_forecast_steps * self.dt
+        return build_time_index(start, end, self.dt, self.calendar)
+
+    # ---------------
+    # 2. Registering fields
+
+    def _get_field_name(self, field_type: VALID_FIELD_TYPES, dim_str: str, vname: str) -> str:
+        """Get the field name and enforce a consistent convention across datasets.
+
+        The convention for the field name is: ``"{user's current source name}/{field_type}/{dim_str}/{vname}"``.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): The field type (e.g., "prognostic")
+            dim_str (str): The dimension string (e.g., "3d" or "2d")
+            vname (str): The variable name (e.g., "T" or "t2m")
+
+        Returns:
+            str: The key string that will be used to access the field variable
+        """
+        # Cast 3D to 3d, etc. (as needed)
+        dim_str = dim_str.lower()
+        # Do not change the case on everything else!
+        return f"{self.curr_source_name}/{field_type}/{dim_str}/{vname}"
+
+    def init_register_all_fields(self) -> None:
+        """Initialize and register all fields for the dataset.
+
+        Raises:
+            KeyError: If the config does not include any variables.
+        """
+
+        if self.dataset_type == "base":
+            logger.error(
+                f"You are currently using a dataset name of {self.dataset_type} for class {self.__class__.__name__}, "
+                "which is the default name for the BaseDataset class. Likely, you did not set the dataset_type attribute "
+                "in the __init__ method of your inherited dataset class, which may cause issues downstream! "
+            )
+
+        # Now we load the variables for the dataset.
+        if "variables" not in self.curr_source_cfg:
+            raise KeyError(
+                "Expected 'variables' key in source config, but it was not found. "
+                + f"Full source config provided: \n{self.curr_source_cfg}"
+            )
+        for field_type, field_config in self.curr_source_cfg["variables"].items():
+            # Notice that we are expecting to call the same _register_field method for each field type.
+            # Check or override this method as needed based on the expected structure of your config for each field type.
+            self._register_field(field_type, field_config)
+
+    def _register_field(self, field_type: VALID_FIELD_TYPES, field_config: dict[str, Any] | None) -> None:
+        """Validate and register one field type from the config variables block.
+
+        Populates ``self.file_dict`` and ``self.var_dict`` for *field_type*.
+
+        Args:
+            field_type: One of VALID_FIELD_TYPES, namely: ``"prognostic"``, ``"dynamic_forcing"``,
+                ``"static"``, ``"diagnostic"``.
+            field_config: Field-type config dict, or ``None`` / null to disable the field.
+
+        Raises:
+            KeyError: If *field_type* is not a recognised field type.
+            ValueError: If *field_config* defines neither ``vars_3D`` nor ``vars_2D``.
+        """
+        if field_type not in get_args(VALID_FIELD_TYPES):
+            raise KeyError(
+                f"Unknown field_type '{field_type}' in config['source']['ERA5']. Valid options are: {VALID_FIELD_TYPES}"
+            )
+        if not isinstance(field_config, dict):
+            # null / disabled field
+            self.file_dict[field_type] = None
+            return
+
+        if not field_config.get("vars_3D") and not field_config.get("vars_2D"):
+            raise ValueError(f"Field '{field_type}' must define at least one of vars_3D or vars_2D")
+
+        self.var_dict[field_type] = {
+            "vars_3D": field_config.get("vars_3D") or [],
+            "vars_2D": field_config.get("vars_2D") or [],
+        }
+
+        self.file_dict[field_type] = self._get_file_source(field_config)
+
+    def _get_file_source(
+        self, field_config: dict[str, Any]
+    ) -> list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None:
+        """Return the file source for a field. Override in subclasses for different modes/backends.
+
+        Args:
+            field_config (dict[str, Any]): Validated field-type config dict.
+
+        Raises:
+            FileNotFoundError: If ``self.mode == "local"`` and the glob pattern matches no files.
+            ValueError: If ``self.mode`` is not a recognised mode.
+
+        Returns:
+            list[tuple[pd.Timestamp, pd.Timestamp, str]] | bool | None: Depending on the mode and field type,
+                this method may return a list of (start_time, end_time, file_path) tuples produced by _map_files,
+                a boolean indicating the presence of the field (e.g., for remote data), or None if the field is disabled.
+                The expected return type should be consistent within a dataset class.
+        """
+        if self.mode == "local":
+            path_template: str = field_config.get("path", "")
+            files = sorted(glob(_path_template_to_glob(path_template)))
+            return _map_files(files, _extract_time_fmt(path_template), path_template) if files else None
+        elif self.mode == "remote":
+            return True
+        else:
+            raise ValueError(f"Unknown mode '{self.mode}'. Expected 'local' or 'remote'.")
+
+    def _extract_field_window(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t_history: pd.DatetimeIndex,
+        sample: dict[str, Any],
+    ) -> None:
+        """Extract *field_type* over a multi-step history window and stack in time.
+
+        This is the generic multi-step reader used when ``history_len > 1``. It
+        calls the subclass's single-step :meth:`_extract_field` once per
+        timestamp in *t_history* (chronological, ending at the current step) and
+        concatenates each resulting variable tensor along the time dimension
+        (``dim=1``). Because it only relies on the single-step contract
+        (3D → ``(n_levels, 1, lat, lon)``, 2D → ``(1, 1, lat, lon)``), every
+        dataset gets multi-step reading without changing its ``_extract_field``.
+
+        Subclasses whose backend can load several timestamps from a single
+        open file/store more cheaply (e.g. :class:`~credit.datasets.gen_2.local.LocalDataset`)
+        may override this method to batch those reads. The stacked output must be
+        identical either way: 3D → ``(n_levels, len(t_history), lat, lon)``,
+        2D → ``(1, len(t_history), lat, lon)``.
+
+        Args:
+            field_type: One of VALID_FIELD_TYPES.
+            t_history: Chronological timestamps of the history window (ending at
+                the current step); length ``history_len``.
+            sample: Dict to write the stacked variable tensors into (modified in place).
+        """
+        # to_calendar (not pd.Timestamp) so this is calendar-correct for
+        # non-standard calendars too — entries of t_history may be
+        # cftime.datetime, which pd.Timestamp cannot consume.
+        if field_type == "static":
+            # Static fields never vary in time: read once and replicate in
+            # memory instead of re-reading the same value per timestamp.
+            step_sample: dict[str, Any] = {}
+            self._extract_field(field_type, to_calendar(t_history[-1], self.calendar), step_sample)
+            n_t = len(t_history)
+            for key, val in step_sample.items():
+                # val is (n_levels_or_1, 1, lat, lon); repeat dim=1 (time) to n_t.
+                sample[key] = val.repeat(1, n_t, 1, 1)
+            return
+
+        per_step: list[dict[str, Any]] = []
+        for tk in t_history:
+            step_sample: dict[str, Any] = {}
+            self._extract_field(field_type, to_calendar(tk, self.calendar), step_sample)
+            per_step.append(step_sample)
+
+        if not per_step:
+            return
+
+        # Every step writes the same keys (single-step contract); stack in time.
+        for key in per_step[0]:
+            sample[key] = torch.cat([step[key] for step in per_step], dim=1)
+
+    def _extract_field(
+        self,
+        field_type: VALID_FIELD_TYPES,
+        t: pd.Timestamp,
+        sample: dict[str, Any],
+    ) -> None:
+        """Base extract field method, which should be overridden in the inherited dataset class to extract the data for
+        each field type. The method should populate data_dict with the extracted data for the given field type and
+        timestamp. The keys in data_dict should follow the format in _get_field_name.
+
+        The entries are added as tensors to the sample["input"] or sample["target"] dict in __getitem__.
+
+        Multi-step history (history_len > 1) is handled by _extract_field_window,
+        which calls this single-step method once per timestamp and stacks the
+        results, so subclasses only need to implement single-step reading here.
+
+        Args:
+            field_type (VALID_FIELD_TYPES): One of VALID_FIELD_TYPES.
+            t (pd.Timestamp): Query timestamp for which to extract the field data.
+            sample (dict[str, Any]): The sample dict being built in __getitem__
+        """
+        logger.error(
+            "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
+            "You should implement this method in your inherited dataset class to extract the data for each field type. Your inherited "
+            "class is of type: " + self.__class__.__name__ + ". "
+        )
+
+        # A 3D variable should have dimensions (n_levels, 1, n_lat, n_lon).
+        # A 2D variable should have dimensions (1, 1, n_lat, n_lon).
+        # We select prime numbers to ensure that there is no accidental shape
+        # matches when testing the dataset.
+        n_lat = 17
+        n_lon = 23
+        n_levels = 7
+
+        if field_type in self.var_dict:
+            for var_2d in self.var_dict[field_type].get("vars_2D", []):
+                key = self._get_field_name(field_type, "2d", var_2d)
+                sample[key] = torch.ones(1, 1, n_lat, n_lon)
+            for var_3d in self.var_dict[field_type].get("vars_3D", []):
+                key = self._get_field_name(field_type, "3d", var_3d)
+                sample[key] = torch.ones(n_levels, 1, n_lat, n_lon)
