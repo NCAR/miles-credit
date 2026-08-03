@@ -17,7 +17,7 @@ import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -39,6 +39,8 @@ except ImportError:
     _SummaryWriter = None
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_DISPLAY_METRICS = ("rmse", "r2score", "bias")
 
 
 class EMATracker:
@@ -96,7 +98,7 @@ class EMATracker:
         # nn.utils.spectral_norm stores weight_u / weight_v alongside weight_orig.
         # Averaging these vectors destroys the power-iteration convergence and causes
         # sigma = u^T W v → 0 in eval mode → weight explodes.
-        if key.endswith("_u") or key.endswith("_v"):
+        if key.endswith(("_u", "_v")):
             orig_key = key[:-2] + "_orig"
             return orig_key in state
         return False
@@ -278,6 +280,15 @@ class BaseTrainer(ABC):
         self.save_metric_vars = trainer_conf.get("save_metric_vars", [])
         self.train_one_epoch_mode = trainer_conf.get("train_one_epoch", False)
 
+        metrics_conf = conf.get("metrics") or {}
+        if metrics_conf.get("type") == "combined":
+            configured_metrics = (metrics_conf.get("args") or {}).get("metrics") or {}
+            self.display_metrics = tuple(configured_metrics)
+        elif metrics_conf.get("type"):
+            self.display_metrics = (metrics_conf["type"],)
+        else:
+            self.display_metrics = DEFAULT_DISPLAY_METRICS
+
         training_metric = trainer_conf.get("training_metric", "train_loss" if self.skip_validation else "valid_loss")
         self.training_metric = training_metric
         direction = trainer_conf.get("training_metric_direction", "min")
@@ -292,7 +303,7 @@ class BaseTrainer(ABC):
         use_ema = trainer_conf.get("use_ema", False)
         if use_ema:
             ema_decay = trainer_conf.get("ema_decay", 0.9999)
-            self.ema: Optional[EMATracker] = EMATracker(self.model, decay=ema_decay)
+            self.ema: EMATracker | None = EMATracker(self.model, decay=ema_decay)
             ema_path = os.path.join(self.save_loc, "checkpoint_ema.pt")
             if self.load_weights and os.path.exists(ema_path):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
@@ -373,13 +384,17 @@ class BaseTrainer(ABC):
         self,
         epoch: int,
         results_dict: dict,
-        optimizer: Optional[Optimizer],
+        optimizer: Optimizer | None,
         pbar,
         phase: str = "train",
+        show_metrics: bool = True,
     ) -> None:
         """Update a tqdm progress bar with rolling-mean batch metrics."""
         parts = [f"Epoch: {epoch}"]
-        for key in (f"{phase}_loss", f"{phase}_acc", f"{phase}_mae"):
+        keys = [f"{phase}_loss"]
+        if show_metrics:
+            keys.extend(f"{phase}_{name}" for name in self.display_metrics)
+        for key in keys:
             if results_dict.get(key):
                 parts.append(f"{key}: {np.mean(results_dict[key]):.6f}")
         if results_dict.get(f"{phase}_std"):
@@ -389,6 +404,16 @@ class BaseTrainer(ABC):
         if self.rank == 0:
             pbar.update(1)
             pbar.set_description(" ".join(parts))
+
+    def _log_epoch_metrics(self, epoch: int, results_dict: dict, phase: str = "valid") -> None:
+        """Log aggregate metrics after a train or validation epoch."""
+        parts = [f"Epoch {epoch} {phase} metrics"]
+        for name in self.display_metrics:
+            values = results_dict.get(f"{phase}_{name}")
+            if values:
+                parts.append(f"{phase}_{name}: {np.mean(values):.6f}")
+        if len(parts) > 1 and self.rank == 0:
+            logger.info("%s", " ".join(parts))
 
     # ------------------------------------------------------------------
     # Checkpointing
@@ -425,7 +450,7 @@ class BaseTrainer(ABC):
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
 
         if self.mode == "fsdp2":
-            from credit.parallel.fsdp2 import fsdp2_state_dict, fsdp2_optimizer_state_dict
+            from credit.parallel.fsdp2 import fsdp2_optimizer_state_dict, fsdp2_state_dict
 
             # FSDP2: all ranks gather full (unsharded) state dicts, rank 0 saves.
             # The optimizer state must also be gathered — a raw
@@ -512,7 +537,7 @@ class BaseTrainer(ABC):
         scaler: GradScaler,
         scheduler: LRScheduler,
         metrics: dict[str, Any],
-        rollout_scheduler: Optional[Callable] = None,
+        rollout_scheduler: Callable | None = None,
         trial: bool = False,
     ) -> dict[str, Any]:
         """
@@ -630,19 +655,20 @@ class BaseTrainer(ABC):
                 valid_results = self.validate(epoch, valid_loader, valid_criterion, metrics)
                 if self.ema is not None:
                     self.ema.swap(self.model)
+                self._log_epoch_metrics(epoch, valid_results, phase="valid")
 
             # ---- Collect results ----
             results_dict["epoch"].append(epoch)
 
-            required_metrics = ["loss", "acc", "mae", "forecast_len", "history_len"]
+            required_metrics = ["loss", *self.display_metrics, "forecast_len", "history_len"]
             if isinstance(self.save_metric_vars, list) and len(self.save_metric_vars) > 0:
                 names = [
                     key.replace("train_", "")
-                    for key in train_results.keys()
+                    for key in train_results
                     if any(var in key for var in self.save_metric_vars)
                 ]
             elif isinstance(self.save_metric_vars, bool) and self.save_metric_vars:
-                names = [key.replace("train_", "") for key in train_results.keys()]
+                names = [key.replace("train_", "") for key in train_results]
             else:
                 names = []
             names = list(dict.fromkeys(names + required_metrics))  # preserves order; set() randomizes column order
@@ -674,6 +700,12 @@ class BaseTrainer(ABC):
                 "valid_forecast_len",
                 "train_loss",
                 "valid_loss",
+                "train_rmse",
+                "valid_rmse",
+                "train_r2score",
+                "valid_r2score",
+                "train_bias",
+                "valid_bias",
                 "train_acc",
                 "valid_acc",
                 "train_mae",
@@ -695,7 +727,7 @@ class BaseTrainer(ABC):
                     val = vals[-1]
                     if np.isfinite(val):
                         # Group train_*/valid_* under "Loss/", "Acc/", etc.; others under "train/"
-                        if key.startswith("train_") or key.startswith("valid_"):
+                        if key.startswith(("train_", "valid_")):
                             prefix, metric = key.split("_", 1)
                             tag = f"{metric}/{prefix}"
                         else:
@@ -750,7 +782,7 @@ class BaseTrainer(ABC):
             self.tb_writer.close()
 
         # Return best epoch results
-        if self.training_metric in results_dict and results_dict[self.training_metric]:
+        if results_dict.get(self.training_metric):
             metric_history = results_dict[self.training_metric]
             best_idx = metric_history.index(self.direction(metric_history))
             result = {k: v[best_idx] for k, v in results_dict.items() if len(v) > best_idx}

@@ -229,6 +229,7 @@ Here's a template for what your `custom_loss.py` file might look like:
 import torch
 import torch.nn as nn
 
+
 class CustomLoss(nn.Module):
     """
     Your custom loss function.
@@ -236,7 +237,8 @@ class CustomLoss(nn.Module):
     This class should inherit from torch.nn.Module and implement
     the forward method.
     """
-    def __init__(self, reduction='mean', **kwargs):
+
+    def __init__(self, reduction="mean", **kwargs):
         """
         Initializes your CustomLoss.
 
@@ -264,17 +266,16 @@ class CustomLoss(nn.Module):
         # Implement your custom loss calculation here.
         # Ensure to apply self.reduction (mean, sum, or none) to the final loss.
         # Example (replace with your actual logic):
-        loss_unreduced = (prediction - target).abs() # Example: element-wise absolute difference
+        loss_unreduced = (prediction - target).abs()  # Example: element-wise absolute difference
 
-        if self.reduction == 'mean':
+        if self.reduction == "mean":
             return torch.mean(loss_unreduced)
-        elif self.reduction == 'sum':
+        elif self.reduction == "sum":
             return torch.sum(loss_unreduced)
-        elif self.reduction == 'none':
+        elif self.reduction == "none":
             return loss_unreduced
         else:
             raise ValueError(f"Reduction method '{self.reduction}' not supported.")
-
 ```
 
 Remember to define your `__init__` method to handle any parameters your loss function might need (like `reduction` or other custom hyperparameters), and your `forward` method to perform the actual loss calculation.
@@ -295,7 +296,7 @@ import torch.nn as nn
 import logging
 
 # ... (other loss imports) ...
-from credit.losses.custom_loss import CustomLoss # NEW: Import your custom loss
+from credit.losses.custom_loss import CustomLoss  # NEW: Import your custom loss
 
 logger = logging.getLogger(__name__)
 
@@ -329,14 +330,13 @@ def base_losses(conf, reduction="mean", validation=False):
         "mae": nn.L1Loss,
         "msle": MSLELoss,
         # ... (other existing losses) ...
-        "custom-loss": CustomLoss, # NEW: Add your custom loss to the registry
+        "custom-loss": CustomLoss,  # NEW: Add your custom loss to the registry
     }
 
     if loss_type in losses:
         return losses[loss_type](**loss_params)
     else:
         raise ValueError(f"Loss type '{loss_type}' not supported")
-
 ```
 
 ### 3. Using Your Custom Loss in `conf.yaml`

@@ -299,7 +299,7 @@ to its column-parallel and row-parallel projection layers:
 
 ```python
 class MyBlock(nn.Module):
-    _tp_col = "proj_up"   # attribute path for the column-parallel layer
+    _tp_col = "proj_up"  # attribute path for the column-parallel layer
     _tp_row = "proj_out"  # attribute path for the row-parallel layer
     ...
 ```
@@ -321,9 +321,10 @@ class FeedForward(nn.Module):
     _tp_col = "layers.1"  # Conv2d(dim → dim*mult)
     _tp_row = "layers.4"  # Conv2d(dim*mult → dim)
 
+
 class Attention(nn.Module):
-    _tp_col = "to_qkv"   # Conv2d(dim → inner_dim*3)
-    _tp_row = "to_out"   # Conv2d(inner_dim → dim)
+    _tp_col = "to_qkv"  # Conv2d(dim → inner_dim*3)
+    _tp_row = "to_out"  # Conv2d(inner_dim → dim)
 ```
 
 Any model block that does **not** declare `_tp_col`/`_tp_row` is left

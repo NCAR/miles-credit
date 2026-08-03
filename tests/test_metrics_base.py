@@ -12,11 +12,16 @@ from credit.metrics import (
     LatWeightedMetrics,
     LatWeightedMetricsClimatology,
     LatWeightedMetricsEnsemble,
+    LogVarianceRatioMetric,
     MAEMetric,
     MSEMetric,
     R2ScoreMetric,
     RMSEMetric,
     load_metric,
+)
+from credit.metrics.anomaly import (
+    AnomalyCorrelationCoefficientMetric,
+    ForecastActivityMetric,
 )
 
 # ---------------------------------------------------------------------------
@@ -232,6 +237,126 @@ def test_r2score_climatology_forecast(tmp_path):
         # R² is near 0; small deviations from the epsilon in the denominator
         # are largest for low-variance variables (e.g. precip ~1e-8).
         assert out[f"r2score/{var_key}"] == pytest.approx(0.0, abs=1e-2)
+
+
+def test_log_variance_ratio_per_variable(tmp_path):
+    """Log variance ratio matches manual log10(var_pred) - log10(var_target)."""
+    metric = _make_metric(
+        LogVarianceRatioMetric, _make_scaler_file(tmp_path), metric_name="log_variance_ratio", var_weighting="none"
+    )
+    state = _make_state_dict()
+    out = metric(state)
+    for var_key in metric.var_keys:
+        p = state["y_processed"]["ERA5"][var_key].float()
+        t = state["y_target_processed"]["ERA5"][var_key].float()
+        var_pred = torch.mean((p - p.mean()) ** 2)
+        var_target = torch.mean((t - t.mean()) ** 2)
+        expected = torch.log10(var_pred + 1e-12) - torch.log10(var_target + 1e-12)
+        assert out[f"log_variance_ratio/{var_key}"] == pytest.approx(expected.item(), rel=1e-4), var_key
+
+
+def test_log_variance_ratio_equal_variance(tmp_path):
+    """Log variance ratio = 0 when pred == target."""
+    metric = _make_metric(
+        LogVarianceRatioMetric, _make_scaler_file(tmp_path), metric_name="log_variance_ratio", var_weighting="none"
+    )
+    g = torch.Generator().manual_seed(42)
+    pred = {
+        VAR_T: torch.randn(2, N_LEVELS, 1, 4, 5, generator=g),
+        VAR_SP: torch.randn(2, 1, 1, 4, 5, generator=g) * 1000.0,
+        VAR_PRECIP: torch.rand(2, 1, 1, 4, 5, generator=g) * 1e-4,
+    }
+    state = {"y_processed": {"ERA5": pred}, "y_target_processed": {"ERA5": {k: v.clone() for k, v in pred.items()}}}
+    out = metric(state)
+    for var_key in metric.var_keys:
+        assert out[f"log_variance_ratio/{var_key}"] == pytest.approx(0.0, abs=1e-4), var_key
+
+
+def test_log_variance_ratio_smooth_forecast_negative(tmp_path):
+    """A damped forecast (lower variance) produces a negative log variance ratio."""
+    metric = _make_metric(
+        LogVarianceRatioMetric, _make_scaler_file(tmp_path), metric_name="log_variance_ratio", var_weighting="none"
+    )
+    state = _make_state_dict()
+    # Damped forecast: pred = 0.5 * original_pred (halves the variance → log10(0.25) ≈ -0.60)
+    pred_damped = {k: 0.5 * v for k, v in state["y_processed"]["ERA5"].items()}
+    state_damped = {"y_processed": {"ERA5": pred_damped}, "y_target_processed": state["y_target_processed"]}
+    out = metric(state_damped)
+    for var_key in metric.var_keys:
+        assert out[f"log_variance_ratio/{var_key}"] < 0.0, var_key
+
+
+def test_log_variance_ratio_sharp_forecast_positive(tmp_path):
+    """An amplified forecast (higher variance) produces a positive log variance ratio."""
+    metric = _make_metric(
+        LogVarianceRatioMetric, _make_scaler_file(tmp_path), metric_name="log_variance_ratio", var_weighting="none"
+    )
+    # Use a clean state where pred and target have the same variance baseline.
+    g = torch.Generator().manual_seed(42)
+    base = {
+        VAR_T: torch.randn(2, N_LEVELS, 1, 4, 5, generator=g),
+        VAR_SP: torch.randn(2, 1, 1, 4, 5, generator=g) * 1000.0,
+        VAR_PRECIP: torch.randn(2, 1, 1, 4, 5, generator=g) * 1e-4,
+    }
+    # Amplified forecast: pred = 2.0 * base (4x the variance → log10(4) ≈ +0.60)
+    pred_sharp = {k: 2.0 * v for k, v in base.items()}
+    state = {"y_processed": {"ERA5": pred_sharp}, "y_target_processed": {"ERA5": base}}
+    out = metric(state)
+    for var_key in metric.var_keys:
+        assert out[f"log_variance_ratio/{var_key}"] > 0.0, var_key
+
+
+def test_log_variance_ratio_custom_eps(tmp_path):
+    """Custom eps is used inside the log10 terms."""
+    metric = _make_metric(
+        LogVarianceRatioMetric,
+        _make_scaler_file(tmp_path),
+        metric_name="log_variance_ratio",
+        var_weighting="none",
+        eps=1.0,
+    )
+    state = _make_state_dict()
+    out = metric(state)
+    for var_key in metric.var_keys:
+        p = state["y_processed"]["ERA5"][var_key].float()
+        t = state["y_target_processed"]["ERA5"][var_key].float()
+        var_pred = torch.mean((p - p.mean()) ** 2)
+        var_target = torch.mean((t - t.mean()) ** 2)
+        expected = torch.log10(var_pred + 1.0) - torch.log10(var_target + 1.0)
+        assert out[f"log_variance_ratio/{var_key}"] == pytest.approx(expected.item(), rel=1e-4), var_key
+
+
+def test_log_variance_ratio_bias_invariant(tmp_path):
+    """Log variance ratio is unaffected by a constant bias (translation-invariant).
+
+    Variance is mathematically translation-invariant; in float32 the invariance
+    is approximate for extreme bias magnitudes relative to the field scale, so
+    we use a moderate bias and a loose tolerance.
+    """
+    metric = _make_metric(
+        LogVarianceRatioMetric, _make_scaler_file(tmp_path), metric_name="log_variance_ratio", var_weighting="none"
+    )
+    state = _make_state_dict()
+    out_no_bias = metric(state)
+    # Add a moderate constant bias (comparable to the field scale, not 1e6
+    # which would destroy float32 precision for small-magnitude variables).
+    state_biased = {
+        "y_processed": {"ERA5": {k: v + 10.0 for k, v in state["y_processed"]["ERA5"].items()}},
+        "y_target_processed": state["y_target_processed"],
+    }
+    out_biased = metric(state_biased)
+    for var_key in metric.var_keys:
+        assert out_biased[f"log_variance_ratio/{var_key}"] == pytest.approx(
+            out_no_bias[f"log_variance_ratio/{var_key}"], abs=1e-2
+        ), var_key
+
+
+def test_load_metric_log_variance_ratio(tmp_path):
+    """load_metric dispatches 'log_variance_ratio' type."""
+    conf = _make_conf(_make_scaler_file(tmp_path), tmp_path)
+    conf["metrics"] = {"type": "log_variance_ratio", "args": {"var_weighting": "none"}}
+    metric = load_metric(conf)
+    assert isinstance(metric, LogVarianceRatioMetric)
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +581,14 @@ def test_load_metric_returns_combined(tmp_path):
     assert set(metric.metric_modules) == {"rmse", "mae", "bias"}
 
 
+def test_load_metric_defaults_to_training_metrics(tmp_path):
+    conf = _make_conf(_make_scaler_file(tmp_path), tmp_path)
+    del conf["metrics"]
+    metric = load_metric(conf)
+    assert isinstance(metric, BaseCombinedMetric)
+    assert set(metric.metric_modules) == {"rmse", "r2score", "bias"}
+
+
 def test_load_metric_unknown_type_raises(tmp_path):
     conf = _make_conf(_make_scaler_file(tmp_path), tmp_path)
     conf["metrics"]["type"] = "bogus"
@@ -468,6 +601,141 @@ def test_load_metric_single_type(tmp_path):
     conf["metrics"] = {"type": "rmse", "args": {"var_weighting": "none"}}
     metric = load_metric(conf)
     assert isinstance(metric, RMSEMetric)
+
+
+# ---------------------------------------------------------------------------
+# Anomaly metrics (ACC, forecast activity)
+# ---------------------------------------------------------------------------
+
+
+def _make_anomaly_metric(metric_cls, scaler_path=None, metric_name=None, **kwargs):
+    """An anomaly metric wired to the synthetic channel schema, no lat weights."""
+    kwargs.setdefault("var_weighting", "none")
+    kwargs.setdefault("channel_schema", _make_schema())
+    if metric_name is None:
+        metric_name = metric_cls.__name__.lower().replace("metric", "")
+    return metric_cls(metric_name=metric_name, **kwargs)
+
+
+def _make_climatology_dict():
+    """Per-variable climatology fields matching _make_state_dict shapes."""
+    g = torch.Generator().manual_seed(99)
+    return {
+        VAR_T: torch.randn(1, N_LEVELS, 1, 4, 5, generator=g) * 0.5,
+        VAR_SP: torch.randn(1, 1, 1, 4, 5, generator=g) * 500.0,
+        VAR_PRECIP: torch.rand(1, 1, 1, 4, 5, generator=g) * 1e-5,
+    }
+
+
+def test_acc_perfect_forecast(tmp_path):
+    """ACC = 1 when pred == target (same anomaly pattern)."""
+    clim = _make_climatology_dict()
+    metric = _make_anomaly_metric(AnomalyCorrelationCoefficientMetric, metric_name="acc", climatology=clim)
+    g = torch.Generator().manual_seed(7)
+    pred = {
+        VAR_T: torch.randn(2, N_LEVELS, 1, 4, 5, generator=g),
+        VAR_SP: torch.randn(2, 1, 1, 4, 5, generator=g) * 1000.0,
+        VAR_PRECIP: torch.rand(2, 1, 1, 4, 5, generator=g) * 1e-4,
+    }
+    state = {"y_processed": {"ERA5": pred}, "y_target_processed": {"ERA5": {k: v.clone() for k, v in pred.items()}}}
+    out = metric(state)
+    for var_key in metric.var_keys:
+        assert out[f"acc/{var_key}"] == pytest.approx(1.0, abs=2e-2), var_key
+
+
+def test_acc_matches_manual_computation(tmp_path):
+    """ACC matches the manual dot-product / (||d_f|| * ||d_t||) formula."""
+    clim = _make_climatology_dict()
+    metric = _make_anomaly_metric(AnomalyCorrelationCoefficientMetric, metric_name="acc", climatology=clim)
+    state = _make_state_dict()
+    out = metric(state)
+    for var_key in metric.var_keys:
+        p = state["y_processed"]["ERA5"][var_key].float()
+        t = state["y_target_processed"]["ERA5"][var_key].float()
+        c = clim[var_key].to(p.device, p.dtype).expand_as(p)
+        d_f = (p - c) - (p - c).mean()
+        d_t = (t - c) - (t - c).mean()
+        expected = (d_f * d_t).mean() / (torch.sqrt((d_f**2).mean() + 1e-12) * torch.sqrt((d_t**2).mean() + 1e-12))
+        assert out[f"acc/{var_key}"] == pytest.approx(expected.item(), rel=1e-4), var_key
+
+
+def test_acc_climatology_from_validation_data(tmp_path):
+    """ACC works when climatology is accumulated from validation batches."""
+    metric = _make_anomaly_metric(AnomalyCorrelationCoefficientMetric, metric_name="acc")
+    # First batch — establishes running mean climatology.
+    state1 = _make_state_dict(seed=0)
+    out1 = metric(state1)
+    assert "acc" in out1
+    # Second batch — climatology updated, ACC should still be finite.
+    state2 = _make_state_dict(seed=1)
+    out2 = metric(state2)
+    assert "acc" in out2
+    for var_key in metric.var_keys:
+        assert np.isfinite(out2[f"acc/{var_key}"]), var_key
+
+
+def test_activity_matches_manual_computation(tmp_path):
+    """Forecast activity (SDAF) matches sqrt(mean(d_f^2))."""
+    clim = _make_climatology_dict()
+    metric = _make_anomaly_metric(ForecastActivityMetric, metric_name="activity", climatology=clim)
+    state = _make_state_dict()
+    out = metric(state)
+    for var_key in metric.var_keys:
+        p = state["y_processed"]["ERA5"][var_key].float()
+        c = clim[var_key].to(p.device, p.dtype).expand_as(p)
+        d_f = (p - c) - (p - c).mean()
+        expected = torch.sqrt((d_f**2).mean() + 1e-12)
+        assert out[f"activity/{var_key}"] == pytest.approx(expected.item(), rel=1e-4), var_key
+
+
+def test_activity_reduced_for_smooth_forecast(tmp_path):
+    """A damped forecast has lower activity than the full forecast."""
+    clim = _make_climatology_dict()
+    metric = _make_anomaly_metric(ForecastActivityMetric, metric_name="activity", climatology=clim)
+    state = _make_state_dict()
+    # Damped forecast: pred = 0.5 * original_pred + 0.5 * clim (closer to climatology)
+    pred_damped = {}
+    for var_key, p in state["y_processed"]["ERA5"].items():
+        c = clim[var_key].to(p.device, p.dtype).expand_as(p)
+        pred_damped[var_key] = 0.5 * p + 0.5 * c
+    state_damped = {"y_processed": {"ERA5": pred_damped}, "y_target_processed": state["y_target_processed"]}
+    out_full = metric(state)
+    out_damped = metric(state_damped)
+    for var_key in metric.var_keys:
+        assert out_damped[f"activity/{var_key}"] < out_full[f"activity/{var_key}"], var_key
+
+
+def test_anomaly_metrics_in_combined(tmp_path):
+    """ACC and activity work inside a BaseCombinedMetric."""
+    clim = _make_climatology_dict()
+    metric = BaseCombinedMetric(
+        channel_schema=_make_schema(),
+        metrics={"acc": {"climatology": clim}, "activity": {"climatology": clim}},
+        var_weighting="none",
+    )
+    state = _make_state_dict()
+    out = metric(state)
+    assert "acc" in out
+    assert "activity" in out
+    for var_key in (VAR_T, VAR_SP, VAR_PRECIP):
+        assert f"acc/{var_key}" in out
+        assert f"activity/{var_key}" in out
+
+
+def test_load_metric_acc(tmp_path):
+    """load_metric dispatches 'acc' type to AnomalyCorrelationCoefficientMetric."""
+    conf = _make_conf(_make_scaler_file(tmp_path), tmp_path)
+    conf["metrics"] = {"type": "acc", "args": {"var_weighting": "none"}}
+    metric = load_metric(conf)
+    assert isinstance(metric, AnomalyCorrelationCoefficientMetric)
+
+
+def test_load_metric_activity(tmp_path):
+    """load_metric dispatches 'activity' type to ForecastActivityMetric."""
+    conf = _make_conf(_make_scaler_file(tmp_path), tmp_path)
+    conf["metrics"] = {"type": "activity", "args": {"var_weighting": "none"}}
+    metric = load_metric(conf)
+    assert isinstance(metric, ForecastActivityMetric)
 
 
 # ---------------------------------------------------------------------------

@@ -287,14 +287,23 @@ class BaseVariableMetric(nn.Module, ABC):
     # Forward
     # ------------------------------------------------------------------
 
-    def _score_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def _score_variable(self, pred: torch.Tensor, target: torch.Tensor, var_key: str | None = None) -> torch.Tensor:
         """Compute the per-variable scalar score from pred and target tensors.
 
         Default implementation calls :meth:`compute_variable` for the
         elementwise error, applies latitude weighting, takes the spatial mean,
         and finalizes via :meth:`reduce`. Subclasses that need access to the
-        full target tensor (e.g. R², which requires the target mean) override
-        this method instead of ``compute_variable``/``reduce``.
+        full target tensor (e.g. R², which requires the target mean) or to the
+        variable key (e.g. anomaly metrics that look up a per-variable
+        climatology) override this method instead of
+        ``compute_variable``/``reduce``.
+
+        Args:
+            pred: forecast tensor for one variable, shape (B, C, T, H, W).
+            target: validating "truth" tensor, same shape as ``pred``.
+            var_key: the variable's registry key (e.g.
+                ``"ERA5/prognostic/3d/temperature"``); ``None`` when the
+                caller does not supply it (backward compatibility).
         """
         elementwise = self.compute_variable(pred, target)
         if elementwise.shape != pred.shape:
@@ -347,7 +356,7 @@ class BaseVariableMetric(nn.Module, ABC):
                 # Physical-unit magnitudes (e.g. SP ~1e5 Pa) overflow fp16 — score in fp32.
                 p = pred[var_key].float()
                 t = target[var_key].float().to(p.device)
-                var_score = self._score_variable(p, t)
+                var_score = self._score_variable(p, t, var_key=var_key)
                 var_scores[var_key] = var_score
                 self.last_var_scores[var_key] = var_score.item()
 

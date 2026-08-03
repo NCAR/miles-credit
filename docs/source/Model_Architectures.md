@@ -139,6 +139,7 @@ Define your model class and apply `@register_model` with the type key you want t
 import torch.nn as nn
 from credit.models import register_model
 
+
 @register_model("my_model", "Loading my custom model ...")
 class MyModel(nn.Module):
     def __init__(self, in_channels: int, hidden_dim: int = 256):

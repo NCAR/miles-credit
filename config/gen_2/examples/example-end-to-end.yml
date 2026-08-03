@@ -310,7 +310,7 @@ metrics:
   args:
     metrics:                          # registry names of univariate metrics
       rmse: {}
-      mae: {}
+      r2score: {}
       bias: {}
     # base_metric_overrides:          # optional per-variable metric overrides
     #   ERA5/diagnostic/2d/total_precipitation: {metric: "mae"}

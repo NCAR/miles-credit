@@ -232,12 +232,9 @@ def main_cli():
         train_criterion.to(device)
         optimizer.add_param_group({"params": list(train_criterion.parameters())})
         logger.info("BaseLoss learnable variance weights added to the optimizer.")
-    from credit.metrics import LatWeightedMetrics, load_metric
+    from credit.metrics import load_metric
 
-    if "metrics" in conf and isinstance(conf.get("metrics", {}).get("type"), str):
-        metrics = load_metric(conf)
-    else:
-        metrics = LatWeightedMetrics(conf)
+    metrics = load_metric(conf)
 
     trainer_cls = load_trainer(conf)
     trainer = trainer_cls(model, rank, conf)

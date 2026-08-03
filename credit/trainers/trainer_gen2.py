@@ -12,7 +12,7 @@ import tqdm
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.losses import BaseLoss, is_crps_loss
-from credit.metrics import BaseCombinedMetric
+from credit.metrics import BaseCombinedMetric, BaseVariableMetric
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.domain import (
     gather_spatial,
@@ -507,7 +507,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     self.ema.update(self.model)
 
             if full_data_dict.get("y_pred") is not None and full_data_dict.get("y") is not None:
-                if isinstance(metrics, BaseCombinedMetric):
+                if isinstance(metrics, (BaseCombinedMetric, BaseVariableMetric)):
                     metrics_dict = metrics(full_data_dict)
                 else:
                     metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
@@ -677,7 +677,7 @@ class TrainerERA5Gen2(BaseTrainer):
                                 full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
                                 full_data_dict["y_pred"],
                             ).mean()
-                        if isinstance(metrics, BaseCombinedMetric):
+                        if isinstance(metrics, (BaseCombinedMetric, BaseVariableMetric)):
                             metrics_dict = metrics(full_data_dict)
                         else:
                             metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
@@ -703,7 +703,14 @@ class TrainerERA5Gen2(BaseTrainer):
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
                 results_dict["valid_history_len"].append(self.valid_history_len)
 
-                self._log_batch_progress(epoch, results_dict, optimizer=None, pbar=batch_group_generator, phase="valid")
+                self._log_batch_progress(
+                    epoch,
+                    results_dict,
+                    optimizer=None,
+                    pbar=batch_group_generator,
+                    phase="valid",
+                    show_metrics=False,
+                )
 
         batch_group_generator.close()
 

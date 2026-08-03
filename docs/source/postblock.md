@@ -91,13 +91,14 @@ The parser will add the `data` and `model` fields from the main config to `post_
 ```python
 from torch import nn
 
+
 class Foo(nn.Module):
     def __init__(self, post_conf):
         super().__init__()
         self.bar = post_conf["foo"]["bar"]
-        
+
         # accessing data or model conf
-        lead_time_periods = post_conf["data"]["lead_time_periods"] 
+        lead_time_periods = post_conf["data"]["lead_time_periods"]
 
     def forward(self, x):
         # x will be a dictionary of the previous state x and y_pred
@@ -109,9 +110,8 @@ class Foo(nn.Module):
 
         # do stuff ...
 
-        x["y_pred"] = y_pred   # pack back into the dictionary
+        x["y_pred"] = y_pred  # pack back into the dictionary
         return x
-
 ```
 
 ## Define config fields
@@ -137,6 +137,7 @@ Inside `credit/postblock.py`, append your postblock to the list of postblock ope
 from credit.skebs import SKEBS
 import logger
 from torch import nn
+
 
 class PostBlock(nn.Module):
     def __init__(self, post_conf):

@@ -25,6 +25,8 @@ from torch import nn
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_METRIC_TYPES = ("rmse", "r2score", "bias")
+
 # ---------------------------------------------------------------------------
 # Config-driven dispatch: maps config-file keys -> class (used by load_metric).
 # Registry entries are either:
@@ -36,6 +38,9 @@ _METRIC_REGISTRY = {
     "mae": ("credit.metrics.common", "MAEMetric"),
     "bias": ("credit.metrics.common", "BiasMetric"),
     "r2score": ("credit.metrics.common", "R2ScoreMetric"),
+    "log_variance_ratio": ("credit.metrics.common", "LogVarianceRatioMetric"),
+    "acc": ("credit.metrics.anomaly", "AnomalyCorrelationCoefficientMetric"),
+    "activity": ("credit.metrics.anomaly", "ForecastActivityMetric"),
     "combined": ("credit.metrics.base", "BaseCombinedMetric"),
 }
 
@@ -48,6 +53,9 @@ _CLASS_SOURCES = {
     "MAEMetric": ("credit.metrics.common", "MAEMetric"),
     "BiasMetric": ("credit.metrics.common", "BiasMetric"),
     "R2ScoreMetric": ("credit.metrics.common", "R2ScoreMetric"),
+    "LogVarianceRatioMetric": ("credit.metrics.common", "LogVarianceRatioMetric"),
+    "AnomalyCorrelationCoefficientMetric": ("credit.metrics.anomaly", "AnomalyCorrelationCoefficientMetric"),
+    "ForecastActivityMetric": ("credit.metrics.anomaly", "ForecastActivityMetric"),
     "LatWeightedMetrics": ("credit.metrics.gen_1.metrics", "LatWeightedMetrics"),
     "LatWeightedMetricsClimatology": ("credit.metrics.gen_1.metrics", "LatWeightedMetricsClimatology"),
     "LatWeightedMetricsEnsemble": ("credit.metrics.gen_1.metrics", "LatWeightedMetricsEnsemble"),
@@ -148,11 +156,15 @@ def load_metric(conf, validation=False):
     :func:`credit.losses.load_loss`. The Gen 2 ``combined`` type returns a
     :class:`credit.metrics.base.BaseCombinedMetric` holding one or more
     :class:`credit.metrics.base.BaseVariableMetric` subclasses; any other
-    registered ``type`` returns a single metric instance.
+    registered ``type`` returns a single metric instance. When the ``metrics``
+    section is omitted, the default combined metric contains ``rmse``,
+    ``r2score``, and ``bias`` with uniform variable weighting.
 
     Args:
-        conf (dict): Configuration dictionary. Must contain a ``metrics``
-            section in the new-style ``{type, args}`` format::
+        conf (dict): Configuration dictionary. An optional ``metrics``
+            section uses the new-style ``{type, args}`` format; when omitted,
+            ``rmse``, ``r2score``, and ``bias`` are loaded with uniform
+            variable weighting::
 
                 metrics:
                   type: combined
@@ -177,7 +189,15 @@ def load_metric(conf, validation=False):
 
     load_custom_objects(conf)
 
-    metrics_conf = conf["metrics"]
+    metrics_conf = conf.get("metrics")
+    if not metrics_conf:
+        metrics_conf = {
+            "type": "combined",
+            "args": {
+                "metrics": {metric_type: {} for metric_type in DEFAULT_METRIC_TYPES},
+                "var_weighting": "none",
+            },
+        }
     metric_type = metrics_conf["type"]
     args = dict(metrics_conf.get("args") or {})
 
