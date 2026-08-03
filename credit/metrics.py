@@ -1,7 +1,9 @@
-import torch
-import numpy as np
 from datetime import datetime
-from credit.losses.weighted_loss import latitude_weights
+
+import numpy as np
+import torch
+
+from credit.losses.gen_1.weighted_loss import latitude_weights
 from credit.parallel.domain import shard_lat_weights
 
 
@@ -314,9 +316,11 @@ class LatWeightedMetricsEnsemble:
 
 
 if __name__ == "__main__":
-    import yaml
     import logging
+
     import xarray as xr
+    import yaml
+
     from credit.parser import credit_main_parser
 
     logging.basicConfig(

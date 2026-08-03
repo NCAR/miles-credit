@@ -59,7 +59,7 @@ _CLASS_SOURCES = {
 #          which imports credit.losses.logcosh on the spot and returns the class.
 def __getattr__(name):
     if name == "VariableTotalLoss2D":
-        from credit.losses.weighted_loss import VariableTotalLoss2D
+        from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
 
         return VariableTotalLoss2D
     if name == "BaseLoss":
@@ -67,7 +67,7 @@ def __getattr__(name):
 
         return BaseLoss
     if name == "DownscalingLoss":
-        from credit.losses.downscaling_loss import DownscalingLoss
+        from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
         return DownscalingLoss
     if name in _CLASS_SOURCES:
@@ -222,8 +222,8 @@ def load_loss(conf, reduction="none", validation=False):
     from credit.registry import (
         load_custom_objects,
     )  # imported here so that importing credit.losses does not automatically load credit.registry
-    from credit.losses.weighted_loss import VariableTotalLoss2D
-    from credit.losses.downscaling_loss import DownscalingLoss
+    from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
+    from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
 
@@ -252,7 +252,7 @@ def load_loss(conf, reduction="none", validation=False):
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
     if is_downscaling:
-        from credit.losses.downscaling_loss import DownscalingLoss
+        from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
         logger.info("Loaded DownscalingLoss (%s)", mode)
         return DownscalingLoss(conf, validation=validation)
@@ -267,7 +267,7 @@ def load_loss(conf, reduction="none", validation=False):
         )
 
     if use_weighted_loss:
-        from credit.losses.weighted_loss import VariableTotalLoss2D
+        from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
 
         logger.info("Loaded VariableTotalLoss2D (%s)", mode)
         return VariableTotalLoss2D(conf, validation=validation)

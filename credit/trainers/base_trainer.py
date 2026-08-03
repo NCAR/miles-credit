@@ -16,16 +16,17 @@ import os
 import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
-from typing import Any, Dict, Optional, Callable
+from collections.abc import Callable
+from typing import Any, Optional
 
 import numpy as np
-from tqdm import tqdm
 import pandas as pd
 import torch
 from torch.amp import GradScaler
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
@@ -215,7 +216,7 @@ class EMATracker:
 
 
 class BaseTrainer(ABC):
-    def __init__(self, model: torch.nn.Module, rank: int, conf: Dict[str, Any]):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict[str, Any]):
         """
         Abstract base class for training and validating machine learning models.
 
@@ -350,8 +351,8 @@ class BaseTrainer(ABC):
         criterion: torch.nn.Module,
         scaler: GradScaler,
         scheduler: LRScheduler,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         raise NotImplementedError
 
     @abstractmethod
@@ -360,8 +361,8 @@ class BaseTrainer(ABC):
         epoch: int,
         valid_loader: DataLoader,
         criterion: torch.nn.Module,
-        metrics: Dict[str, Any],
-    ) -> Dict[str, float]:
+        metrics: dict[str, Any],
+    ) -> dict[str, float]:
         raise NotImplementedError
 
     # ------------------------------------------------------------------
@@ -502,7 +503,7 @@ class BaseTrainer(ABC):
 
     def fit(
         self,
-        conf: Dict[str, Any],
+        conf: dict[str, Any],
         train_loader: DataLoader,
         valid_loader: DataLoader,
         optimizer: Optimizer,
@@ -510,10 +511,10 @@ class BaseTrainer(ABC):
         valid_criterion: torch.nn.Module,
         scaler: GradScaler,
         scheduler: LRScheduler,
-        metrics: Dict[str, Any],
+        metrics: dict[str, Any],
         rollout_scheduler: Optional[Callable] = None,
         trial: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Run the full training loop.
 
@@ -527,7 +528,7 @@ class BaseTrainer(ABC):
             trial: Optuna trial object, or False.
 
         Returns:
-            Dict with the best epoch's results.
+            dict with the best epoch's results.
         """
         os.makedirs(self.save_loc, exist_ok=True)
 
@@ -535,7 +536,7 @@ class BaseTrainer(ABC):
         epochs = self.epochs
 
         # Reload results log if resuming from a checkpoint
-        results_dict: Dict[str, list] = defaultdict(list)
+        results_dict: dict[str, list] = defaultdict(list)
         log_path = os.path.join(self.save_loc, "training_log.csv")
         if start_epoch > 0 and self.load_weights and os.path.exists(log_path):
             saved = pd.read_csv(log_path)

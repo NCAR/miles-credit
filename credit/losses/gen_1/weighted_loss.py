@@ -4,8 +4,8 @@ import numpy as np
 import logging
 
 from credit.losses import _instantiate_loss
-from credit.losses.spectral import SpectralLoss2D
-from credit.losses.power import PSDLoss
+from credit.losses.gen_1.spectral import SpectralLoss2D
+from credit.losses.gen_1.power import PSDLoss
 
 
 logger = logging.getLogger(__name__)
