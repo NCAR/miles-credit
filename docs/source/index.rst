@@ -52,6 +52,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>
    Working with Loss Functions <Losses.md>
+   Gen 1 Losses <Losses_gen1.md>
 
 .. toctree::
    :maxdepth: 2
