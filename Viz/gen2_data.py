@@ -113,7 +113,18 @@ def load_truth_dataset(conf: dict, valid_times, variables: list[str], source: st
     rename_map = {lon_name: "longitude", lat_name: "latitude"}
     if level_coord in truth.dims:
         rename_map[level_coord] = "level"
-    return truth.rename(rename_map)
+    truth = truth.rename(rename_map)
+
+    # Stash the real CESM hybrid-sigma level values on a separate aux coordinate
+    # before align_truth_to_prediction overwrites "level" itself with prediction's
+    # plain 0..31 index (needed so .sel(level=idx) means the same thing on both
+    # datasets -- see align_truth_to_prediction). "level_value" is for display
+    # only (dropdown labels, axis ticks); xarray carries it along automatically
+    # through any .sel()/.isel() on the "level" dimension.
+    if "level" in truth.coords:
+        truth = truth.assign_coords(level_value=("level", truth["level"].values))
+
+    return truth
 
 
 def align_truth_to_prediction(truth_ds: xr.Dataset, pred_ds: xr.Dataset, time_coord: str = "time") -> xr.Dataset:
@@ -145,6 +156,30 @@ def load_truth_and_prediction(
     truth = load_truth_dataset(conf, pred["time"].values, variables=variables, source=source)
     truth = align_truth_to_prediction(truth, pred)
     return truth, pred
+
+
+def load_ic_snapshot(
+    conf: dict, variables: list[str], init_time: str | None = None, source: str = "CESM"
+) -> xr.Dataset:
+    """Load the single input timestep a forecast would start from, before any rollout has run.
+
+    Reads straight from the source zarr(s) (same path resolution as load_truth_dataset) and
+    selects the nearest timestep to *init_time* -- useful for displaying e.g. SST so a user can
+    click a sensible location on it, without waiting on a model run.
+    """
+    if init_time is None:
+        init_time = conf["inference"]["single_forecast"]["start_datetime"]
+    ds = load_truth_dataset(conf, [init_time], variables=variables, source=source)
+
+    # CFTimeIndex.sel(method="nearest") compares raw values rather than coercing a string label
+    # (unlike exact/label indexing, which does parse ISO strings) -- so it errors on a plain str
+    # against cftime.datetime entries. Build a cftime object of the index's own subclass instead.
+    time_vals = ds["time"].values
+    target = pd.Timestamp(init_time)
+    if len(time_vals) and isinstance(time_vals[0], cftime.datetime):
+        cf_type = type(time_vals[0])
+        target = cf_type(target.year, target.month, target.day, target.hour, target.minute, target.second)
+    return ds.sel(time=target, method="nearest")
 
 
 if __name__ == "__main__":

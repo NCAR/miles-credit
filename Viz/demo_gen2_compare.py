@@ -50,7 +50,18 @@ nt = pred.sizes["time"]
 time_strings = [t.strftime("%Y-%m-%d %H:%M") for t in times]
 ts_x_data = np.arange(nt, dtype=np.float32)
 
-level_items = ["default"] + [str(int(v)) for v in pred["level"].values] if "level" in pred.dims else ["default"]
+# level_items values are the plain 0..31 index (what .sel(level=...) expects on
+# both datasets, see gen2_data.align_truth_to_prediction); titles show the real
+# CESM hybrid-sigma level value (truth["level_value"]) for readability.
+if "level" in pred.dims:
+    real_levels = truth["level_value"].values if "level_value" in truth.coords else pred["level"].values
+    level_value_labels = [f"{float(v):.2f}" for v in real_levels]
+    level_items = [{"title": "default", "value": "default"}] + [
+        {"title": label, "value": str(i)} for i, label in enumerate(level_value_labels)
+    ]
+else:
+    level_value_labels = []
+    level_items = [{"title": "default", "value": "default"}]
 
 if DEFAULT_VAR not in variable_items:
     DEFAULT_VAR = variable_items[0]
@@ -111,6 +122,20 @@ def update_contours_for_panels(time_idx, state, target_panels):
 vmin, vmax = get_global_range(DEFAULT_VAR, parse_level("default"))
 base_clim = (vmin, vmax)
 
+CMAP_ITEMS = [
+    "viridis",
+    "plasma",
+    "inferno",
+    "magma",
+    "turbo",
+    "RdYlBu_r",
+    "BrBG",
+    "PuOr_r",
+    "rainbow",
+    "Blues_r",
+    "Reds",
+]
+
 # ============================================================
 # Vertical slice (forecast field only, for now)
 # ============================================================
@@ -145,9 +170,29 @@ plotter = pv.Plotter(
 
 border_actors = [r.add_border(color="black", width=10.0) for r in plotter.renderers]
 
+# Title strips for panels 1 & 2 (Forecast / Diff): separate, non-interactive, fixed-viewport
+# renderers above each data panel (viewport set below alongside the colorbar strips). Keeping
+# the label outside the data renderer means panning/zooming that renderer's camera can never
+# scroll the field behind the label or shrink the data window below it.
+title_renderers = [VtkRenderer(), VtkRenderer()]
+for _r in title_renderers:
+    _r.SetBackground(1.0, 1.0, 1.0)
+    _r.SetInteractive(False)
+    plotter.ren_win.AddRenderer(_r)
+
 panels = {
     "forecast": MapPanel(
-        plotter, 0, 0, lon, lat, coast_texture, coast_plane, title="Forecast", cmap="viridis", show_scalar_bar=False
+        plotter,
+        0,
+        0,
+        lon,
+        lat,
+        coast_texture,
+        coast_plane,
+        title="Forecast",
+        cmap="viridis",
+        show_scalar_bar=False,
+        title_renderer=title_renderers[0],
     ),
     "diff": MapPanel(
         plotter,
@@ -160,6 +205,7 @@ panels = {
         title="Difference (Forecast − Truth)",
         cmap="coolwarm",
         show_scalar_bar=False,
+        title_renderer=title_renderers[1],
     ),
     "slice": VerticalSlicePanel(plotter, 1, 0, title="Vertical Slice", cmap="viridis", border_actor=border_actors[2]),
     "ts": TimeSeriesPanel(plotter, 1, 1, border_actor=border_actors[3]),
@@ -195,10 +241,11 @@ plotter.enable_custom_trackball_style(
 # Colorbar renderer strips
 # ============================================================
 CBAR_STRIP = 0.06
+TITLE_STRIP = 0.05
 
 _data_vp = [
-    (0.0, 0.5 + CBAR_STRIP, 0.5, 1.0),  # Forecast
-    (0.5, 0.5 + CBAR_STRIP, 1.0, 1.0),  # Diff
+    (0.0, 0.5 + CBAR_STRIP, 0.5, 1.0 - TITLE_STRIP),  # Forecast
+    (0.5, 0.5 + CBAR_STRIP, 1.0, 1.0 - TITLE_STRIP),  # Diff
     (0.0, 0.0 + CBAR_STRIP, 0.5, 0.5),  # Vertical slice
 ]
 _cbar_vp = [
@@ -206,6 +253,12 @@ _cbar_vp = [
     (0.5, 0.5, 1.0, 0.5 + CBAR_STRIP),
     (0.0, 0.0, 0.5, 0.0 + CBAR_STRIP),
 ]
+_title_vp = [
+    (0.0, 1.0 - TITLE_STRIP, 0.5, 1.0),  # Forecast
+    (0.5, 1.0 - TITLE_STRIP, 1.0, 1.0),  # Diff
+]
+for _r, vp in zip(title_renderers, _title_vp):
+    _r.SetViewport(*vp)
 
 plotter.renderers[3].SetViewport(0.5, 0.0, 1.0, 0.5)
 
@@ -232,7 +285,10 @@ for cmap_name, cvp in zip(_panel_cmaps, _cbar_vp):
     sb.SetPosition(0.175, 0.1)
     sb.SetPosition2(0.65, 0.78)
     sb.SetBarRatio(0.4)
-    sb.SetLabelFormat("%.1f")
+    # %.2g (2 significant figures, auto-switches to scientific notation) instead of a fixed
+    # %.1f -- a flat 1-decimal format rounds any small-magnitude variable (e.g. Qtot ~1e-3) to
+    # "0.0" on every tick.
+    sb.SetLabelFormat("%.2g")
     ltp = sb.GetLabelTextProperty()
     ltp.SetFontSize(15)
     ltp.SetColor(0.0, 0.0, 0.0)
@@ -325,6 +381,8 @@ def _zoom_at_cursor(direction):
     camera.position = (px + dx, py + dy, pz)
     camera.focal_point = (fx + dx, fy + dy, fz)
 
+    if renderer in (plotter.renderers[0], plotter.renderers[1]):
+        _user_interacted[0] = True
     _clamp_camera()
     ctrl.view_update()
 
@@ -377,6 +435,7 @@ def _on_pan_end(obj, event):
     if event_is_over_vertical_slice():
         panels["slice"].restore_camera_state()
     elif not event_is_over_ts_chart():
+        _user_interacted[0] = True
         _clamp_camera()
         _update_slice_from_camera()
     ctrl.view_update()
@@ -400,10 +459,14 @@ state, ctrl = server.state, server.controller
 
 state.variable_items = variable_items
 state.level_items = level_items
+state.cmap_items = CMAP_ITEMS
 
 state.base_var = DEFAULT_VAR
 state.base_has_level = has_level(pred, DEFAULT_VAR)
 state.base_level = "default"
+state.base_cmap = "viridis"
+state.panel2_mode = "Difference"
+state.panel2_mode_items = ["Difference", "Truth"]
 state.t_index = 0
 state.time_text = time_strings[0]
 state.latency_text = "Ready"
@@ -420,11 +483,17 @@ state.c0_line_width = 1.2
 
 state.slice_variable_items = slice_variable_items
 state.slice_var = "T" if "T" in slice_variable_items else (slice_variable_items[0] if slice_variable_items else "")
+state.slice_cmap = "viridis"
+state.slice_n_contours = 10
 state.slice_orientation = "latitude"
 state.slice_lat_value = 0.0
 state.slice_lon_value = 260.0
 state.slice_orientation_items = ["latitude", "longitude"]
 state.slice_panel_visible = False
+# x-axis sub-range for the slice: longitude range when orientation="latitude"
+# (x=longitude), latitude range when orientation="longitude" (x=latitude).
+state.slice_lon_range = [float(lon.min()), float(lon.max())]
+state.slice_lat_range = [float(lat.min()), float(lat.max())]
 
 state.ts_picking_enabled = False
 state.ts_point_picked = False
@@ -444,20 +513,27 @@ def refresh_panels():
 
     pred_arr = get_2d_field(pred, var, t, lev)
     truth_arr = get_2d_field(truth, var, t, lev)
-    diff_arr = pred_arr - truth_arr
 
     clim = (state.base_vmin, state.base_vmax)
     panels["forecast"].update_base(pred_arr, clim=clim)
 
-    diff_clim = get_diff_clim(diff_arr)
-    panels["diff"].update_base(diff_arr, clim=diff_clim)
-    cbar_luts[1].scalar_range = diff_clim
+    if state.panel2_mode == "Truth":
+        panels["diff"].update_base(truth_arr, clim=clim)
+        cbar_luts[1].scalar_range = clim
+    else:
+        diff_arr = pred_arr - truth_arr
+        diff_clim = get_diff_clim(diff_arr)
+        panels["diff"].update_base(diff_arr, clim=diff_clim)
+        cbar_luts[1].scalar_range = diff_clim
 
     update_contours_for_panels(t, state, map_panels)
 
 
 def update_vertical_slice():
     if not slice_variable_items:
+        return
+    if not state.slice_panel_visible:
+        # Panel hidden -- skip the dask read entirely instead of computing a slice nobody sees.
         return
     x, levels, arr, title = get_vertical_slice(
         ds=pred,
@@ -467,8 +543,24 @@ def update_vertical_slice():
         lat_value=float(state.slice_lat_value),
         lon_value=float(state.slice_lon_value),
     )
+
+    x_range = state.slice_lon_range if state.slice_orientation == "latitude" else state.slice_lat_range
+    mask = (x >= x_range[0]) & (x <= x_range[1])
+    if mask.sum() >= 2:
+        x = x[mask]
+        arr = arr[mask, :]
+
     vmin_s, vmax_s = get_slice_global_range(state.slice_var)
-    panels["slice"].set_slice(x=x, levels=levels, arr=arr, clim=(vmin_s, vmax_s), title=title)
+    panels["slice"].set_slice(
+        x=x,
+        levels=levels,
+        arr=arr,
+        clim=(vmin_s, vmax_s),
+        title=title,
+        level_labels=level_value_labels,
+        show_axis_labels=True,
+        n_contours=int(state.slice_n_contours),
+    )
     cbar_luts[2].scalar_range = (vmin_s, vmax_s)
 
 
@@ -489,10 +581,12 @@ def _update_slice_lines():
         plotter.subplot(panel.row, panel.col)
         if state.slice_orientation == "latitude":
             lat_val = float(state.slice_lat_value)
-            mesh = make_dashed_line_mesh(lon_min, lat_val, lon_max, lat_val, z=5.0)
+            x0, x1 = state.slice_lon_range
+            mesh = make_dashed_line_mesh(x0, lat_val, x1, lat_val, z=5.0)
         else:
             lon_val = float(state.slice_lon_value)
-            mesh = make_dashed_line_mesh(lon_val, lat_min, lon_val, lat_max, z=5.0)
+            y0, y1 = state.slice_lat_range
+            mesh = make_dashed_line_mesh(lon_val, y0, lon_val, y1, z=5.0)
 
         actor = plotter.add_mesh(mesh, color="dimgray", line_width=2.0, lighting=False, pickable=False)
         _slice_line_actors[key] = actor
@@ -609,7 +703,15 @@ def on_contour_change(**kwargs):
     ctrl.view_update()
 
 
-@state.change("slice_var", "slice_orientation", "slice_lat_value", "slice_lon_value")
+@state.change(
+    "slice_var",
+    "slice_orientation",
+    "slice_lat_value",
+    "slice_lon_value",
+    "slice_lon_range",
+    "slice_lat_range",
+    "slice_n_contours",
+)
 def on_slice_selection_change(**kwargs):
     update_vertical_slice()
     _update_slice_lines()
@@ -644,8 +746,8 @@ def on_base_var_change(base_var, **kwargs):
     state.base_has_level = has_lev
     if not has_lev:
         state.base_level = "default"
-    elif state.base_level in (None, "default") and level_items:
-        state.base_level = level_items[1]
+    elif state.base_level in (None, "default") and len(level_items) > 1:
+        state.base_level = level_items[1]["value"]
     new_vmin, new_vmax = get_global_range(base_var, parse_level(state.base_level))
     state.base_vmin, state.base_vmax = new_vmin, new_vmax
     cbar_luts[0].scalar_range = (new_vmin, new_vmax)
@@ -661,6 +763,40 @@ def on_base_level_change(base_level, **kwargs):
     cbar_luts[0].scalar_range = (new_vmin, new_vmax)
     refresh_panels()
     update_timeseries_chart()
+    ctrl.view_update()
+
+
+@state.change("base_cmap")
+def on_base_cmap_change(base_cmap, **kwargs):
+    panels["forecast"].set_cmap(base_cmap)
+    cbar_luts[0].cmap = base_cmap
+    # In "Truth" mode, panel 2 shows the same kind of physical field as panel 1
+    # (not a diverging difference), so keep it visually consistent.
+    if state.panel2_mode == "Truth":
+        panels["diff"].set_cmap(base_cmap)
+        cbar_luts[1].cmap = base_cmap
+    ctrl.view_update()
+
+
+@state.change("panel2_mode")
+def on_panel2_mode_change(panel2_mode, **kwargs):
+    if panel2_mode == "Truth":
+        panels["diff"].set_title("Truth")
+        panels["diff"].set_cmap(state.base_cmap)
+        cbar_luts[1].cmap = state.base_cmap
+    else:
+        panels["diff"].set_title("Difference (Forecast − Truth)")
+        panels["diff"].set_cmap("coolwarm")
+        cbar_luts[1].cmap = "coolwarm"
+    refresh_panels()
+    ctrl.view_update()
+
+
+@state.change("slice_cmap")
+def on_slice_cmap_change(slice_cmap, **kwargs):
+    panels["slice"].cmap = slice_cmap
+    cbar_luts[2].cmap = slice_cmap
+    update_vertical_slice()
     ctrl.view_update()
 
 
@@ -757,6 +893,22 @@ with SinglePageLayout(server) as layout:
                                     classes="mt-1",
                                     v_show=("base_has_level",),
                                 )
+                                vuetify.VSelect(
+                                    v_model=("base_cmap", "viridis"),
+                                    items=("cmap_items",),
+                                    label="Colormap",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                )
+                                vuetify.VSelect(
+                                    v_model=("panel2_mode", "Difference"),
+                                    items=("panel2_mode_items",),
+                                    label="Panel 2 shows",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                )
 
                         with vuetify.VExpansionPanel(title="Contour"):
                             with vuetify.VExpansionPanelText():
@@ -779,6 +931,25 @@ with SinglePageLayout(server) as layout:
                                     classes="mt-1",
                                 )
                                 vuetify.VSelect(
+                                    v_model=("slice_cmap", "viridis"),
+                                    items=("cmap_items",),
+                                    label="Colormap",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                )
+                                vuetify.VSlider(
+                                    v_model=("slice_n_contours", 10),
+                                    min=3,
+                                    max=25,
+                                    step=1,
+                                    label="Number of contours",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                    thumb_label=True,
+                                )
+                                vuetify.VSelect(
                                     v_model=("slice_orientation", "latitude"),
                                     items=("slice_orientation_items",),
                                     label="Slice orientation",
@@ -797,12 +968,34 @@ with SinglePageLayout(server) as layout:
                                     classes="mt-1",
                                     v_show=("slice_orientation === 'latitude'",),
                                 )
+                                vuetify.VRangeSlider(
+                                    v_model=("slice_lon_range", [float(lon.min()), float(lon.max())]),
+                                    min=float(lon.min()),
+                                    max=float(lon.max()),
+                                    step=1.25,
+                                    label="Longitude range",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                    v_show=("slice_orientation === 'latitude'",),
+                                )
                                 vuetify.VSlider(
                                     v_model=("slice_lon_value", 260.0),
                                     min=float(lon.min()),
                                     max=float(lon.max()),
                                     step=1.25,
                                     label="Longitude",
+                                    density="compact",
+                                    hide_details=True,
+                                    classes="mt-1",
+                                    v_show=("slice_orientation === 'longitude'",),
+                                )
+                                vuetify.VRangeSlider(
+                                    v_model=("slice_lat_range", [float(lat.min()), float(lat.max())]),
+                                    min=float(lat.min()),
+                                    max=float(lat.max()),
+                                    step=1.0,
+                                    label="Latitude range",
                                     density="compact",
                                     hide_details=True,
                                     classes="mt-1",
@@ -841,34 +1034,51 @@ with SinglePageLayout(server) as layout:
 # ============================================================
 # Fit view to browser viewport on first connect
 # ============================================================
-_view_fitted = [False]
+# True once the user has manually panned/zoomed the map -- until then, every
+# resize event re-fits from scratch (see _fit_map_camera_to_domain), since
+# remote-view windows can report an intermediate size before settling on the
+# browser's real viewport across several ConfigureEvents, and a one-shot fit
+# (the previous approach) locks in whichever size arrived first. Once the user
+# has taken over the camera, we stop re-fitting and just clamp their view to
+# stay in bounds on further resizes.
+_user_interacted = [False]
+
+
+# <1.0 deliberately zooms in tighter than the strict "show the entire domain,
+# no cropping" fit below -- the exact fit leaves a visibly loose margin in
+# practice (likely device-pixel-ratio / remote-view scaling not reflected in
+# GetSize()), so this trades a small, fixed amount of edge cropping for a
+# panel that actually looks filled. Tune to taste.
+_MAP_ZOOM_FACTOR = 2.2
+
+
+def _fit_map_camera_to_domain():
+    # Aspect of this renderer's own viewport, not the whole render window --
+    # the colorbar strip eats vertical space asymmetrically, so per-quadrant
+    # aspect differs slightly from the whole window's.
+    rw, rh = plotter.renderers[0].GetSize()
+    if rh <= 0:
+        return
+    aspect = rw / rh
+    dom_hw = 0.5 * (lon_max - lon_min)
+    dom_hh = 0.5 * (lat_max - lat_min)
+    dom_cx = lon_min + dom_hw
+    dom_cy = lat_min + dom_hh
+    # Explicit renderer-0 camera, not plotter.camera (see _clamp_camera).
+    camera = plotter.renderers[0].GetActiveCamera()
+    camera.parallel_scale = max(dom_hh, dom_hw / aspect) * _MAP_ZOOM_FACTOR
+    pz = camera.position[2]
+    fz = camera.focal_point[2]
+    camera.position = (dom_cx, dom_cy, pz)
+    camera.focal_point = (dom_cx, dom_cy, fz)
 
 
 def _on_window_configure(obj, event):
     w, h = obj.GetSize()
     if w < 2 or h < 2:
         return
-    if not _view_fitted[0]:
-        # Aspect of this renderer's own viewport, not the whole render window --
-        # the colorbar strip eats vertical space asymmetrically, so per-quadrant
-        # aspect differs slightly from the whole window's. Using the whole-window
-        # aspect here left noticeable extra margin (looked "too zoomed out"),
-        # while _clamp_camera() below already (correctly) uses the per-renderer
-        # size for the same computation.
-        rw, rh = plotter.renderers[0].GetSize()
-        aspect = (rw / rh) if rh > 0 else (w / h)
-        dom_hw = 0.5 * (lon_max - lon_min)
-        dom_hh = 0.5 * (lat_max - lat_min)
-        dom_cx = lon_min + dom_hw
-        dom_cy = lat_min + dom_hh
-        # Explicit renderer-0 camera, not plotter.camera (see _clamp_camera).
-        camera = plotter.renderers[0].GetActiveCamera()
-        camera.parallel_scale = max(dom_hh, dom_hw / aspect)
-        pz = camera.position[2]
-        fz = camera.focal_point[2]
-        camera.position = (dom_cx, dom_cy, pz)
-        camera.focal_point = (dom_cx, dom_cy, fz)
-        _view_fitted[0] = True
+    if not _user_interacted[0]:
+        _fit_map_camera_to_domain()
     else:
         _clamp_camera()
 

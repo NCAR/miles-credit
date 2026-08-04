@@ -578,13 +578,33 @@ class ForecastWriter:
             )
 
     def _make_encoding(self, ds: xr.Dataset) -> dict:
-        """Build per-variable NetCDF encoding (not used for zarr data variables)."""
-        _SCALAR_KEYS = {"dtype", "zlib", "complevel", "shuffle", "chunksizes", "fletcher32", "contiguous"}
+        """Build per-variable NetCDF encoding (not used for zarr data variables).
+
+        chunksizes always defaults to a single timestep, full extent on every other
+        dimension -- not a config-controlled uniform value, since 2D and 3D output
+        variables have different dimensionality and one flat chunksizes tuple can't
+        apply to both (an earlier version of this method tried, via a top-level
+        "chunksizes" key in _SCALAR_KEYS, and would misapply a 3D tuple to 2D
+        variables or vice versa). Without an explicit per-timestep chunk, zlib
+        compression still forces HDF5 to pick *some* chunk shape, and its default
+        heuristic can end up chunking the whole variable as one block -- fine for a
+        single bulk read, but it means any tool that reads one timestep at a time
+        (e.g. Viz/'s interactive rollout viewers scrubbing a time slider) ends up
+        pulling the entire variable off disk on every single access. Chunking by
+        time=1 here matches how the CESM source zarrs are already chunked, and keeps
+        per-timestep reads cheap regardless of forecast length. A variable-specific
+        override (keyed by full "<source>/.../<name>" path or bare name) can still
+        set its own chunksizes explicitly.
+        """
+        _SCALAR_KEYS = {"dtype", "zlib", "complevel", "shuffle", "fletcher32", "contiguous"}
         default = {k: v for k, v in self._encoding_conf.items() if k in _SCALAR_KEYS}
-        overrides = {k: v for k, v in self._encoding_conf.items() if k not in _SCALAR_KEYS}
+        overrides = {k: v for k, v in self._encoding_conf.items() if k not in _SCALAR_KEYS and k != "chunksizes"}
         encoding = {}
         for var in ds.data_vars:
+            da = ds[var]
             enc = dict(default)
+            if "time" in da.dims:
+                enc["chunksizes"] = tuple(1 if d == "time" else da.sizes[d] for d in da.dims)
             for key, override in overrides.items():
                 if key == var or key.split("/")[-1] == var:
                     enc.update(override)

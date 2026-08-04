@@ -3,6 +3,7 @@ import pyvista as pv
 import matplotlib.pyplot as plt
 import cartopy.io.shapereader as shpreader
 from shapely.geometry import LineString, MultiLineString
+from vtkmodules.vtkRenderingCore import vtkTextActor
 
 BASE_ARRAY_NAME = "base_field"
 
@@ -188,7 +189,18 @@ def get_vertical_slice(ds, var, time_idx, orientation, lat_value, lon_value):
 # ============================================================
 class MapPanel:
     def __init__(
-        self, plotter, row, col, lon, lat, coast_texture, coast_plane, title, cmap="viridis", show_scalar_bar=True
+        self,
+        plotter,
+        row,
+        col,
+        lon,
+        lat,
+        coast_texture,
+        coast_plane,
+        title,
+        cmap="viridis",
+        show_scalar_bar=True,
+        title_renderer=None,
     ):
         self.plotter = plotter
         self.row = row
@@ -198,6 +210,13 @@ class MapPanel:
         self.title = title
         self.cmap = cmap
         self.show_scalar_bar = show_scalar_bar
+        # Optional separate, fixed-viewport renderer for the title (set up by the app alongside
+        # the colorbar strips -- see demo_gen2_compare.py). When given, the label lives outside
+        # the data renderer entirely, so panning/zooming the data camera can never scroll the
+        # field behind it or shrink the data window below it. When None (the default), falls
+        # back to the original in-panel overlay text, unchanged.
+        self.title_renderer = title_renderer
+        self._title_actor2d = None
 
         self.grid = make_surface_grid(lon, lat, z_value=0.0)
         self.base_actor = None
@@ -206,7 +225,28 @@ class MapPanel:
 
         self.plotter.subplot(row, col)
         self.coast_actor = self.plotter.add_mesh(coast_plane, texture=coast_texture, lighting=False, pickable=False)
-        self.plotter.add_text(title, position="upper_left", font_size=9, color="black", name=f"title_{row}_{col}")
+        self.set_title(title)
+
+    def set_title(self, title):
+        self.title = title
+        if self.title_renderer is not None:
+            if self._title_actor2d is None:
+                self._title_actor2d = vtkTextActor()
+                tp = self._title_actor2d.GetTextProperty()
+                tp.SetFontSize(16)
+                tp.SetColor(0.0, 0.0, 0.0)
+                tp.SetJustificationToLeft()
+                tp.SetVerticalJustificationToCentered()
+                self._title_actor2d.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+                self._title_actor2d.SetPosition(0.02, 0.5)
+                self.title_renderer.AddActor2D(self._title_actor2d)
+            self._title_actor2d.SetInput(title)
+        else:
+            self.plotter.subplot(self.row, self.col)
+            # Same name= every call -- replaces the existing title actor in place.
+            self.plotter.add_text(
+                title, position="upper_left", font_size=9, color="black", name=f"title_{self.row}_{self.col}"
+            )
 
     def add_base(self, arr, clim, opacity=0.95):
         self.plotter.subplot(self.row, self.col)
@@ -229,6 +269,13 @@ class MapPanel:
         self.grid.point_data[BASE_ARRAY_NAME][:] = arr_flat
         if self.base_actor is not None and clim is not None:
             self.base_actor.mapper.scalar_range = clim
+
+    def set_cmap(self, cmap):
+        self.cmap = cmap
+        if self.base_actor is not None:
+            lut = pv.LookupTable(cmap=cmap, n_values=256)
+            lut.scalar_range = self.base_actor.mapper.scalar_range
+            self.base_actor.mapper.lookup_table = lut
 
     def remove_contour(self, slot):
         actor = self.contour_actors.get(slot)
@@ -372,8 +419,10 @@ class VerticalSlicePanel:
 
         self.grid = None
         self.actor = None
+        self.contour_line_actor = None
         self.view_initialized = False
         self._domain = None
+        self._axis_label_actor = None
 
         self.title_actor = self.plotter.add_text(
             title, position="upper_left", font_size=9, color="black", name=f"title_{row}_{col}"
@@ -403,12 +452,20 @@ class VerticalSlicePanel:
             self.title_actor.SetVisibility(True)
             if self.actor is not None:
                 self.actor.SetVisibility(True)
+            if self.contour_line_actor is not None:
+                self.contour_line_actor.SetVisibility(True)
+            if self._axis_label_actor is not None:
+                self._axis_label_actor.SetVisibility(True)
         else:
             self.renderer.SetBackground(0.9, 0.9, 0.9)
             self.placeholder_actor.SetVisibility(True)
             self.title_actor.SetVisibility(False)
             if self.actor is not None:
                 self.actor.SetVisibility(False)
+            if self.contour_line_actor is not None:
+                self.contour_line_actor.SetVisibility(False)
+            if self._axis_label_actor is not None:
+                self._axis_label_actor.SetVisibility(False)
 
     def _make_grid(self, x, levels):
         x = np.asarray(x, dtype=np.float32)
@@ -433,7 +490,53 @@ class VerticalSlicePanel:
         bounds = (float(x.min()), float(x.max()), float(levels_scaled.min()), float(levels_scaled.max()))
         return pv.StructuredGrid(X.astype(np.float32), Y.astype(np.float32), Z), bounds
 
-    def set_slice(self, x, levels, arr, clim=None, title=None):
+    def _clear_axis_labels(self):
+        if self._axis_label_actor is not None:
+            self.plotter.remove_actor(self._axis_label_actor)
+            self._axis_label_actor = None
+
+    def _update_axis_labels(self, x, levels, level_labels, grid_bounds):
+        self._clear_axis_labels()
+        x = np.asarray(x, dtype=np.float32)
+        levels = np.asarray(levels, dtype=np.float32)
+        x_min, x_max, y_min, y_max = grid_bounds
+        level_min, level_max = float(levels.min()), float(levels.max())
+
+        points = []
+        labels = []
+
+        # X-axis ticks along the bottom edge: a handful of evenly spaced values.
+        for xv in np.linspace(float(x.min()), float(x.max()), 5):
+            points.append([xv, y_min, 0.5])
+            labels.append(f"{xv:.0f}")
+
+        # Level ticks along the left edge: map each chosen level index through
+        # the same linear stretch _make_grid used (backed out from grid_bounds,
+        # since levels here are the raw 0..31 index, not the stretched values).
+        n_ticks = min(6, len(levels))
+        for idx in np.linspace(0, len(levels) - 1, n_ticks).astype(int):
+            frac = (float(levels[idx]) - level_min) / (level_max - level_min) if level_max > level_min else 0.0
+            yv = y_min + frac * (y_max - y_min)
+            label = level_labels[idx] if level_labels is not None else f"{int(levels[idx])}"
+            points.append([x_min, yv, 0.5])
+            labels.append(str(label))
+
+        self._axis_label_actor = self.plotter.add_point_labels(
+            np.array(points, dtype=np.float32),
+            labels,
+            font_size=11,
+            text_color="black",
+            shape=None,
+            show_points=False,
+            always_visible=True,
+            reset_camera=False,
+            pickable=False,
+        )
+        self._axis_label_actor.SetVisibility(self.is_active)
+
+    def set_slice(
+        self, x, levels, arr, clim=None, title=None, level_labels=None, show_axis_labels=False, n_contours=10
+    ):
         self.plotter.subplot(self.row, self.col)
         if clim is None:
             clim = (
@@ -446,10 +549,29 @@ class VerticalSlicePanel:
 
         if self.actor is not None:
             self.plotter.remove_actor(self.actor)
+        if self.contour_line_actor is not None:
+            self.plotter.remove_actor(self.contour_line_actor)
+
+        # Filled + line contours at matching levels (like matplotlib's contourf + contour on
+        # the same `levels`), both from one vtkBandedPolyDataContourFilter call:
+        # `bands` carries a per-region CELL scalar (one flat value per band -- cell data
+        # renders as a solid color per polygon, unlike point data which would interpolate
+        # smoothly across a band boundary) and `edges` is the polyline geometry running
+        # exactly along each band boundary.
+        surface = self.grid.extract_surface(algorithm="dataset_surface")
+        # clipping=False: clim is typically a 1st/99th-percentile range (robust to outliers),
+        # so a few points always fall outside it. The default clipping=True *drops* those
+        # cells from the output entirely, leaving gaps of bare background -- clamp them into
+        # the nearest band instead, matching how a plain VTK lookup table clamps out-of-range
+        # scalars to the end colors rather than hiding them.
+        bands, edges = surface.contour_banded(
+            max(int(n_contours), 2), rng=clim, scalars="slice_field", scalar_mode="value", clipping=False
+        )
+        band_scalar_name = bands.cell_data.keys()[0]
 
         self.actor = self.plotter.add_mesh(
-            self.grid,
-            scalars="slice_field",
+            bands,
+            scalars=band_scalar_name,
             cmap=self.cmap,
             clim=clim,
             show_edges=False,
@@ -458,8 +580,18 @@ class VerticalSlicePanel:
         )
         self.actor.mapper.scalar_range = clim
 
-        # Ensure new mesh respects current panel visibility
+        self.contour_line_actor = self.plotter.add_mesh(
+            edges,
+            color="black",
+            line_width=1.0,
+            render_lines_as_tubes=False,
+            lighting=False,
+            pickable=False,
+        )
+
+        # Ensure new meshes respect current panel visibility
         self.actor.SetVisibility(self.is_active)
+        self.contour_line_actor.SetVisibility(self.is_active)
 
         if title is not None:
             self.title_actor = self.plotter.add_text(
@@ -490,6 +622,12 @@ class VerticalSlicePanel:
             cam.parallel_scale = max((y_max - y_min) / 2.0, 1e-6)
             self.view_initialized = True
             self._domain = domain
+
+        if show_axis_labels:
+            self._update_axis_labels(x, levels, level_labels, grid_bounds)
+        else:
+            self._clear_axis_labels()
+
         self.save_camera_state()
 
     def save_camera_state(self):
