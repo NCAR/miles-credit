@@ -304,72 +304,36 @@ Remember to define your `__init__` method to handle any parameters your loss fun
 
 Returning an unreduced tensor under `reduction="none"` is what allows the loss to be wrapped by `VariableTotalLoss2D` when latitude or variable weighting is enabled.
 
-### 2. Update `base_losses.py`
+### 2. Make the class importable from your config
 
-Next, you'll need to modify your `base_losses.py` file to import your new custom loss class and add it to the `losses` dictionary. This makes your custom loss function discoverable and usable through your configuration file.
+`@register_loss` only takes effect once the module holding the class is imported.
+The `custom_objects` section does that for you — no edit to the CREDIT source tree
+is needed:
 
-**Changes to `base_losses.py`:**
-
-* **Import the Custom Loss:** Add the line `from credit.losses.custom_loss import CustomLoss` at the top of the file, alongside other loss imports.
-* **Register the Loss:** Add a new entry to the `losses` dictionary within the `base_losses` function, using a unique string key that you'll use in your configuration (e.g., `"my-custom-loss"`). The value for this key will be your `CustomLoss` class.
-
-Here's how the relevant parts of your `base_losses.py` file should be updated:
-
-```python
-import torch.nn as nn
-import logging
-
-# ... (other loss imports) ...
-from credit.losses.custom_loss import CustomLoss  # NEW: Import your custom loss
-
-logger = logging.getLogger(__name__)
-
-
-def base_losses(conf, reduction="mean", validation=False):
-    """Load a specified loss function by its type.
-
-    Args:
-        conf (dict): Configuration dictionary containing loss settings.
-        reduction (str, optional): Default reduction method if not specified in parameters.
-        validation (bool): Use validation loss settings if True, else training loss.
-
-    Returns:
-        torch.nn.Module: Instantiated loss function.
-    """
-    loss_key = "validation_loss" if validation else "training_loss"
-    params_key = "validation_loss_parameters" if validation else "training_loss_parameters"
-
-    loss_type = conf["loss"][loss_key]
-    loss_params = conf["loss"].get(params_key, {})
-
-    # Ensure 'reduction' is included if not already specified by the user
-    if "reduction" not in loss_params:
-        loss_params["reduction"] = reduction
-
-    logger.info(f"Loaded the {loss_type} loss function with parameters: {loss_params}")
-
-    # Standard loss registry
-    losses = {
-        "mse": nn.MSELoss,
-        "mae": nn.L1Loss,
-        "msle": MSLELoss,
-        # ... (other existing losses) ...
-        "custom-loss": CustomLoss,  # NEW: Add your custom loss to the registry
-    }
-
-    if loss_type in losses:
-        return losses[loss_type](**loss_params)
-    else:
-        raise ValueError(f"Loss type '{loss_type}' not supported")
+```yaml
+custom_objects:
+  CustomLoss:
+    object_type: loss
+    module_path: mypackage.losses
 ```
+
+`module_path` is the importable module containing the decorated class, and the key
+is the class name. CREDIT imports it before building the loss, so the
+`@register_loss("custom-loss")` decorator runs and the key becomes available.
+
+If you would rather add the loss to CREDIT itself, put the module under
+`credit/losses/` and add an entry to `_LOSS_REGISTRY` in
+`credit/losses/__init__.py`, mapping your config key to a
+`(module_path, class_name)` tuple. The registry imports lazily, so this costs
+nothing at import time for users who do not select your loss.
 
 ### 3. Using Your Custom Loss in `conf.yaml`
 
-Once your `CustomLoss` is registered in `base_losses.py`, you can reference it directly in your configuration file, just like any other built-in or pre-existing loss:
+Once your `CustomLoss` is registered, you can reference it by its registry key in your configuration file, just like any other built-in or pre-existing loss:
 
 ```yaml
 loss:
-    training_loss: "custom-loss" # Use the key you defined in base_losses.py
+    training_loss: "custom-loss" # The key you passed to @register_loss
     training_loss_parameters:
         custom_param1: 10 # Pass parameters specific to your CustomLoss's __init__
         custom_param2: "some_value"
