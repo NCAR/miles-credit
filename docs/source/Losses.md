@@ -13,7 +13,7 @@ otherwise, so existing Gen 1 configs keep working unchanged.
 
 This page covers the Gen 2 format. For the companion verification metrics
 framework, which mirrors the structure described here, see
-[Evaluation and Metrics](Evaluation.md).
+[Verification Metrics](Metrics.md).
 
 ## Why a per-variable loss
 

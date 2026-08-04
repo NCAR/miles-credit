@@ -21,6 +21,9 @@ templates_path = ["_templates"]
 exclude_patterns = []
 
 myst_enable_extensions = ["colon_fence"]
+# Generate anchor slugs for headings up to level 3 so Markdown pages can
+# cross-reference sections, e.g. [text](Losses.md#required-postblocks).
+myst_heading_anchors = 3
 
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
