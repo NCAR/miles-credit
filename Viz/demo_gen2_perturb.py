@@ -24,6 +24,7 @@ from shared_utils import (
     make_cartopy_coastline_texture,
     make_coast_plane,
     make_contours,
+    pick_colorbar_label_format,
     MapPanel,
 )
 
@@ -272,10 +273,7 @@ for cmap_name, cvp in zip(_PANEL_CMAPS, _cbar_vp):
     sb.SetPosition(0.175, 0.1)
     sb.SetPosition2(0.65, 0.78)
     sb.SetBarRatio(0.4)
-    # %.2g (2 significant figures, auto-switches to scientific notation) instead of a fixed
-    # %.1f -- a flat 1-decimal format rounds any small-magnitude variable (e.g. Qtot ~1e-3) to
-    # "0.0" on every tick.
-    sb.SetLabelFormat("%.2g")
+    sb.SetLabelFormat(pick_colorbar_label_format(ic_vmin, ic_vmax))
     ltp = sb.GetLabelTextProperty()
     ltp.SetFontSize(15)
     ltp.SetColor(0.0, 0.0, 0.0)
@@ -291,6 +289,15 @@ for cmap_name, cvp in zip(_PANEL_CMAPS, _cbar_vp):
     plotter.ren_win.AddRenderer(r)
     cbar_renderers.append(r)
     cbar_actors.append(sb)
+
+
+def _set_cbar_range(idx, clim):
+    """Update a colorbar's range and its tick-label format together, so the format always
+    matches whatever variable/range is currently shown instead of a single fixed format
+    string compromising between very different variable magnitudes."""
+    cbar_luts[idx].scalar_range = clim
+    cbar_actors[idx].SetLabelFormat(pick_colorbar_label_format(*clim))
+
 
 # ============================================================
 # Perturbation marker (ENSO blob center)
@@ -619,7 +626,7 @@ def _refresh_all_panels():
         panels["diff"].update_base(zero, clim=(-1.0, 1.0))
         panels["diag"].update_base(zero, clim=(0.0, 1.0))
         for idx in [0, 1]:
-            cbar_luts[idx].scalar_range = clim
+            _set_cbar_range(idx, clim)
         return
 
     t = int(state.t_index)
@@ -636,17 +643,17 @@ def _refresh_all_panels():
     diff = arr_a - arr_b
     diff_clim = _get_diff_clim(diff)
     panels["diff"].update_base(diff, clim=diff_clim)
-    cbar_luts[2].scalar_range = diff_clim
+    _set_cbar_range(2, diff_clim)
 
     diag = compute_diagnostic(arr_a, arr_b, state.diagnostic, var, state.view_level)
     diag_max = float(np.nanmax(np.abs(diag)))
     diag_max = diag_max if diag_max > 1e-6 else 1.0
     diag_clim = (0.0, diag_max) if state.diagnostic == "Absolute Difference |A-B|" else (-diag_max, diag_max)
     panels["diag"].update_base(diag, clim=diag_clim)
-    cbar_luts[3].scalar_range = diag_clim
+    _set_cbar_range(3, diag_clim)
 
     for idx in [0, 1]:
-        cbar_luts[idx].scalar_range = clim
+        _set_cbar_range(idx, clim)
 
     _apply_contours(t)
 
@@ -699,7 +706,7 @@ def on_view_cmap_change(view_cmap, **kwargs):
         lut.scalar_range = clim
         panels[key].base_actor.mapper.lookup_table = lut
         cbar_luts[idx].cmap = view_cmap
-        cbar_luts[idx].scalar_range = clim
+        _set_cbar_range(idx, clim)
     ctrl.view_update()
 
 

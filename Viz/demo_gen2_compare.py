@@ -23,6 +23,7 @@ from shared_utils import (
     make_dashed_line_mesh,
     make_star_mesh,
     get_vertical_slice,
+    pick_colorbar_label_format,
     MapPanel,
     TimeSeriesPanel,
     VerticalSlicePanel,
@@ -170,11 +171,11 @@ plotter = pv.Plotter(
 
 border_actors = [r.add_border(color="black", width=10.0) for r in plotter.renderers]
 
-# Title strips for panels 1 & 2 (Forecast / Diff): separate, non-interactive, fixed-viewport
-# renderers above each data panel (viewport set below alongside the colorbar strips). Keeping
-# the label outside the data renderer means panning/zooming that renderer's camera can never
-# scroll the field behind the label or shrink the data window below it.
-title_renderers = [VtkRenderer(), VtkRenderer()]
+# Title strips for all 4 panels: separate, non-interactive, fixed-viewport renderers above
+# each data panel (viewport set below alongside the colorbar strips). Keeping the label outside
+# the data renderer means panning/zooming that renderer's camera can never scroll the field
+# behind the label or shrink the data window below it.
+title_renderers = [VtkRenderer(), VtkRenderer(), VtkRenderer(), VtkRenderer()]
 for _r in title_renderers:
     _r.SetBackground(1.0, 1.0, 1.0)
     _r.SetInteractive(False)
@@ -207,8 +208,16 @@ panels = {
         show_scalar_bar=False,
         title_renderer=title_renderers[1],
     ),
-    "slice": VerticalSlicePanel(plotter, 1, 0, title="Vertical Slice", cmap="viridis", border_actor=border_actors[2]),
-    "ts": TimeSeriesPanel(plotter, 1, 1, border_actor=border_actors[3]),
+    "slice": VerticalSlicePanel(
+        plotter,
+        1,
+        0,
+        title="Vertical Slice",
+        cmap="viridis",
+        border_actor=border_actors[2],
+        title_renderer=title_renderers[2],
+    ),
+    "ts": TimeSeriesPanel(plotter, 1, 1, border_actor=border_actors[3], title_renderer=title_renderers[3]),
 }
 
 map_panels = [panels["forecast"], panels["diff"]]
@@ -246,7 +255,7 @@ TITLE_STRIP = 0.05
 _data_vp = [
     (0.0, 0.5 + CBAR_STRIP, 0.5, 1.0 - TITLE_STRIP),  # Forecast
     (0.5, 0.5 + CBAR_STRIP, 1.0, 1.0 - TITLE_STRIP),  # Diff
-    (0.0, 0.0 + CBAR_STRIP, 0.5, 0.5),  # Vertical slice
+    (0.0, 0.0 + CBAR_STRIP, 0.5, 0.5 - TITLE_STRIP),  # Vertical slice
 ]
 _cbar_vp = [
     (0.0, 0.5, 0.5, 0.5 + CBAR_STRIP),
@@ -256,11 +265,13 @@ _cbar_vp = [
 _title_vp = [
     (0.0, 1.0 - TITLE_STRIP, 0.5, 1.0),  # Forecast
     (0.5, 1.0 - TITLE_STRIP, 1.0, 1.0),  # Diff
+    (0.0, 0.5 - TITLE_STRIP, 0.5, 0.5),  # Vertical slice
+    (0.5, 0.5 - TITLE_STRIP, 1.0, 0.5),  # Time series
 ]
 for _r, vp in zip(title_renderers, _title_vp):
     _r.SetViewport(*vp)
 
-plotter.renderers[3].SetViewport(0.5, 0.0, 1.0, 0.5)
+plotter.renderers[3].SetViewport(0.5, 0.0, 1.0, 0.5 - TITLE_STRIP)
 
 _panel_cmaps = [panels["forecast"].cmap, panels["diff"].cmap, panels["slice"].cmap]
 
@@ -285,10 +296,7 @@ for cmap_name, cvp in zip(_panel_cmaps, _cbar_vp):
     sb.SetPosition(0.175, 0.1)
     sb.SetPosition2(0.65, 0.78)
     sb.SetBarRatio(0.4)
-    # %.2g (2 significant figures, auto-switches to scientific notation) instead of a fixed
-    # %.1f -- a flat 1-decimal format rounds any small-magnitude variable (e.g. Qtot ~1e-3) to
-    # "0.0" on every tick.
-    sb.SetLabelFormat("%.2g")
+    sb.SetLabelFormat(pick_colorbar_label_format(vmin, vmax))
     ltp = sb.GetLabelTextProperty()
     ltp.SetFontSize(15)
     ltp.SetColor(0.0, 0.0, 0.0)
@@ -308,6 +316,14 @@ for cmap_name, cvp in zip(_panel_cmaps, _cbar_vp):
 # Vertical slice panel starts hidden until toggled on in the sidebar.
 cbar_renderers[2].SetBackground(0.9, 0.9, 0.9)
 cbar_actors[2].SetVisibility(False)
+
+
+def _set_cbar_range(idx, clim):
+    """Update a colorbar's range and its tick-label format together, so the format always
+    matches whatever variable/range is currently shown instead of a single fixed format
+    string compromising between very different variable magnitudes."""
+    cbar_luts[idx].scalar_range = clim
+    cbar_actors[idx].SetLabelFormat(pick_colorbar_label_format(*clim))
 
 
 # ============================================================
@@ -519,12 +535,12 @@ def refresh_panels():
 
     if state.panel2_mode == "Truth":
         panels["diff"].update_base(truth_arr, clim=clim)
-        cbar_luts[1].scalar_range = clim
+        _set_cbar_range(1, clim)
     else:
         diff_arr = pred_arr - truth_arr
         diff_clim = get_diff_clim(diff_arr)
         panels["diff"].update_base(diff_arr, clim=diff_clim)
-        cbar_luts[1].scalar_range = diff_clim
+        _set_cbar_range(1, diff_clim)
 
     update_contours_for_panels(t, state, map_panels)
 
@@ -561,7 +577,7 @@ def update_vertical_slice():
         show_axis_labels=True,
         n_contours=int(state.slice_n_contours),
     )
-    cbar_luts[2].scalar_range = (vmin_s, vmax_s)
+    _set_cbar_range(2, (vmin_s, vmax_s))
 
 
 _slice_line_actors = {"forecast": None, "diff": None}
@@ -750,7 +766,7 @@ def on_base_var_change(base_var, **kwargs):
         state.base_level = level_items[1]["value"]
     new_vmin, new_vmax = get_global_range(base_var, parse_level(state.base_level))
     state.base_vmin, state.base_vmax = new_vmin, new_vmax
-    cbar_luts[0].scalar_range = (new_vmin, new_vmax)
+    _set_cbar_range(0, (new_vmin, new_vmax))
     refresh_panels()
     update_timeseries_chart()
     ctrl.view_update()
@@ -760,7 +776,7 @@ def on_base_var_change(base_var, **kwargs):
 def on_base_level_change(base_level, **kwargs):
     new_vmin, new_vmax = get_global_range(state.base_var, parse_level(base_level))
     state.base_vmin, state.base_vmax = new_vmin, new_vmax
-    cbar_luts[0].scalar_range = (new_vmin, new_vmax)
+    _set_cbar_range(0, (new_vmin, new_vmax))
     refresh_panels()
     update_timeseries_chart()
     ctrl.view_update()
@@ -1101,4 +1117,4 @@ state.latency_text = "Ready"
 
 if __name__ == "__main__":
     # server.start(port=8082, open_browser=True)
-    server.start(port=8081, host="0.0.0.0", open_browser=False)
+    server.start(port=8082, host="0.0.0.0", open_browser=False)

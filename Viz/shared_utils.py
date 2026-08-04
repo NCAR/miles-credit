@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import pyvista as pv
 import matplotlib.pyplot as plt
@@ -6,6 +8,29 @@ from shapely.geometry import LineString, MultiLineString
 from vtkmodules.vtkRenderingCore import vtkTextActor
 
 BASE_ARRAY_NAME = "base_field"
+
+
+def pick_colorbar_label_format(vmin, vmax):
+    """Choose a printf-style tick-label format (for vtkScalarBarActor.SetLabelFormat) sized to
+    the value range, so ticks stay readable across wildly different variable magnitudes.
+
+    A fixed decimal count either rounds small-magnitude variables to "0.0" (e.g. Qtot ~1e-3) or,
+    if given enough decimals to show those, forces scientific notation on everyday-sized ones
+    (TREFHT ~300, PS ~1e5) -- %g's rule is "scientific once the exponent reaches the requested
+    precision," which normal-sized numbers hit immediately at low precision. Instead: fixed
+    decimal notation with a magnitude-derived decimal count for normal ranges, and scientific
+    notation only once decimals alone would need more than ~5 places to show anything.
+    """
+    span = abs(vmax - vmin)
+    scale = span if span > 0 else max(abs(vmin), abs(vmax))
+    if not np.isfinite(scale) or scale == 0:
+        return "%.2f"
+
+    magnitude = math.floor(math.log10(scale))
+    if magnitude < -3:
+        return "%.1e"
+    decimals = min(max(0, 2 - magnitude), 6)
+    return f"%.{decimals}f"
 
 
 # ============================================================
@@ -184,6 +209,27 @@ def get_vertical_slice(ds, var, time_idx, orientation, lat_value, lon_value):
     return x, levels, arr, title
 
 
+def _make_title_actor2d(renderer, title, font_size=16):
+    """Build a vtkTextActor pinned to a fixed-viewport renderer's left-center.
+
+    Shared by MapPanel and VerticalSlicePanel's title_renderer option: a title drawn in its own
+    separate, non-interactive renderer (set up by the app alongside the colorbar strips) instead
+    of overlaid inside the data renderer, so panning/zooming the data camera can never scroll
+    the field behind the label or shrink the data window below it.
+    """
+    actor = vtkTextActor()
+    tp = actor.GetTextProperty()
+    tp.SetFontSize(font_size)
+    tp.SetColor(0.0, 0.0, 0.0)
+    tp.SetJustificationToLeft()
+    tp.SetVerticalJustificationToCentered()
+    actor.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
+    actor.SetPosition(0.02, 0.5)
+    actor.SetInput(title)
+    renderer.AddActor2D(actor)
+    return actor
+
+
 # ============================================================
 # MapPanel
 # ============================================================
@@ -231,16 +277,9 @@ class MapPanel:
         self.title = title
         if self.title_renderer is not None:
             if self._title_actor2d is None:
-                self._title_actor2d = vtkTextActor()
-                tp = self._title_actor2d.GetTextProperty()
-                tp.SetFontSize(16)
-                tp.SetColor(0.0, 0.0, 0.0)
-                tp.SetJustificationToLeft()
-                tp.SetVerticalJustificationToCentered()
-                self._title_actor2d.GetPositionCoordinate().SetCoordinateSystemToNormalizedViewport()
-                self._title_actor2d.SetPosition(0.02, 0.5)
-                self.title_renderer.AddActor2D(self._title_actor2d)
-            self._title_actor2d.SetInput(title)
+                self._title_actor2d = _make_title_actor2d(self.title_renderer, title)
+            else:
+                self._title_actor2d.SetInput(title)
         else:
             self.plotter.subplot(self.row, self.col)
             # Same name= every call -- replaces the existing title actor in place.
@@ -303,11 +342,18 @@ class MapPanel:
 # TimeSeriesPanel
 # ============================================================
 class TimeSeriesPanel:
-    def __init__(self, plotter, row, col, border_actor=None):  # <-- Accept border_actor
+    def __init__(self, plotter, row, col, border_actor=None, title_renderer=None):  # <-- Accept border_actor
         self.plotter = plotter
         self.row = row
         self.col = col
         self.border_actor = border_actor
+        # See MapPanel's title_renderer. pv.Chart2D's own .title normally reserves its own
+        # layout space (unlike MapPanel/VerticalSlicePanel's raw text overlay), but when a
+        # title_renderer is given we still route through it for visual consistency with the
+        # other panels.
+        self.title_renderer = title_renderer
+        self.title = None
+        self._title_actor2d = None
 
         self.plotter.subplot(row, col)
         self.renderer = self.plotter.renderer
@@ -316,6 +362,9 @@ class TimeSeriesPanel:
         # Hide the border initially
         if self.border_actor:
             self.border_actor.SetVisibility(False)
+
+        if self.title_renderer is not None:
+            self.title_renderer.SetBackground(0.9, 0.9, 0.9)
 
         self.chart = pv.Chart2D()
         self.chart.visible = False
@@ -333,16 +382,29 @@ class TimeSeriesPanel:
         self.placeholder_actor.GetTextProperty().SetVerticalJustificationToCentered()
         self.has_data = False
 
+    def _draw_title(self, title):
+        self.title = title
+        if self.title_renderer is not None:
+            if self._title_actor2d is None:
+                self._title_actor2d = _make_title_actor2d(self.title_renderer, title)
+            else:
+                self._title_actor2d.SetInput(title)
+        else:
+            self.chart.title = title
+
+    def _on_first_data(self):
+        self.has_data = True
+        self.renderer.SetBackground(1.0, 1.0, 1.0)
+        self.placeholder_actor.SetVisibility(False)
+        self.chart.visible = True
+        if self.title_renderer is not None:
+            self.title_renderer.SetBackground(1.0, 1.0, 1.0)
+        if self.border_actor:
+            self.border_actor.SetVisibility(True)
+
     def update_chart(self, x_data, y_data, tick_locs, tick_labels, title, y_label):
         if not self.has_data:
-            self.has_data = True
-            self.renderer.SetBackground(1.0, 1.0, 1.0)
-            self.placeholder_actor.SetVisibility(False)
-            self.chart.visible = True
-
-            # Show the border once data loads
-            if self.border_actor:
-                self.border_actor.SetVisibility(True)
+            self._on_first_data()
 
         self.chart.clear()
         self.chart.line(x_data, y_data, color="blue", width=2.0)
@@ -350,20 +412,14 @@ class TimeSeriesPanel:
         self.chart.x_axis.tick_locations = tick_locs
         self.chart.x_axis.tick_labels = tick_labels
 
-        self.chart.title = title
+        self._draw_title(title)
         self.chart.y_axis.label = y_label
         self._time_line = None
 
     def update_multi_chart(self, x_data, series, tick_locs, tick_labels, title, y_label):
         """Like update_chart, but draws several named/colored lines with a legend."""
         if not self.has_data:
-            self.has_data = True
-            self.renderer.SetBackground(1.0, 1.0, 1.0)
-            self.placeholder_actor.SetVisibility(False)
-            self.chart.visible = True
-
-            if self.border_actor:
-                self.border_actor.SetVisibility(True)
+            self._on_first_data()
 
         self.chart.clear()
         for s in series:
@@ -375,7 +431,7 @@ class TimeSeriesPanel:
         self.chart.x_axis.tick_locations = tick_locs
         self.chart.x_axis.tick_labels = tick_labels
 
-        self.chart.title = title
+        self._draw_title(title)
         self.chart.y_axis.label = y_label
         self._time_line = None
 
@@ -399,7 +455,7 @@ class TimeSeriesPanel:
 # ============================================================
 class VerticalSlicePanel:
     def __init__(
-        self, plotter, row, col, title="Vertical Slice", cmap="viridis", border_actor=None
+        self, plotter, row, col, title="Vertical Slice", cmap="viridis", border_actor=None, title_renderer=None
     ):  # <-- Accept border_actor
         self.plotter = plotter
         self.row = row
@@ -408,6 +464,12 @@ class VerticalSlicePanel:
         self.cmap = cmap
         self.is_active = False
         self.border_actor = border_actor
+        # See MapPanel's title_renderer -- keeps the label outside the data renderer, which
+        # matters even more here since the slice fills its whole panel by design (the
+        # aspect-stretch in _make_grid), so an in-panel title would sit right on top of data.
+        self.title_renderer = title_renderer
+        self.title_actor = None
+        self._title_actor2d = None
 
         self.plotter.subplot(row, col)
         self.renderer = self.plotter.renderer
@@ -424,10 +486,8 @@ class VerticalSlicePanel:
         self._domain = None
         self._axis_label_actor = None
 
-        self.title_actor = self.plotter.add_text(
-            title, position="upper_left", font_size=9, color="black", name=f"title_{row}_{col}"
-        )
-        self.title_actor.SetVisibility(False)
+        self._draw_title(title)
+        self._set_title_visible(False)
 
         self.placeholder_actor = self.plotter.add_text(
             "Vertical Slice Panel\n(Enable in sidebar)",
@@ -439,6 +499,27 @@ class VerticalSlicePanel:
         self.placeholder_actor.GetTextProperty().SetJustificationToCentered()
         self.placeholder_actor.GetTextProperty().SetVerticalJustificationToCentered()
 
+    def _draw_title(self, title):
+        self.title = title
+        if self.title_renderer is not None:
+            if self._title_actor2d is None:
+                self._title_actor2d = _make_title_actor2d(self.title_renderer, title)
+            else:
+                self._title_actor2d.SetInput(title)
+        else:
+            self.plotter.subplot(self.row, self.col)
+            self.title_actor = self.plotter.add_text(
+                title, position="upper_left", font_size=9, color="black", name=f"title_{self.row}_{self.col}"
+            )
+
+    def _set_title_visible(self, visible):
+        if self.title_renderer is not None:
+            if self._title_actor2d is not None:
+                self._title_actor2d.SetVisibility(visible)
+            self.title_renderer.SetBackground(*((1.0, 1.0, 1.0) if visible else (0.9, 0.9, 0.9)))
+        elif self.title_actor is not None:
+            self.title_actor.SetVisibility(visible)
+
     def toggle_visibility(self, visible):
         self.is_active = visible
 
@@ -446,10 +527,11 @@ class VerticalSlicePanel:
         if self.border_actor:
             self.border_actor.SetVisibility(visible)
 
+        self._set_title_visible(visible)
+
         if visible:
             self.renderer.SetBackground(1.0, 1.0, 1.0)
             self.placeholder_actor.SetVisibility(False)
-            self.title_actor.SetVisibility(True)
             if self.actor is not None:
                 self.actor.SetVisibility(True)
             if self.contour_line_actor is not None:
@@ -459,7 +541,6 @@ class VerticalSlicePanel:
         else:
             self.renderer.SetBackground(0.9, 0.9, 0.9)
             self.placeholder_actor.SetVisibility(True)
-            self.title_actor.SetVisibility(False)
             if self.actor is not None:
                 self.actor.SetVisibility(False)
             if self.contour_line_actor is not None:
@@ -594,10 +675,8 @@ class VerticalSlicePanel:
         self.contour_line_actor.SetVisibility(self.is_active)
 
         if title is not None:
-            self.title_actor = self.plotter.add_text(
-                title, position="upper_left", font_size=9, color="black", name=f"title_{self.row}_{self.col}"
-            )
-            self.title_actor.SetVisibility(self.is_active)
+            self._draw_title(title)
+            self._set_title_visible(self.is_active)
 
         # x's meaning (and range) changes with slice orientation -- latitude vs.
         # longitude span completely different domains -- so a camera framing fit
