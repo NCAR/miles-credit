@@ -217,7 +217,8 @@ Three constraints apply to `learnable`:
   `include_computed_diagnostics: false`.
 - **The learned parameters are not currently checkpointed.** They re-initialize
   when you resume from a checkpoint. `train_gen2` does add them to the optimizer
-  automatically, so training itself works; only resumption is affected.
+  automatically, so training itself works; only resumption is affected. Tracked
+  in [issue #473](https://github.com/NCAR/miles-credit/issues/473).
 ```
 
 ### `variable_weights` on top

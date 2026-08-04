@@ -902,3 +902,9 @@ def test_gen1_metrics_reexport():
     assert LatWeightedMetrics is not None
     assert LatWeightedMetricsClimatology is not None
     assert LatWeightedMetricsEnsemble is not None
+
+
+def test_last_var_scores_initialized_before_forward():
+    """The documented attribute exists before any forward pass."""
+    metric = RMSEMetric(metric_name="rmse", var_weighting="none")
+    assert metric.last_var_scores == {}

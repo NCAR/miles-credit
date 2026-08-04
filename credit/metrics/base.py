@@ -231,6 +231,9 @@ class BaseVariableMetric(nn.Module, ABC):
 
         self._combination_weights = None  # {var_key: float}; built at first forward
         self.var_keys = None  # full scoring list, resolved at first forward
+        # Populated by forward(); initialized here so the documented attribute
+        # exists (and logging code reading it is safe) before the first pass.
+        self.last_var_scores = {}
 
     # ------------------------------------------------------------------
     # Subclass hooks

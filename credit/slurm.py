@@ -37,6 +37,7 @@ import logging
 import subprocess
 
 from credit.cli._common import _PERLMUTTER_ENV_SETUP
+from credit.conda_env import torchrun_path
 
 logger = logging.getLogger(__name__)
 
@@ -148,15 +149,10 @@ def _module_lines(options):
 def _resolve_torchrun(conda):
     """Return the torchrun path for a conda env name or full path.
 
-    A bare env name is resolved at run time from ``$CONDA_PREFIX`` (set by the
-    ``conda activate`` line above it), falling back to a ``conda info --envs``
-    lookup.  ``$(conda info --base)/envs/<name>`` is wrong for envs kept
-    outside the base install (``envs_dirs`` in ``~/.condarc``).
+    Thin wrapper over :func:`credit.conda_env.torchrun_path`, kept as a module
+    -level name because the Slurm script builders call it in several places.
     """
-    if "/" in conda:
-        return f"{conda}/bin/torchrun"
-    lookup = f"conda info --envs | awk -v n={conda} '$1==n {{print $NF; exit}}'"
-    return f"${{CONDA_PREFIX:-$({lookup})}}/bin/torchrun"
+    return torchrun_path(conda)
 
 
 def _submit_script(script, save_loc, launch):

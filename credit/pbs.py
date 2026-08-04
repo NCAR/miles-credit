@@ -5,6 +5,8 @@ import shutil
 import logging
 import subprocess
 
+from credit.conda_env import torchrun_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -219,16 +221,7 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
         pass
 
     conda = pbs_options.get("conda", "credit")
-    # Resolve torchrun from the conda env's bin directory. A bare env name is
-    # resolved at run time: $CONDA_PREFIX when the env is active, otherwise a
-    # `conda info --envs` lookup by name, which honors envs_dirs from
-    # ~/.condarc (unlike $(conda info --base)/envs/<name>, which is wrong for
-    # envs kept outside the base install).
-    if "/" in conda:
-        torchrun = f"{conda}/bin/torchrun"
-    else:
-        lookup = f"conda info --envs | awk -v n={conda} '$1==n {{print $NF; exit}}'"
-        torchrun = f"${{CONDA_PREFIX:-$({lookup})}}/bin/torchrun"
+    torchrun = torchrun_path(conda)
 
     total_ranks = num_nodes * num_gpus
     cuda_devices = ",".join(str(i) for i in range(num_gpus))
