@@ -898,7 +898,7 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
 
     Example YAML configuration (grid built in-memory from specs)::
 
@@ -918,7 +918,7 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
