@@ -710,6 +710,7 @@ class TestBuildPreblocks:
         assert "concat" in preblocks
 
     def test_to_device_moves_nested_state(self):
+        """Every tensor nested in the state moves to the device, non-tensors are untouched."""
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         block = ToDevice(device)
         state = {
@@ -721,11 +722,13 @@ class TestBuildPreblocks:
 
         result = block(state)
 
-        assert result["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device == device
-        assert result["target"]["ERA5"]["ERA5/prognostic/2d/SP"].device == device
-        assert result["metadata"]["tensor"].device == device
+        # Compare device.type, not the device itself: an unindexed torch.device("cuda")
+        # is not equal to the "cuda:0" that a moved tensor reports.
+        assert result["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == device.type
+        assert result["target"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == device.type
+        assert result["metadata"]["tensor"].device.type == device.type
         assert result["metadata"]["levels"] == [500, 850]
-        assert result["sequence"][0].device == device
+        assert result["sequence"][0].device.type == device.type
         assert result["sequence"][1] == "unchanged"
         assert state["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == "cpu"
 
