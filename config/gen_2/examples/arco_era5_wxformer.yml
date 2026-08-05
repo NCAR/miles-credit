@@ -1,0 +1,58 @@
+save_loc: "/glade/derecho/scratch/$USER/credit_models/arcoera5_wxformer/"
+seed: 2525
+
+data:
+  source:
+    ERA5:
+      dataset_type: "arcoera5"
+      levels: []
+      level_coord: "level"
+      variables:
+        prognostic:
+          vars_3D: ["temperature",
+                    "specific_humidity",
+                    "fraction_of_cloud_cover",
+                    "u_component_of_wind",
+                    "v_component_of_wind",]
+          vars_2D: ["surface_pressure",
+                    "2m_temperature",
+                    "2m_dewpoint_temperature",
+                    "10m_u_component_of_wind",
+                    "10m_v_component_of_wind",
+                    "skin_temperature"]
+        diagnostic:
+          vars_2D: ["total_precipitation",
+                    "snowfall",
+                    "evaporation", 
+                    "top_net_thermal_radiation", 
+                    "top_net_solar_radiation",
+                    "surface_latent_heat_flux", 
+                    "surface_net_solar_radiation",
+                    "surface_net_thermal_radiation", 
+                    "surface_sensible_heat_flux"]
+        static:
+          vars_2d: ["geopotential_at_surface",
+                    "standard_deviation_of_orography",
+                    "land_sea_mask",
+                    "low_vegetation_cover",
+                    "high_vegetation_cover",
+                    "leaf_area_index_high_vegetation",
+                    "leaf_area_index_low_vegetation",
+                    "sea_ice_cover",
+                    "anisotropy_of_sub_gridscale_orography",
+                    "angle_of_sub_gridscale_orography"
+                   ]
+    SOLAR:
+      dataset_type: "tisr"
+      num_integration_steps: 2160
+      lat_spec: [ 90, -90, 721 ]          # [start, end, num_points], inclusive
+      lon_spec: [ 0, 359.75, 1440 ]
+      variables:
+        prognostic: null
+        diagnostic: null
+        dynamic_forcing:
+          var_2d: [ 'tisr' ]
+
+
+
+          
