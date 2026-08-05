@@ -611,13 +611,23 @@ class NextGenWXFormer(BaseModel):
         self.spectral_bottleneck = SpectralGNNBottleneck(last_dim, bn_h, bn_w, num_spectral_nodes=num_spectral_nodes)
 
         # ── Decoder ──────────────────────────────────────────────────────
-        scale = 2
-        self.up_block1 = UpBlockPS(last_dim, last_dim // 2, dim[0])
-        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        # Each up-block undoes its matching encoder stage's own stride (reverse
+        # order: up_block1 undoes stage 3, ..., up_block4 undoes stage 0) rather
+        # than a hardcoded x2, so a non-uniform cross_embed_strides (e.g.
+        # entering stage 0 at native resolution with stride 1) produces the
+        # correct total upsample. The F.interpolate calls in forward() still
+        # run after each block -- they exist to hit the exact target grid shape
+        # (e.g. ERA5's 721x1440-ish, not a clean power of 2), not to correct
+        # for a stride mismatch here; getting the scales right keeps them doing
+        # only that small, intended correction instead of silently absorbing a
+        # much larger, unvalidated one.
+        s0, s1, s2, s3 = cross_embed_strides
+        self.up_block1 = UpBlockPS(last_dim, last_dim // 2, dim[0], scale=s3)
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0], scale=s2)
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0], scale=s1)
         self.up_block4 = nn.Sequential(
-            nn.Conv2d(2 * (last_dim // 8), self.output_channels * scale**2, 3, padding=1),
-            nn.PixelShuffle(scale),
+            nn.Conv2d(2 * (last_dim // 8), self.output_channels * s0**2, 3, padding=1),
+            nn.PixelShuffle(s0),
             nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
         )
 

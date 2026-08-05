@@ -468,18 +468,26 @@ class CubeSphereWxFormer(nn.Module):
             self.cross_face_tile_attn = None
 
         # ── Decoder ──────────────────────────────────────────────────────
-        # Four ×2 UpBlockPS (sub-pixel conv + PixelShuffle, ICNR init) mirror the
-        # four encoder stages, returning to the padded face size; a final Conv2d
-        # head projects to the output channels. UpBlockPS replaces the plain
-        # ConvTranspose2d UpBlock, which produces checkerboard/blob artifacts at
-        # initialization that compound over long autoregressive rollouts.
+        # Four UpBlockPS (sub-pixel conv + PixelShuffle, ICNR init) mirror the
+        # four encoder stages in reverse, each undoing its matching stage's own
+        # cross_embed_stride -- NOT hardcoded to x2. With a non-uniform stride
+        # tuple (e.g. (1, 2, 2, 2), entering the first stage at native
+        # resolution) a fixed x2-per-stage decoder would upsample by a
+        # different total factor than the encoder downsampled by, and since
+        # this decoder deliberately has no interpolate-to-match step (the
+        # design requires an exact pad/crop, not a resample), that mismatch
+        # would surface as a shape error or a silent wrong-region crop rather
+        # than a visible failure. UpBlockPS replaces the plain ConvTranspose2d
+        # UpBlock, which produces checkerboard/blob artifacts at initialization
+        # that compound over long autoregressive rollouts.
         d0, d1, d2, d3 = dim[0], dim[1], dim[2], dim[3]
+        s0, s1, s2, s3 = cross_embed_strides
         # num_groups for GroupNorm: d0 divides d3//2, d3//4, d3//8 for geometric dims
         _ng = max(1, d0)
-        self.up1 = UpBlockPS(d3, d3 // 2, _ng)  # cat: d3 → d3//2
-        self.up2 = UpBlockPS(d3 // 2 + d2, d3 // 4, _ng)  # cat(d3//2, d2) → d3//4
-        self.up3 = UpBlockPS(d3 // 4 + d1, d3 // 8, _ng)  # cat(d3//4, d1) → d3//8
-        self.up4 = UpBlockPS(d3 // 8 + d0, d0, _ng)  # cat(d3//8, d0) → d0
+        self.up1 = UpBlockPS(d3, d3 // 2, _ng, scale=s3)  # cat: d3 → d3//2, undoes stage 3
+        self.up2 = UpBlockPS(d3 // 2 + d2, d3 // 4, _ng, scale=s2)  # cat(d3//2, d2) → d3//4, undoes stage 2
+        self.up3 = UpBlockPS(d3 // 4 + d1, d3 // 8, _ng, scale=s1)  # cat(d3//4, d1) → d3//8, undoes stage 1
+        self.up4 = UpBlockPS(d3 // 8 + d0, d0, _ng, scale=s0)  # cat(d3//8, d0) → d0, undoes stage 0
         self.head = nn.Conv2d(d0, self.output_channels, 3, padding=1)
         # Zero-init the head: delta ≈ 0 at init, so the model starts from
         # persistence (output ≈ x_res from the residual connection), which

@@ -177,13 +177,22 @@ class CrossEmbedLayer(nn.Module):
 
         self.convs = nn.ModuleList([])
         for kernel, dim_scale in zip(kernel_sizes, dim_scales):
+            # Symmetric padding = (kernel - stride) // 2 only gives a true "same"
+            # shape (out = ceil(in / stride)) when (kernel - stride) is even. For
+            # an even kernel at stride=1 that's odd, so // 2 rounds down and drops
+            # one cell (e.g. kernel=4, stride=1: padding=1, 480 in -> 479 out). All
+            # kernel branches lose the same cell, so the cat() still succeeds --
+            # silently, at the wrong size. Use explicit asymmetric zero-padding
+            # instead so every (kernel, stride) combination gets the exact "same"
+            # shape; this is a no-op vs. the old formula whenever (kernel - stride)
+            # is even (the previously-working case, e.g. every default stride=2 config).
+            pad_total = kernel - stride
+            pad_left = pad_total // 2
+            pad_right = pad_total - pad_left
             self.convs.append(
-                nn.Conv2d(
-                    dim_in,
-                    dim_scale,
-                    kernel,
-                    stride=stride,
-                    padding=(kernel - stride) // 2,
+                nn.Sequential(
+                    nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
+                    nn.Conv2d(dim_in, dim_scale, kernel, stride=stride, padding=0),
                 )
             )
 
