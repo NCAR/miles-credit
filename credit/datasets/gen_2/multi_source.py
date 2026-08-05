@@ -72,6 +72,8 @@ _SOURCE_REGISTRY: dict[str, tuple[str, str]] = {
     "hrrr": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
     "hrrr_nat": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
     "hrrr_subh": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "gfs": ("credit.datasets.gen_2.gfs", "GFSDataset"),
+    "gefs": ("credit.datasets.gen_2.gefs", "GEFSDataset"),
     "tisr": ("credit.datasets.gen_2.tisr", "TISRDataset"),
 }
 
