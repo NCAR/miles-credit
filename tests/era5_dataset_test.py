@@ -445,6 +445,58 @@ def test_static_metadata_grid_found_from_real_coords(
     np.testing.assert_allclose(grid["lon"], annual_xr_dataset[2022]["longitude"].values)
 
 
+@pytest.mark.parametrize(
+    ("grid_layout", "expected_grid_type"),
+    [("shared_dim", "unstructured"), ("same_length_fallback", "unstructured")],
+)
+def test_local_find_grid_detects_unstructured_layout(tmp_path, monkeypatch, grid_layout, expected_grid_type):
+    """_find_grid detects both the shared-dimension and weaker same-length paths."""
+    path = tmp_path / f"{grid_layout}.nc"
+    values = np.arange(4, dtype=np.float32)
+    if grid_layout == "shared_dim":
+        ds = xr.Dataset(
+            {"T": ("ncol", values)},
+            coords={"lat": ("ncol", [10.0, 20.0, 30.0, 40.0]), "lon": ("ncol", values)},
+        )
+    else:
+        ds = xr.Dataset(
+            {"T": (("lat_dim", "lon_dim"), np.arange(16, dtype=np.float32).reshape(4, 4))},
+            coords={
+                "lat": ("lat_dim", [10.0, 20.0, 30.0, 40.0]),
+                "lon": ("lon_dim", values),
+            },
+        )
+    ds.to_netcdf(path)
+
+    monkeypatch.setattr("credit.datasets.gen_2.local.glob", lambda pattern: [str(path)])
+    dataset = LocalDataset.__new__(LocalDataset)
+    dataset.curr_source_name = "Test_Local"
+    dataset.save_loc = None
+    dataset.level_coord = "level"
+    dataset.levels = None
+
+    grid = dataset._find_grid({"variables": {"prognostic": {"path": str(path)}}})
+
+    assert grid["grid_type"] == expected_grid_type
+    np.testing.assert_array_equal(grid["lat"], [10.0, 20.0, 30.0, 40.0])
+
+
+def test_local_read_3d_array_rejects_nonleading_level_dimension():
+    """_read_3d_array rejects variables whose level dimension is not first."""
+    dataset = LocalDataset.__new__(LocalDataset)
+    dataset.curr_source_name = "Test_Local"
+    dataset.level_coord = "level"
+    dataset.levels = [1000, 500]
+    dataset.static_metadata = {}
+    ds = xr.Dataset(
+        {"T": (("lat", "level", "lon"), np.zeros((2, 2, 3), dtype=np.float32))},
+        coords={"level": [1000, 500], "lat": [0.0, 1.0], "lon": [0.0, 1.0, 2.0]},
+    )
+
+    with pytest.raises(ValueError, match="must be first"):
+        dataset._read_3d_array(ds, "T")
+
+
 def test_grid_schema_written_to_save_loc(
     minimal_config: dict[str, Any],
     patch_refactor_io_multiyear: dict[int, xr.Dataset],

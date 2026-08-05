@@ -45,10 +45,12 @@ from credit.postblock import build_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
+    apply_inference_overrides,
     batch_init_times,
     load_model_for_inference,
     parse_length,
     run_forecast,
+    with_inference_datetime_bounds,
 )
 from credit.trainers.utils import cleanup
 from credit.samplers import MultiStepBatchSamplerSubset
@@ -142,6 +144,13 @@ Examples:
     save_dir = os.path.expandvars(inf_conf["save_forecast"])
     os.makedirs(save_dir, exist_ok=True)
 
+    # ── Inference-scoped data/preblocks/postblocks overrides ────────────────────
+    # Optional: inference.data / inference.preblocks / inference.postblocks each
+    # independently replace the corresponding top-level block for this rollout,
+    # falling back to the top-level (training) block when absent. Must run before
+    # anything below reads conf["data"]/preblocks/postblocks.
+    schema_conf = apply_inference_overrides(conf)
+
     # ── PBS launch ───────────────────────────────────────────────────────────
     if args.launch:
         script_path = Path(__file__).absolute()
@@ -213,7 +222,7 @@ Examples:
     # only in targets), so without a schema the reconstruction map would cover
     # prognostics only and every diagnostic would be silently dropped from the
     # output. Prefer the schema saved at training time in save_loc.
-    channel_schema = ChannelSchema.load_or_from_config(conf)
+    channel_schema = ChannelSchema.load_or_from_config(schema_conf)
     attach_channel_schema(ic_preblocks, channel_schema)
     attach_channel_schema(step_preblocks, channel_schema)
 
@@ -232,7 +241,7 @@ Examples:
     # that for each init time the loader yields: IC batch (step=0), then
     # (n_steps-1) dynamic-forcing-only batches (step>0).
     dataset_conf = {
-        **conf["data"],
+        **with_inference_datetime_bounds(conf["data"], all_init_times, n_steps, timestep),
         "forecast_len": n_steps,
         "datetimes": all_init_times,
         # Forwarded into each sub-dataset's own config so dataset classes can

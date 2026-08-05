@@ -1,8 +1,13 @@
-import torch
-import numpy as np
-import xarray as xr
+import logging
 from os.path import expandvars
+
+import numpy as np
+import torch
+import xarray as xr
+
 from credit.preblock.base import BasePreblock
+
+logger = logging.getLogger(__name__)
 
 
 class Regridder(BasePreblock):
@@ -38,9 +43,9 @@ class Regridder(BasePreblock):
         self,
         weight_file: str,
         variables: list[str],
-        data_types: list[str] = None,
+        data_types: list[str] | None = None,
         reshape_to_xy: bool = True,
-        flip_axis: list[int] = None,
+        flip_axis: list[int] | None = None,
     ):
         super().__init__()
         dst_lat = None
@@ -127,20 +132,47 @@ class Regridder(BasePreblock):
         return W
 
     def _regrid(self, x: torch.Tensor) -> torch.Tensor:
+
         device = x.device
         W = self._get_W(device)
-        if self.flip_axis is not None:
-            x = torch.flip(x, dims=self.flip_axis)
-        lead_shape = x.shape[:-2]  # all dims except the last two spatial dims (lat, lon)
-        # Flatten leading dims and transpose: sparse mm expects (n_a, N) input, returns (n_b, N).
-        x_flat = x.reshape(-1, self.n_a).T
-        y_flat = torch.sparse.mm(W, x_flat).T
 
+        # 1. Dynamically determine if source is structured (2D) or unstructured (1D)
+        if x.shape[-1] == self.n_a:
+            spatial_dims = 1
+        elif len(x.shape) >= 2 and (x.shape[-2] * x.shape[-1]) == self.n_a:
+            spatial_dims = 2
+        else:
+            raise ValueError(f"Cannot map input shape {x.shape} to expected source grid size {self.n_a}.")
+
+        # 2. Safely extract leading dimensions (e.g., batch, time, level)
+        lead_shape = x.shape[:-spatial_dims]
+
+        # 3. Safeguard flip_axis to prevent flipping non-spatial dimensions
+        if self.flip_axis is not None:
+            # Ensure we only flip dimensions that fall within our detected spatial dims
+            requested_flips = list(self.flip_axis)
+            valid_flips = [d for d in requested_flips if -spatial_dims <= d < 0]
+            if valid_flips != requested_flips:
+                logger.warning(
+                    "Regridder: ignoring invalid flip_axis values %s; spatial axes must be negative "
+                    "indices in [%d, -1].",
+                    [d for d in requested_flips if d not in valid_flips],
+                    -spatial_dims,
+                )
+            if valid_flips:
+                x = torch.flip(x, dims=valid_flips)
+
+        # 4. Flatten leading dims and transpose: sparse mm expects (n_a, N) input, returns (n_b, N).
+        x_flat = x.reshape(-1, self.n_a).T
+        y_flat = torch.sparse.mm(W, x_flat).T  # Shape: (N, n_b)
+
+        # 5. Restore leading dimensions and apply destination shape
         if self.reshape_to_xy and self.dst_shape is not None:
             ny, nx = self.dst_shape
             return y_flat.reshape(*lead_shape, ny, nx)
         else:
-            return y_flat
+            # Even when not reshaping to XY, we must unpack the leading dims
+            return y_flat.reshape(*lead_shape, self.n_b)
 
     def forward(self, batch: dict) -> dict:
         batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict

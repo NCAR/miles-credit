@@ -415,6 +415,30 @@ The generated script uses `torchrun --standalone --nproc-per-node=4`. For multi-
 runs, set `nodes: 2` (or more) in the `pbs:` block and `credit submit` handles the
 `--nnodes` and `--rdzv` arguments.
 
+#### Multi-node launcher (derecho)
+
+For multi-node derecho jobs, `credit submit` offers two launchers via `--launcher`:
+
+- `mpiexec` (default) — launches one `python` process per GPU under cray-mpich; MPI's
+  PMI environment variables tell each rank its identity.
+- `pbsdsh` — spawns one `torchrun` per node with PBS Pro's native task launcher
+  (no MPI process management), and runs NCCL over the `libfabric` module. Rank identity
+  comes from torchrun (`LOCAL_RANK`/`RANK`/`WORLD_SIZE`).
+
+```bash
+# Default (mpiexec)
+credit submit --cluster derecho -c config.yml --nodes 2
+
+# pbsdsh + torchrun, NCCL over libfabric
+credit submit --cluster derecho -c config.yml --nodes 2 --launcher pbsdsh
+```
+
+Both launchers apply to `--mode train` and `--mode preprocess`. Single-node jobs always
+use `torchrun --standalone` regardless of `--launcher`. The `pbsdsh` launcher bakes the
+fully-resolved conda/module environment into a per-node script, because pbsdsh's spawned
+shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
+libfabric for inter-node communication. Use `--dry-run` to compare the two scripts.
+
 ### Job submission
 
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.

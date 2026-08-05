@@ -20,11 +20,15 @@ cftime objects are ever created and behavior is bit-identical.
 from __future__ import annotations
 
 import bisect
-import cftime
 import logging
 import re
+from collections.abc import Iterable, Sequence
 from datetime import datetime as dt_cls
+from itertools import pairwise
+from typing import TypeAlias
 
+import cftime
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -43,6 +47,9 @@ _UNSUPPORTED_CALENDARS = frozenset({"360_day"})
 # cftime accepts these aliases; normalize so equality checks work
 _CALENDAR_ALIASES = {"365_day": "noleap", "366_day": "all_leap"}
 _EPOCH_US = "microseconds since 1970-01-01T00:00:00"
+_ZERO_TIMEDELTA = pd.Timedelta(0)
+
+TimeLike: TypeAlias = pd.Timestamp | cftime.datetime | dt_cls | np.datetime64 | str
 
 
 def normalize_calendar(calendar: str | None) -> str:
@@ -70,7 +77,7 @@ def _check_supported(calendar: str) -> str:
     return cal
 
 
-def to_calendar(t, calendar: str | None):
+def to_calendar(t: TimeLike, calendar: str | None) -> pd.Timestamp | cftime.datetime:
     """Convert a timestamp to *calendar* by date fields (year, month, day, ...).
 
     The conversion preserves the calendar *label* (2000-03-01 stays 2000-03-01),
@@ -112,7 +119,61 @@ def to_calendar(t, calendar: str | None):
         ) from exc
 
 
-def build_time_index(start, end, freq, calendar: str | None = "standard"):
+def _is_leap_year(year: int, calendar: str) -> bool:
+    """Whether *year* has a Feb 29 in *calendar* (already normalized/checked-supported).
+
+    Every other (month, day) combination is a fixed length every year in the
+    calendars this module supports (Jan=31, Apr=30, ...), so Feb is the only
+    month whose length ever depends on the year -- this is the only leap-rule
+    lookup ``to_cycle_year`` needs.
+    """
+    if calendar == "noleap":
+        return False
+    if calendar == "all_leap":
+        return True
+    if calendar == "julian":
+        return year % 4 == 0
+    return year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)  # standard / gregorian / proleptic_gregorian
+
+
+def to_cycle_year(t: TimeLike, cycle_year: int, calendar: str | None) -> pd.Timestamp | cftime.datetime:
+    """Rewrite *t* onto *cycle_year*, preserving (month, day, hour, minute, second).
+
+    Used by cyclic (``temporal_mode: "cyclic"``) sources to map an arbitrary
+    real timestamp onto the single representative year a climatology file
+    lives in. Unlike ``to_calendar``, this never raises for a nonexistent Feb
+    29: if *t* is Feb 29 and *cycle_year* doesn't have one in *calendar*, the
+    day is clamped to Feb 28 instead -- there both is and needs to be no
+    "which year is this climatology for" requirement on *cycle_year* (any year
+    works), since asof-lookup against the source's own native timestamps
+    already resolves Feb 28 (or the clamp target) to whatever's actually
+    there, exactly the "map to the previous time step" behavior wanted here.
+    A silent clamp is safe specifically because this is the one calendar-only
+    edge case that can never indicate a real data error, unlike ``to_calendar``
+    (which raises loudly, since there a mismatch usually does mean one).
+
+    Args:
+        t: ``pd.Timestamp`` or ``cftime.datetime``.
+        cycle_year: the single representative year the cyclic source's data lives in.
+        calendar: the cyclic source's own CF calendar (``None`` == standard).
+
+    Returns:
+        ``pd.Timestamp`` when *calendar* is standard, else ``cftime.datetime`` --
+        same convention as ``to_calendar``.
+    """
+    cal = _check_supported(calendar)
+    month, day = t.month, t.day
+    if month == 2 and day == 29 and not _is_leap_year(cycle_year, cal):
+        day = 28
+
+    if is_standard_calendar(calendar):
+        return pd.Timestamp(cycle_year, month, day, t.hour, t.minute, t.second, t.microsecond)
+    return cftime.datetime(cycle_year, month, day, t.hour, t.minute, t.second, t.microsecond, calendar=cal)
+
+
+def build_time_index(
+    start: TimeLike, end: TimeLike, freq: pd.Timedelta | str, calendar: str | None = "standard"
+) -> pd.Index:
     """Build the sampling clock for *calendar*.
 
     Standard calendars return exactly ``pd.date_range(start, end, freq=freq)``
@@ -135,7 +196,79 @@ def build_time_index(start, end, freq, calendar: str | None = "standard"):
     return xr.date_range(to_calendar(start, cal), to_calendar(end, cal), freq=freq_str, calendar=cal, use_cftime=True)
 
 
-def encode_time(t) -> int:
+def build_time_index_multi(
+    blocks: Sequence[tuple[TimeLike, TimeLike]],
+    freq: pd.Timedelta | str,
+    calendar: str | None = "standard",
+    start_margin: pd.Timedelta = _ZERO_TIMEDELTA,
+    end_margin: pd.Timedelta = _ZERO_TIMEDELTA,
+) -> pd.Index:
+    """Build the sampling clock from one or more non-overlapping ``(start, end)`` blocks.
+
+    Generalizes ``build_time_index`` to non-contiguous date ranges (e.g. train on
+    1950-1965 + 1970-1985, skipping 1966-1969): *start_margin* is added to each
+    block's start and *end_margin* subtracted from each block's end -- exactly
+    the existing history_len/forecast_len safety margin
+    (``(history_len-1)*dt`` / ``num_forecast_steps*dt``), applied per block
+    instead of once globally -- then each block's own time index is built
+    independently and the results are concatenated. Because the margin is
+    applied per block, an init time drawn from anywhere in the resulting index
+    can never produce a history/rollout window that reaches outside that
+    block, into an excluded gap -- nothing downstream (sampler, per-source
+    persist/cyclic filtering) needs to know blocks exist at all.
+
+    Args:
+        blocks: list of ``(start, end)`` pairs (timestamp or parseable string
+            each). Must be sorted and non-overlapping (validated here, on the
+            raw/untrimmed bounds).
+        freq: ``pd.Timedelta`` or pandas frequency string.
+        calendar: CF calendar name.
+        start_margin: added to each block's start before building its index.
+        end_margin: subtracted from each block's end before building its index.
+
+    Raises:
+        ValueError: if ``blocks`` is empty, a block has end <= start, blocks
+            are unsorted/overlapping, or a block is too short to survive its
+            own ``start_margin``/``end_margin`` trim.
+    """
+    if not blocks:
+        raise ValueError("build_time_index_multi: `blocks` must be a non-empty list of (start, end) pairs.")
+
+    cal_blocks = []
+    for start, end in blocks:
+        s = to_calendar(pd.Timestamp(start), calendar)
+        e = to_calendar(pd.Timestamp(end), calendar)
+        if e <= s:
+            raise ValueError(f"build_time_index_multi: block ({start}, {end}) has end <= start.")
+        cal_blocks.append((s, e))
+
+    cal_blocks.sort(key=lambda b: b[0])
+    for (_, e1), (s2, _) in pairwise(cal_blocks):
+        if s2 <= e1:
+            raise ValueError(
+                "build_time_index_multi: date_ranges blocks must be sorted and non-overlapping; "
+                f"block ending {e1} overlaps (or is out of order with) block starting {s2}."
+            )
+
+    all_ts = []
+    for s, e in cal_blocks:
+        trimmed_start = s + start_margin
+        trimmed_end = e - end_margin
+        if trimmed_end < trimmed_start:
+            raise ValueError(
+                f"build_time_index_multi: block ({s}, {e}) is too short for the configured "
+                f"history_len/forecast_len margin (needs at least {start_margin + end_margin})."
+            )
+        all_ts.extend(build_time_index(trimmed_start, trimmed_end, freq, calendar))
+
+    if is_standard_calendar(calendar):
+        return pd.DatetimeIndex(all_ts)
+    import xarray as xr  # deferred: keeps the standard path free of the import
+
+    return xr.CFTimeIndex(all_ts)
+
+
+def encode_time(t: TimeLike) -> int:
     """Encode a timestamp as int nanoseconds since 1970-01-01 *in its own calendar*.
 
     For ``pd.Timestamp`` this is exactly ``int(t.value)`` (unix ns).  For cftime
@@ -146,7 +279,7 @@ def encode_time(t) -> int:
     datasets advertise the calendar via ``static_metadata``.
     """
     if isinstance(t, cftime.datetime):
-        return int(round(float(cftime.date2num(t, _EPOCH_US, calendar=t.calendar)))) * 1000
+        return round(float(cftime.date2num(t, _EPOCH_US, calendar=t.calendar))) * 1000
     return int(pd.Timestamp(t).value)
 
 
@@ -158,7 +291,7 @@ def decode_time(value: int, calendar: str | None = "standard"):
     return cftime.num2date(int(value) // 1000, _EPOCH_US, calendar=cal)
 
 
-def most_restrictive_calendar(calendars) -> str:
+def most_restrictive_calendar(calendars: Iterable[str | None]) -> str:
     """Pick the master-clock calendar from per-source calendars.
 
     Standard-family calendars impose no restriction; a single non-standard
@@ -176,12 +309,12 @@ def most_restrictive_calendar(calendars) -> str:
     return next(iter(non_standard))
 
 
-def _time_label(t) -> tuple:
+def _time_label(t: TimeLike) -> tuple[int, int, int, int, int, int]:
     """Calendar-agnostic identity of a timestamp: its date/time fields."""
     return (t.year, t.month, t.day, t.hour, t.minute, t.second)
 
 
-def filter_index_by_labels(index, other):
+def filter_index_by_labels(index: pd.Index, other: Iterable[TimeLike]) -> pd.Index:
     """Keep elements of *index* whose (Y,M,D,h,m,s) label occurs in *other*.
 
     Calendar-agnostic replacement for ``index.isin(other)`` when the two sides
@@ -378,7 +511,7 @@ def _map_files(
                 f"Time format '{time_fmt}' did not match path '{f}'. "
                 "Verify that your path contains strftime codes covering the date portion."
             )
-        parsed = dt_cls.strptime(m.group(group_key), time_fmt)
+        parsed = dt_cls.strptime(m.group(group_key), time_fmt)  # noqa: DTZ007
         period = pd.Period(parsed, freq)
         intervals.append((period.start_time, period.end_time, f))
 
@@ -387,7 +520,7 @@ def _map_files(
 
 def _find_file(
     intervals: list[tuple[pd.Timestamp, pd.Timestamp, str]],
-    t: pd.Timestamp,
+    t: TimeLike,
 ) -> str:
     """Binary-search for the file whose interval covers *t*.
 
@@ -457,3 +590,21 @@ def _start_s3_fs():
         "default_block_size": 8**20,
     }
     return s3fs.S3FileSystem(**fs_config)
+
+
+def _start_s3_obstore(s3_bucket_name: str):
+    """Lazily initialize an anonymous ``obstore.store.S3S3Store`` instance.
+
+    Called automatically on the first ``__extract_field__`` (called within ``__getitem__``)
+    invocation when ``mode`` is ``"remote"``. The filesystem object is cached in ``_obstore``
+    for re-use across later calls.
+
+    """
+
+    try:
+        import obstore
+    except ImportError as exc:
+        raise ImportError("s3fs is required for remote dataset access. Install it with: pip install obstore") from exc
+
+    # Skip signature is important to create an anonymous client!
+    return obstore.store.S3Store(s3_bucket_name, skip_signature=True)

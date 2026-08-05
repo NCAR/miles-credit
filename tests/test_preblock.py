@@ -14,6 +14,7 @@ from credit.preblock import apply_preblocks, build_preblocks
 from credit.preblock.concat import ConcatToTensor
 from credit.preblock.log import LogTransform
 from credit.preblock.regrid import Regridder
+from credit.preblock.rename import RenameVariables
 from credit.preblock.scaler import BridgeScalerTransform
 from credit.preblock.sqrt import SqrtTransform
 from credit.preblock._utils import (
@@ -22,6 +23,7 @@ from credit.preblock._utils import (
     _unflatten_spatial_tensors,
 )
 from credit.postblock import build_postblocks
+from credit.datasets.gen_2.channel_utils import ChannelSchema
 
 
 def create_synthetic_data() -> dict:
@@ -91,6 +93,8 @@ def weight_file(tmp_path):
             "row": xr.DataArray(rows.astype(np.int32), dims=("n_s",)),
             "col": xr.DataArray(cols.astype(np.int32), dims=("n_s",)),
             "S": xr.DataArray(vals.astype(np.float64), dims=("n_s",)),
+            "yc_b": xr.DataArray(np.repeat(np.arange(n_dst_lat), n_dst_lon).astype(np.float64), dims=("n_b",)),
+            "xc_b": xr.DataArray(np.tile(np.arange(n_dst_lon), n_dst_lat).astype(np.float64), dims=("n_b",)),
         }
     )
     path = tmp_path / "weights.nc"
@@ -114,6 +118,28 @@ def test_regrid_output_shape(weight_file):
         assert result[split]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
 
 
+def test_regrid_unstructured_input(weight_file):
+    """A source tensor with the spatial dims already flattened (e.g. an unstructured/
+    curvilinear source grid, or any pre-flattened (..., n_a) input) must regrid to the
+    exact same result as the structured (lat, lon) input -- _regrid detects spatial_dims
+    (1 vs 2) from the tensor shape rather than always assuming 2D."""
+    path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
+    variables = ["Test_ERA5/prognostic/3d/T"]
+    batch_2d = create_synthetic_data()
+    batch_flat = copy.deepcopy(batch_2d)
+    batch_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"] = batch_flat["input"]["Test_ERA5"][
+        "Test_ERA5/prognostic/3d/T"
+    ].reshape(100, 16, 1, n_src_lat * n_src_lon)
+
+    result_2d = Regridder(path, variables=variables)(batch_2d)
+    result_flat = Regridder(path, variables=variables)(batch_flat)
+
+    t_2d = result_2d["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    t_flat = result_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    assert t_flat.shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+    assert torch.equal(t_flat, t_2d)
+
+
 def test_regrid_uniform_input(weight_file):
     """Block-average regrid: uniform input maps to uniform output of the same value."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
@@ -129,13 +155,15 @@ def test_regrid_uniform_input(weight_file):
 
 
 def test_regrid_reshape_false(weight_file):
-    """reshape_to_xy=False returns a flat (prod(lead_dims), n_b) tensor."""
+    """reshape_to_xy=False skips the (ny, nx) reshape but still preserves the
+    leading (batch, level, time) dims, returning (*lead_dims, n_b) — batch must
+    stay a distinct leading dim for downstream consumers (e.g. ConcatToTensor)."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
     variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables, reshape_to_xy=False)
     batch = create_synthetic_data()
     result = regrid(batch)
-    assert result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
+    assert result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat * n_dst_lon)
 
 
 def test_regrid_flip_axis(weight_file):
@@ -151,6 +179,66 @@ def test_regrid_flip_axis(weight_file):
         result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
         result_flip["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
     )
+
+
+def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
+    """Positive flip axes are rejected instead of flipping a leading dimension."""
+    path, n_src_lat, n_src_lon, _, _ = weight_file
+    variable = "Test_ERA5/prognostic/3d/T"
+    x = torch.arange(2 * 1 * 2 * n_src_lat * n_src_lon, dtype=torch.float32).reshape(2, 1, 2, n_src_lat, n_src_lon)
+    batch = {"input": {"Test_ERA5": {variable: x}}}
+    baseline = Regridder(path, variables=[variable])(batch)
+    caplog.set_level("WARNING")
+    result = Regridder(path, variables=[variable], flip_axis=[2])(batch)
+
+    torch.testing.assert_close(result["input"]["Test_ERA5"][variable], baseline["input"]["Test_ERA5"][variable])
+    assert "invalid flip_axis values [2]" in caplog.text
+
+
+def test_grid_schema_resolve_rejects_unstructured_native_grid():
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    with pytest.raises(ValueError, match="native grid_type='unstructured'"):
+        GridSchema.resolve(dataset)
+
+
+def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    path, *_ = weight_file
+    regrid = Regridder(path, variables=["Test_ERA5/prognostic/3d/T"])
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    schema = GridSchema.resolve(dataset, step_preblocks=nn.ModuleDict({"regrid": regrid}))
+
+    assert schema.origin == "regridded"
+    assert schema.grid_type == "rectilinear"
+    assert schema.lat.shape == (4,)
+    assert schema.lon.shape == (4,)
+
+
+def test_unstructured_source_grid_schema_is_skipped(tmp_path, caplog):
+    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+
+    caplog.set_level("INFO")
+    write_source_grid_schema_if_missing(
+        "Test_Local",
+        {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)},
+        str(tmp_path),
+    )
+
+    assert not (tmp_path / "Test_Local_grid_schema.nc").exists()
+    assert "unstructured" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -789,6 +877,112 @@ class TestConcatToTensorChannelOrder:
             covered.extend(range(s.start, s.stop))
 
         assert len(covered) == len(set(covered)), "Channel slices must not overlap"
+
+
+# ---------------------------------------------------------------------------
+# ConcatToTensor — input side ChannelSchema validation
+# ---------------------------------------------------------------------------
+
+
+class TestConcatToTensorInputSchemaValidation:
+    def _schema(self):
+        return ChannelSchema(
+            input_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+            target_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+        )
+
+    def test_matching_input_passes_with_schema_attached(self):
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        tensor, _meta = ct(batch)  # must not raise
+        assert tensor.shape == (1, 1, 1, 4, 4)
+
+    def test_mismatched_input_raises_with_no_target_present(self):
+        """The inference (no-target) case this was added for: a renamed/extra/missing
+        input variable must be caught here, not surfaced as a shape mismatch later."""
+        batch = {"input": {"gfs": {"gfs/prognostic/2d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        with pytest.raises(ValueError, match="ChannelSchema mismatch"):
+            ct(batch)
+
+    def test_input_schema_validated_only_once(self):
+        """A second batch with the same (already-validated) layout must not re-raise
+        or otherwise re-run the comparison."""
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        ct(batch)
+        assert ct._input_schema_validated
+        ct(batch)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# RenameVariables
+# ---------------------------------------------------------------------------
+
+
+class TestRenameVariables:
+    def test_renames_across_source_boundary(self):
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 4, 1, 4, 4)}}}
+        rn = RenameVariables(mapping={"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"})
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+        assert out["input"]["GFS"] == {}
+        # original batch must be untouched (shallow-copy contract)
+        assert list(batch["input"]["GFS"].keys()) == ["GFS/prognostic/3d/TMP"]
+
+    def test_key_absent_in_a_data_type_is_skipped(self):
+        """A mapping entry that doesn't apply to a given data_type (e.g. a static-only
+        rename during a target pass) is silently skipped, matching other preblocks."""
+        batch = {"input": {"GFS": {"GFS/static/2d/z": torch.randn(1, 1, 1, 4, 4)}}, "target": {}}
+        rn = RenameVariables(mapping={"GFS/static/2d/z": "ERA5/static/2d/z"})
+        out = rn(batch)
+        assert "ERA5" in out["input"]
+        assert out["target"] == {}
+
+    @pytest.mark.parametrize("mapping", [{"A/x": "B/x", "B/x": "C/x"}, {"B/x": "C/x", "A/x": "B/x"}])
+    def test_chained_mappings_use_original_keys_only(self, mapping):
+        """A mapped destination is not remapped again in the same pass."""
+        batch = {"input": {"A": {"A/x": torch.tensor(1.0)}}}
+
+        out = RenameVariables(mapping=mapping)(batch)
+
+        assert out["input"]["A"] == {}
+        assert torch.equal(out["input"]["B"]["B/x"], torch.tensor(1.0))
+        assert "C" not in out["input"]
+
+    def test_destination_collision_raises(self):
+        batch = {
+            "input": {
+                "GFS": {
+                    "GFS/prognostic/3d/A": torch.randn(1, 1, 1, 4, 4),
+                    "GFS/prognostic/3d/B": torch.randn(1, 1, 1, 4, 4),
+                }
+            }
+        }
+        rn = RenameVariables(
+            mapping={"GFS/prognostic/3d/A": "ERA5/prognostic/3d/T", "GFS/prognostic/3d/B": "ERA5/prognostic/3d/T"}
+        )
+        with pytest.raises(ValueError, match="already exists"):
+            rn(batch)
+
+    def test_mapping_file_loads_and_applies(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "map.yaml"
+        path.write_text(yaml.safe_dump({"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"}))
+        rn = RenameVariables(mapping_file=str(path))
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+
+    def test_requires_exactly_one_of_mapping_or_mapping_file(self):
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables()
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables(mapping={"a": "b"}, mapping_file="unused.yaml")
 
 
 # ---------------------------------------------------------------------------

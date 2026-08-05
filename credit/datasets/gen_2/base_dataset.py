@@ -7,28 +7,51 @@ AbstractBaseDataset and BaseDataset: A PyTorch Dataset class for:
 3. Provide a minimal implementation of a Dataset for testing
 4. Avoid redundant code across dataset classes
 
+BaseDataset handles configuration, sampling clocks, field registration, file
+mapping, history windows, metadata, and input/target sample assembly for a
+single data source. Subclasses customize file discovery and field extraction;
+MultiSourceDataset coordinates multiple BaseDataset instances.
+
+Temporal behavior is selected with the source-level ``temporal_mode`` option:
+
+* ``exact`` (default): require source timestamps to match the master clock.
+* ``persist``: use the latest source timestamp at or before each master-clock
+  timestamp, which is useful for coarser-resolution data.
+* ``cyclic``: map each timestamp onto a representative ``cycle_year`` and
+  resolve it within a repeating annual cycle, which is useful for climatology
+  or seasonal forcing. February 29 is clamped to February 28 when the source
+  calendar or cycle year has no leap day.
+
+Sources may use standard pandas calendars or supported CF calendars such as
+``noleap``, ``all_leap``, and ``julian``. The sampling clock can use either a
+continuous ``start_datetime``/``end_datetime`` interval or non-contiguous
+``date_ranges``; history and forecast margins are applied to each range.
+
 """
 
-from glob import glob
 import logging
+from glob import glob
 from typing import Any, Literal, get_args
 
 import cftime
 import pandas as pd
-
-from torch.utils.data import Dataset
 import torch
+from torch.utils.data import Dataset
 
 from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage]
     _extract_time_fmt,
     _map_files,
     _path_template_to_glob,
     build_time_index,
+    build_time_index_multi,
     encode_time,
     is_standard_calendar,
     normalize_calendar,
     to_calendar,
+    to_cycle_year,
 )
+
+logger = logging.getLogger(__name__)
 
 # Expected types of fields
 # * ``prognostic``      — input at step 0 and target (autoregressive rollout)
@@ -245,8 +268,64 @@ class BaseDataset(AbstractBaseDataset):
         self.num_forecast_steps: int = self._load_num_forecast_steps(data_config, self.curr_source_cfg)
         self.history_len: int = self._load_history_len(data_config, self.curr_source_cfg)
 
-        self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
-        self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        # date_ranges is an optional alternative to start_datetime/end_datetime:
+        # a list of non-contiguous (start, end) blocks (e.g. train on
+        # 1950-1965 + 1970-1985, skipping 1966-1969). Mutually exclusive with
+        # start_datetime/end_datetime *at the same level* -- but an explicit
+        # source-level start_datetime/end_datetime always wins over a data-level
+        # date_ranges (not a conflict): this is the normal case for persist/cyclic
+        # sources, which almost always define their own independent coverage
+        # regardless of what the overall run's date_ranges looks like.
+        temporal_mode = self.curr_source_cfg.get("temporal_mode", "exact")
+        if temporal_mode == "cyclic":
+            # A cyclic source's own coverage is always self-contained -- its
+            # own single representative cycle, either explicit
+            # (start_datetime/end_datetime) or inferred from its data (see
+            # LocalDataset._load_start_datetime/_load_end_datetime) -- never
+            # date_ranges, which describes the overall run's real multi-year
+            # span, a different concept entirely that a cyclic source must not
+            # accidentally inherit from the data level.
+            if "date_ranges" in self.curr_source_cfg:
+                raise ValueError(
+                    f"Source '{self.curr_source_name}': temporal_mode: cyclic cannot be combined with "
+                    "date_ranges -- its own start_datetime/end_datetime (explicit or inferred) already "
+                    "describes its single representative cycle."
+                )
+            self.date_ranges = None
+            self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+            self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+        else:
+            has_source_date_range = self._in_source_config(data_config, self.curr_source_cfg, "start_datetime") or (
+                self._in_source_config(data_config, self.curr_source_cfg, "end_datetime")
+            )
+            source_has_date_ranges = "date_ranges" in self.curr_source_cfg
+            if has_source_date_range and source_has_date_ranges:
+                raise ValueError(
+                    f"Source '{self.curr_source_name}': date_ranges cannot be combined with "
+                    "start_datetime/end_datetime in the same source config -- use one or the other."
+                )
+
+            if has_source_date_range:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
+            elif source_has_date_ranges:
+                self.date_ranges = self.curr_source_cfg["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            elif "date_ranges" in data_config:
+                if "start_datetime" in data_config or "end_datetime" in data_config:
+                    raise ValueError(
+                        "date_ranges cannot be combined with start_datetime/end_datetime at the data level "
+                        "-- use one or the other."
+                    )
+                self.date_ranges = data_config["date_ranges"]
+                self.start_datetime = None
+                self.end_datetime = None
+            else:
+                self.date_ranges = None
+                self.start_datetime: pd.Timestamp = self._load_start_datetime(data_config, self.curr_source_cfg)
+                self.end_datetime: pd.Timestamp = self._load_end_datetime(data_config, self.curr_source_cfg)
 
         # CF calendar of this source's clock. Resolved from config (source-level
         # `calendar:` key, then data-level) with a subclass hook for finding it in
@@ -264,10 +343,27 @@ class BaseDataset(AbstractBaseDataset):
         if "mode" in self.curr_source_cfg:
             self.mode = self.curr_source_cfg["mode"]
 
-        # temporal_mode: "exact" (default, exact timestamp match required) or
-        # "persist" (snap to last native timestamp via asof(); used for coarser sources)
+        # temporal_mode: "exact" (default, exact timestamp match required),
+        # "persist" (snap to last native timestamp via asof(); used for coarser
+        # sources), or "cyclic" (map any real timestamp onto this source's single
+        # cycle_year via to_cycle_year + asof; used for climatology/seasonal
+        # forcing that repeats every cycle without duplicating data across real
+        # years -- see _resolve_cyclic_timestamp).
         self.temporal_mode: str = self.curr_source_cfg.get("temporal_mode", "exact")
         self._persist_cache: dict = {}
+
+        # cycle_year: the single representative year a cyclic source's data lives
+        # in (e.g. 2000). Any year works -- to_cycle_year clamps Feb 29 to Feb 28
+        # when cycle_year doesn't have one, rather than requiring a leap year.
+        # Config wins if given; subclasses (e.g. LocalDataset) may override
+        # _load_cycle_year to infer it from the data instead.
+        self.cycle_year: int | None = self._load_cycle_year(data_config, self.curr_source_cfg)
+        if self.temporal_mode == "cyclic" and self.cycle_year is None:
+            raise ValueError(
+                f"Source '{self.curr_source_name}': temporal_mode: cyclic requires 'cycle_year' "
+                "(the single representative year this source's climatology data lives in) "
+                "to be set in the source config."
+            )
 
         # Placeholder for static metadata. `datetime_fmt` tells metadata consumers
         # how to decode the input/target_datetime ints (see _utils.decode_time):
@@ -369,6 +465,29 @@ class BaseDataset(AbstractBaseDataset):
             )
         return resolved
 
+    def _resolve_cyclic_timestamp(self, t: pd.Timestamp | cftime.datetime) -> pd.Timestamp | cftime.datetime:
+        """Map *t* onto this source's single ``cycle_year``, then snap to the
+        last native timestamp at or before that point.
+
+        Same "last available, not nearest" semantics as ``_resolve_persist_timestamp``
+        (``asof``), applied within one cycle instead of across the whole run. Unlike
+        persist, this never raises: a point before the cycle's first native timestamp
+        (e.g. the file starts at 06:00 on Jan 1 and the remapped point lands at 00:00)
+        wraps to the cycle's *last* entry instead -- this is periodic, not a bounded
+        series, so "before the start" really means "just after the end."
+
+        Args:
+            t: Real timestamp to resolve (any real year).
+
+        Returns:
+            The resolved native timestamp within ``cycle_year``.
+        """
+        t_cycle = to_cycle_year(t, self.cycle_year, self.calendar)
+        resolved = self.datetimes.asof(t_cycle)
+        if pd.isna(resolved):
+            resolved = self.datetimes[-1]
+        return resolved
+
     def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
         """Build and return the sample dict for timestamp *t* and step index *i*.
 
@@ -383,7 +502,9 @@ class BaseDataset(AbstractBaseDataset):
         window. With ``history_len == 1`` behaviour is identical to the original.
 
         Args:
-            t: Timestamp to load (already resolved for persist sources).
+            t: Timestamp to load (already resolved for persist sources; the real,
+                un-remapped master timestamp for cyclic sources -- see the
+                cyclic lookup-remapping below).
             i: Within-sequence step index (0 = initial step).
 
         Returns:
@@ -407,29 +528,45 @@ class BaseDataset(AbstractBaseDataset):
             # pd.date_range cannot consume.
             t_history = build_time_index(t - (self.history_len - 1) * self.dt, t, self.dt, self.calendar)
 
+        # Cyclic sources: t / t_target / t_history above are real, monotonic
+        # master-clock timestamps -- computed exactly as for any other source,
+        # never wrapping. Only the *lookup* keys actually handed to the read
+        # calls below are remapped onto this source's single cycle_year, via
+        # _resolve_cyclic_timestamp, independently per timestamp (so a history
+        # window or target that crosses a real year boundary needs no special
+        # handling: each point is resolved on its own, regardless of how far
+        # apart its neighbors are in real time). Non-cyclic sources are
+        # unaffected -- the lookup values are just t / t_target / t_history
+        # themselves, no extra work.
+        is_cyclic = self.temporal_mode == "cyclic"
+        t_lookup = self._resolve_cyclic_timestamp(t) if is_cyclic else t
+        t_target_lookup = self._resolve_cyclic_timestamp(t_target) if is_cyclic else t_target
+        if use_history_window:
+            t_history_lookup = [self._resolve_cyclic_timestamp(x) for x in t_history] if is_cyclic else t_history
+
         # Dynamic forcing is loaded at every step.
         # At i == 0 we need the full history window so the trainer's x has H
         # time steps; at i > 0 we only need the newest step (the trainer slides
         # the previous history forward during rollout).
         if "dynamic_forcing" in self.var_dict:
             if i == 0 and use_history_window:
-                self._extract_field_window("dynamic_forcing", t_history, input_data)
+                self._extract_field_window("dynamic_forcing", t_history_lookup, input_data)
             else:
-                self._extract_field("dynamic_forcing", t, input_data)
+                self._extract_field("dynamic_forcing", t_lookup, input_data)
 
         # Prognostic + static are only needed at the initial step.
         # Both are loaded over the full history window so x starts with H steps.
         if i == 0:
             if "static" in self.var_dict:
                 if use_history_window:
-                    self._extract_field_window("static", t_history, input_data)
+                    self._extract_field_window("static", t_history_lookup, input_data)
                 else:
-                    self._extract_field("static", t, input_data)
+                    self._extract_field("static", t_lookup, input_data)
             if "prognostic" in self.var_dict:
                 if use_history_window:
-                    self._extract_field_window("prognostic", t_history, input_data)
+                    self._extract_field_window("prognostic", t_history_lookup, input_data)
                 else:
-                    self._extract_field("prognostic", t, input_data)
+                    self._extract_field("prognostic", t_lookup, input_data)
 
         sample: dict[str, Any] = {
             "input": input_data,
@@ -442,7 +579,7 @@ class BaseDataset(AbstractBaseDataset):
             target_data: dict[str, Any] = {}
             for field_type in ("prognostic", "diagnostic"):
                 if field_type in self.var_dict:
-                    self._extract_field(field_type, t_target, target_data)
+                    self._extract_field(field_type, t_target_lookup, target_data)
 
             sample["target"] = target_data
             sample["metadata"]["target_datetime"] = encode_time(t_target)
@@ -506,13 +643,22 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timedelta: The timestep for the dataset
         """
-        self._check_in_data_config(data_config, dt_key)
+        has_source_dt = self._in_source_config(data_config, curr_source_config, dt_key)
+        if dt_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. a
+            # cyclic source whose timestep is inferred/declared independently
+            # of the overall run) -- the source-level value, if this source has
+            # its own, is authoritative on its own.
+            if not has_source_dt:
+                self._check_in_data_config(data_config, dt_key)  # raises with the standard message
+            return pd.Timedelta(curr_source_config[dt_key])
+
         dt_in_data = pd.Timedelta(data_config[dt_key])
 
-        if self._in_source_config(data_config, curr_source_config, dt_key):
+        if has_source_dt:
             dt_in_source = pd.Timedelta(curr_source_config[dt_key])
             if dt_in_source < dt_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{dt_key} in source ({dt_in_source}) "
                     + f"is smaller than {dt_key} in data ({dt_in_data}). "
@@ -548,7 +694,7 @@ class BaseDataset(AbstractBaseDataset):
         if self._in_source_config(data_config, curr_source_config, num_forecast_steps_key):
             num_forecast_steps_in_source = curr_source_config[num_forecast_steps_key]
             if num_forecast_steps_in_source > num_forecast_steps_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{num_forecast_steps_key} in source ({num_forecast_steps_in_source}) "
                     + f"is greater than {num_forecast_steps_key} in data ({num_forecast_steps_in_data}). "
@@ -618,14 +764,21 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timestamp: The start datetime for the dataset
         """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, start_datetime_key)
+        if start_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, start_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[start_datetime_key])
 
-        self._check_in_data_config(data_config, start_datetime_key)
         start_datetime_in_data = pd.Timestamp(data_config[start_datetime_key])
 
-        if self._in_source_config(data_config, curr_source_config, start_datetime_key):
+        if has_source_date_range:
             start_datetime_in_source = pd.Timestamp(curr_source_config[start_datetime_key])
             if start_datetime_in_source < start_datetime_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{start_datetime_key} in source ({start_datetime_in_source}) "
                     + f"is earlier than {start_datetime_key} in data ({start_datetime_in_data}). "
@@ -652,14 +805,21 @@ class BaseDataset(AbstractBaseDataset):
         Returns:
             pd.Timestamp: The end datetime for the dataset
         """
+        has_source_date_range = self._in_source_config(data_config, curr_source_config, end_datetime_key)
+        if end_datetime_key not in data_config:
+            # No data-level default to fall back to or compare against (e.g. the
+            # data level uses date_ranges instead) -- the source-level value, if
+            # this source has its own, is authoritative on its own.
+            if not has_source_date_range:
+                self._check_in_data_config(data_config, end_datetime_key)  # raises with the standard message
+            return pd.Timestamp(curr_source_config[end_datetime_key])
 
-        self._check_in_data_config(data_config, end_datetime_key)
         end_datetime_in_data = pd.Timestamp(data_config[end_datetime_key])
 
-        if self._in_source_config(data_config, curr_source_config, end_datetime_key):
+        if has_source_date_range:
             end_datetime_in_source = pd.Timestamp(curr_source_config[end_datetime_key])
             if end_datetime_in_source > end_datetime_in_data:
-                logging.warning(
+                logger.warning(
                     f"In loading for class {self.__class__.__name__}, "
                     + f"{end_datetime_key} in source ({end_datetime_in_source}) "
                     + f"is later than {end_datetime_key} in data ({end_datetime_in_data}). "
@@ -669,6 +829,23 @@ class BaseDataset(AbstractBaseDataset):
             return end_datetime_in_source
 
         return end_datetime_in_data
+
+    def _load_cycle_year(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> int | None:
+        """Resolve a cyclic source's cycle_year from config, or None when unset.
+
+        Config always wins if given. Subclasses that can inspect their data
+        files (see LocalDataset) should override this and fall back to
+        inferring it from the data's own time coordinate when config gives no
+        answer; ``__init__`` raises if this is still None for a cyclic source.
+
+        Args:
+            data_config (dict[str, Any]): Portion of the config under "data"
+            curr_source_config (dict[str, Any]): Portion of the config under a specific source
+
+        Returns:
+            int | None: The configured cycle_year, or None if unset.
+        """
+        return curr_source_config.get("cycle_year")
 
     def _resolve_calendar(self, data_config: dict[str, Any], curr_source_config: dict[str, Any]) -> str | None:
         """Resolve this source's CF calendar from config, or None when unset.
@@ -711,11 +888,27 @@ class BaseDataset(AbstractBaseDataset):
         like to enforce time bounds automatically for your dataset. You can use
         super() to have base functionality in these cases.
 
+        When ``self.date_ranges`` is set (non-contiguous blocks, e.g. train on
+        1950-1965 + 1970-1985), the same history/forecast margin is applied to
+        each block independently and the per-block indices are concatenated
+        (see ``build_time_index_multi``) -- an init time drawn from anywhere in
+        the result can never produce a window that reaches outside its own
+        block, so nothing downstream needs to know blocks exist at all.
+
         Returns:
             pd.DatetimeIndex or xr.CFTimeIndex from ``start_datetime + (history_len-1)*dt``
                 to ``end_datetime`` minus the forecast horizon, at the configured
-                timestep frequency.
+                timestep frequency (or the per-block equivalent when ``date_ranges``
+                is set).
         """
+        if self.date_ranges is not None:
+            return build_time_index_multi(
+                self.date_ranges,
+                self.dt,
+                self.calendar,
+                start_margin=(self.history_len - 1) * self.dt,
+                end_margin=self.num_forecast_steps * self.dt,
+            )
         start = to_calendar(self.start_datetime, self.calendar) + (self.history_len - 1) * self.dt
         end = to_calendar(self.end_datetime, self.calendar) - self.num_forecast_steps * self.dt
         return build_time_index(start, end, self.dt, self.calendar)
@@ -749,7 +942,7 @@ class BaseDataset(AbstractBaseDataset):
         """
 
         if self.dataset_type == "base":
-            logging.error(
+            logger.error(
                 f"You are currently using a dataset name of {self.dataset_type} for class {self.__class__.__name__}, "
                 "which is the default name for the BaseDataset class. Likely, you did not set the dataset_type attribute "
                 "in the __init__ method of your inherited dataset class, which may cause issues downstream! "
@@ -902,7 +1095,7 @@ class BaseDataset(AbstractBaseDataset):
             t (pd.Timestamp): Query timestamp for which to extract the field data.
             sample (dict[str, Any]): The sample dict being built in __getitem__
         """
-        logging.error(
+        logger.error(
             "You are using the default _extract_field method in BaseDataset, which does not actually extract any data. "
             "You should implement this method in your inherited dataset class to extract the data for each field type. Your inherited "
             "class is of type: " + self.__class__.__name__ + ". "
