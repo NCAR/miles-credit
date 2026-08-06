@@ -176,6 +176,19 @@ postblocks:
         variables: *log_vars
     geopotential:
       type: "geopotential_diagnostic"
+      args:
+        output_name: "ERA5/computed_diagnostic/3d/geopotential"
+        surface_geopotential_var: "ERA5/static/2d/geopotential_at_surface"
+        surface_pressure_var: "ERA5/prognostic/2d/surface_pressure"
+        temperature_var: "ERA5/prognostic/3d/temperature"
+        specific_humidity_var: "ERA5/prognostic/3d/specific_humidity"
+        flip_vertical: True
+        level_info_file: "ERA5_Lev_Info.nc"
+        model_a_half_var: "a_half"
+        model_b_half_var: "b_half"
+        key: "y_processed"
+        static_source_key: "ic_raw"
+        chunk_size: 1000
 
 
 model:
@@ -225,7 +238,22 @@ loss:
   args:
     training_loss: "mse"
     var_weighting: "inverse_variance"
-      
+    base_loss_parameters: {}
+    scaler_path: *scaler_path
+    normalize_weights: true
+    include_computed_diagnostics: true
+    use_latitude_weights: false
+
+pbs: #derecho
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "wxformer_arco_6hr_gen2"
+  walltime: "12:00:00"
+  nodes: 4
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'
 
 
 
