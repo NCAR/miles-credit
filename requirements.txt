@@ -27,3 +27,4 @@ torchmetrics
 s3fs
 numba
 fastapi
+obstore
