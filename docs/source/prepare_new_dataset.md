@@ -89,11 +89,11 @@ Variable types of **periodic forcing variables** and **static variables** do not
 Once the data is prepared and registered in the YAML config file. You can run the following code for a quick test:
 ```python
 from credit.parser import credit_main_parser, training_data_check, predict_data_check
-import yaml 
+import yaml
 
 # load your config
-config_name = 'your_path/model.yml'
-with open(config_name, 'r') as stream:
+config_name = "your_path/model.yml"
+with open(config_name, "r") as stream:
     conf = yaml.safe_load(stream)
 
 conf = credit_main_parser(conf, parse_training=True, parse_predict=True, print_summary=True)

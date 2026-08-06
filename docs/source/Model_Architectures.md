@@ -6,6 +6,8 @@ In your configuration file, you can select from multiple supported models. Below
 
 - [WxFormer](#wxformer)
 - [NCAR-FuXi](#ncar-fuxi)
+- UNet *(no guide section yet — see the API reference)*
+- Graph Transformer *(no guide section yet — see the API reference)*
 ---
 
 ## WxFormer
@@ -136,6 +138,7 @@ Define your model class and apply `@register_model` with the type key you want t
 ```python
 import torch.nn as nn
 from credit.models import register_model
+
 
 @register_model("my_model", "Loading my custom model ...")
 class MyModel(nn.Module):

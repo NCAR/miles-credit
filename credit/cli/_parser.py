@@ -5,6 +5,7 @@ import sys
 import textwrap
 
 from ._ask import _ask
+from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
@@ -46,6 +47,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
     )
     p.add_argument("--force", action="store_true", help="Overwrite existing output file")
+
+    # ---- check ----
+    p = sub.add_parser(
+        "check",
+        help="Validate a config: resolve every type, block, and path it names",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Validate a gen2 config without running anything.
+
+            Resolves every registry key (model, trainer, loss, dataset_type,
+            pre/postblock types), binds each block's `args` against its real
+            constructor signature, cross-checks the channel layout against the
+            model geometry, verifies the BaseLoss target-twin postblock chain,
+            and checks that every file the config names exists.  Each finding
+            comes with the fix where the fix is unambiguous.
+
+            Exits 1 if any errors were found (add --strict to fail on warnings
+            too), so it can gate a job submission:
+
+              credit check -c config.yml && credit submit --cluster derecho -c config.yml
+
+            Examples:
+              credit check -c config.yml
+              credit check -c config.yml --deep     # also construct model/blocks/loss
+              credit check -c config.yml --json     # machine-readable output
+        """),
+    )
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
+    p.add_argument(
+        "--deep",
+        action="store_true",
+        help="Also instantiate the model, blocks, loss, and metrics. Needs the scaler JSON on disk "
+        "and allocates the model on CPU.",
+    )
+    p.add_argument("--strict", action="store_true", help="Exit non-zero on warnings as well as errors")
+    p.add_argument("--json", action="store_true", help="Emit findings as JSON instead of text")
 
     # ---- preprocess ----
     p = sub.add_parser("preprocess", help="Fit preprocessing scalers (BridgeScaler) over the training data")
@@ -109,11 +146,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jobs", type=int, default=1, metavar="N", help="Number of parallel jobs (default: 1)")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job")
-    p.add_argument("--mem", default=None, help="Memory per job")
+    p.add_argument("--mem", default=None, help="Memory per job (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (default: a100_80gb)")
+    p.add_argument(
+        "--gpu-type",
+        dest="gpu_type",
+        default=None,
+        help="Casper GPU type, e.g. a100_80gb/h100/v100 (default: any NVIDIA GPGPU)",
+    )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda env path")
     p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
@@ -183,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node")
     p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node")
-    p.add_argument("--mem", default=None, help="Memory per node")
+    p.add_argument("--mem", default=None, help="Memory per node (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
@@ -194,7 +236,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="SLURM node constraint (-C), e.g. 'gpu' on Perlmutter. Switches GPU requests to --gpus-per-node.",
     )
     p.add_argument("--qos", metavar="QOS", default=None, help="SLURM quality of service (-q), e.g. 'regular'/'debug'")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type")
+    p.add_argument(
+        "--gpu-type",
+        dest="gpu_type",
+        default=None,
+        help="GPU type, e.g. a100_80gb/h100/v100 (Casper default: any NVIDIA GPGPU)",
+    )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument(
@@ -374,6 +421,7 @@ def main() -> None:
 
     dispatch = {
         "init": _init,
+        "check": _check,
         "preprocess": _preprocess,
         "train": _train,
         "rollout": _rollout,

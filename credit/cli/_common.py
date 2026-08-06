@@ -4,18 +4,119 @@ import logging
 import os
 import pathlib
 
+from credit.conda_env import torchrun_path
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Cluster defaults — single source of truth
 # ---------------------------------------------------------------------------
 
+# Casper GPU node hardware, as (max GPUs per node, node memory in GB), keyed by
+# PBS ``gpu_type``.  Source: NCAR HPC docs "Casper hardware"
+# (https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/).
+#
+#   v100      4x V100 32GB / 768 GB nodes and 8x V100 32GB / 1152 GB nodes
+#   a100_80gb 4x A100 80GB / 1024 GB
+#   h100      4x H100 80GB / 1024 GB
+#   a100      1x A100 40GB / 384 GB   (data analysis & visualization nodes)
+#   gp100     1x Quadro GP100 16GB / 384 GB
+#   l40       L40 visualization nodes / 768 GB (GPUs-per-node is not published,
+#             so treat it as 1 — the memory request then never exceeds the node)
+#
+# ``None`` is the "any NVIDIA GPGPU" default: use the 8x V100 node (the largest
+# GPU count) so the per-GPU share stays small enough to also fit the 4-GPU nodes.
+_CASPER_GPU_NODES = {
+    None: (8, 1152),
+    "v100": (8, 1152),
+    "a100_80gb": (4, 1024),
+    "h100": (4, 1024),
+    "a100": (1, 384),
+    "gp100": (1, 384),
+    "l40": (1, 768),
+}
+
+# Memory requested for a single-GPU Casper job; the scale below grows from here
+# to (nearly) the full node memory at the node's maximum GPU count.
+_CASPER_MEM_1GPU_GB = 64
+
+# PBS advertises slightly less memory than a node physically has (the OS and
+# filesystem caches take a cut), so a request for the full figure above would
+# never be schedulable.  Ask for at most this fraction of the node.
+_CASPER_MEM_NODE_FRACTION = 0.95
+
+
+def casper_mem(gpus: int, gpu_type: str = None) -> str:
+    """Return the Casper memory request for *gpus* GPUs of *gpu_type*.
+
+    Scales linearly from ``64GB`` for a single GPU up to (nearly) the whole
+    node's memory when the job takes every GPU on the node, so a job asks for
+    roughly the share of the node it actually occupies.  Unknown GPU types (and
+    the "any GPGPU" default) fall back to the profile that is safe on every
+    Casper GPU node.  Single-GPU node types keep the 64GB baseline rather than
+    claiming their whole (shared, analysis-oriented) node.
+    """
+    max_gpus, node_mem = _CASPER_GPU_NODES.get(
+        (gpu_type or "").lower() or None,
+        _CASPER_GPU_NODES[None],
+    )
+    # Whole-node ask, rounded down to a multiple of 16 GB.
+    full = int(node_mem * _CASPER_MEM_NODE_FRACTION) // 16 * 16
+    gpus = max(1, int(gpus))
+    if max_gpus <= 1:
+        return f"{_CASPER_MEM_1GPU_GB}GB"
+    if gpus >= max_gpus:
+        return f"{full}GB"
+    # Round up to the next 16 GB so the scale lands on tidy values.
+    mem = _CASPER_MEM_1GPU_GB + (full - _CASPER_MEM_1GPU_GB) * (gpus - 1) / (max_gpus - 1)
+    return f"{min(full, int(-(-mem // 16) * 16))}GB"
+
+
+# PBS queues by cluster.  A ``pbs:`` block written for one NCAR machine is often
+# reused against the other (``credit submit --cluster casper`` with a Derecho
+# config, say), and the only symptom is a qsub rejection *after* the script has
+# been generated.  These sets let the CLI catch the swap up front.  They are not
+# exhaustive — an unrecognized queue is left alone, since sites add queues — so
+# only a queue that is known to belong to the *other* cluster is an error.
+_PBS_QUEUES = {
+    "casper": {"casper", "cpu", "gpgpu", "gpudev", "largemem", "vis", "htc", "rda", "l40"},
+    "derecho": {"main", "preempt", "develop", "cpudev", "gpudev"},
+}
+
+
+def queue_cluster_error(queue: str, cluster: str) -> str:
+    """Return an error message if *queue* belongs to a cluster other than *cluster*.
+
+    Returns ``""`` when the queue is valid for *cluster*, when it is not
+    recognized on either machine (a site-specific or newly added queue), or when
+    *cluster* is not an NCAR PBS machine.  ``queue`` may carry a ``@server``
+    suffix, which is ignored.
+    """
+    if cluster not in _PBS_QUEUES:
+        return ""
+    name = str(queue).split("@", 1)[0].strip().lower()
+    if name in _PBS_QUEUES[cluster]:
+        return ""
+    other = [c for c, queues in _PBS_QUEUES.items() if c != cluster and name in queues]
+    if not other:
+        return ""
+    valid = ", ".join(sorted(_PBS_QUEUES[cluster]))
+    return (
+        f"queue '{name}' is a {other[0].capitalize()} queue, but this job targets {cluster}.\n"
+        f"{cluster.capitalize()} queues: {valid}.\n"
+        f"Fix the 'queue:' in the config's pbs block, or override it with --queue."
+    )
+
+
 _PBS_DEFAULTS = {
     "casper": {
         "cpus": 8,
+        # Fallback only — `credit submit` sizes Casper memory with casper_mem().
         "mem": "128GB",
         "queue": "casper",
-        "gpu_type": "a100_80gb",
+        # Unset => any NVIDIA GPGPU on Casper (shorter queue waits).  Set
+        # pbs.gpu_type / --gpu-type to pin a specific model (a100_80gb, h100, ...).
+        "gpu_type": None,
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
@@ -141,18 +242,12 @@ def _find_torchrun() -> str:
 def _resolve_torchrun(conda_env) -> str:
     """Return a torchrun path for a conda env given as a name or a prefix path.
 
-    A value containing a path separator is treated as a full environment prefix
-    (``<prefix>/bin/torchrun``).  A bare environment *name* resolves at run time
-    via ``conda info --base`` so it is never mistaken for a same-named directory
-    in the current working directory (e.g. the repo's ``credit/`` package dir,
-    which made a ``conda: credit`` config yield a bogus ``credit/bin/torchrun``).
-    Falls back to :func:`_find_torchrun` when no env is configured.
+    See :func:`credit.conda_env.conda_prefix_expr` for how the env prefix is
+    resolved.  Falls back to :func:`_find_torchrun` when no env is configured.
     """
     if not conda_env:
         return _find_torchrun()
-    if "/" in conda_env:
-        return f"{conda_env}/bin/torchrun"
-    return f"$(conda info --base)/envs/{conda_env}/bin/torchrun"
+    return torchrun_path(conda_env)
 
 
 def _is_ncar_system() -> bool:

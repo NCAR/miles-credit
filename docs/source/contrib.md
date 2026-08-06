@@ -106,9 +106,10 @@ pip install -e ".[develop]"
 To test your new install, open a python session and try importing `credit`. You can also try printing the version number, which should be unique to the latest commit on your fork.
 
 ```python  
-import credit  
-print(credit.__version__) 
-# '2026.2.0'  
+import credit
+
+print(credit.__version__)
+# '2026.2.0'
 ```
 
 ### Create a branch for your changes

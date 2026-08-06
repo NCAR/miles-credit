@@ -983,7 +983,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # --------------------------------------------------------- #
     # conf['loss'] section
 
-    if parse_training:
+    # New-style Gen 2 loss sections use {type, args} and are self-contained;
+    # the legacy flat-key checks below do not apply to them.
+    if parse_training and "type" not in conf["loss"]:
         assert "training_loss" in conf["loss"], "Training loss ('training_loss') is missing from conf['loss']"
 
         if is_downscaling:

@@ -10,28 +10,25 @@ directly and assumes the new ``conf["data"]["source"]`` structure produced by
 For the legacy flat schema (v1), use ``applications/train.py``.
 """
 
-import os
-import sys
-import yaml
-import shutil
 import logging
+import os
+import shutil
+import sys
 import warnings
-
-from pathlib import Path
 from argparse import ArgumentParser
 
 import torch
+import yaml
 
-from credit.distributed import distributed_model_wrapper_gen2, setup, get_rank_info
-from credit.seed import seed_everything
+from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, setup
 from credit.losses import is_crps_loss
-from credit.trainers import load_trainer
-from credit.pbs import launch_script, launch_script_mpi
 from credit.models import load_model
+from credit.seed import seed_everything
+from credit.trainers import load_trainer
 from credit.trainers.utils import (
     inject_flat_var_keys,
-    load_dataset,
     load_dataloader,
+    load_dataset,
     load_model_states_and_optimizer,
 )
 
@@ -68,7 +65,6 @@ def main_cli():
         required=True,
         help="Path to the model config YAML (Gen2 nested schema).",
     )
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit workers to PBS.")
     parser.add_argument(
         "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
     )
@@ -80,13 +76,12 @@ def main_cli():
     )
     args = parser.parse_args()
     config = args.model_config
-    launch = int(args.launch)
     backend = args.backend
 
     try:
         with open(config) as cf:
             conf = yaml.load(cf, Loader=yaml.FullLoader)
-    except Exception as exc:
+    except OSError as exc:
         print(f"ERROR: failed to load config file '{config}': {exc}", file=sys.stderr)
         sys.exit(1)
 
@@ -94,7 +89,9 @@ def main_cli():
         "train.py requires the Gen2 nested data schema (conf['data']['source']). "
         "For the legacy flat schema, use applications/train.py."
     )
-    loss_name = conf["loss"]["training_loss"]
+    # Loss sections are either legacy flat keys (training_loss: ...) or the
+    # new-style {type, args} structure (mirrors preblocks/postblocks).
+    loss_name = conf["loss"].get("training_loss") or conf["loss"].get("type")
     ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
     if is_crps_loss(loss_name) and ensemble_size <= 1:
         raise ValueError(
@@ -135,16 +132,6 @@ def main_cli():
     if not os.path.exists(os.path.join(save_loc, "model.yml")):
         shutil.copy(config, os.path.join(save_loc, "model.yml"))
 
-    if launch:
-        script_path = Path(__file__).absolute()
-        if conf["pbs"]["queue"] == "casper":
-            logger.info("Launching to PBS on Casper")
-            launch_script(config, script_path)
-        else:
-            logger.info("Launching to PBS on Derecho")
-            launch_script_mpi(config, script_path)
-        sys.exit()
-
     _trainer_conf = conf["trainer"]
     assert "parallelism" in _trainer_conf, (
         "Gen2 training configs must define trainer.parallelism with data, tensor, "
@@ -184,7 +171,7 @@ def main_cli():
     ensemble_mode = is_crps_loss(loss_name) and ensemble_size > 1
     train_rank, train_world_size = (0, 1) if ensemble_mode else (data_rank, data_world_size)
     if ensemble_mode and data_world_size > 1:
-        logging.info(
+        logger.info(
             f"CRPS ensemble training: {data_world_size} dp ranks receive shared batches; dp data sharding disabled"
         )
 
@@ -235,9 +222,19 @@ def main_cli():
 
     train_criterion = load_loss(conf)
     valid_criterion = load_loss(conf, validation=True)
-    from credit.metrics import LatWeightedMetrics
 
-    metrics = LatWeightedMetrics(conf)
+    # BaseLoss with var_weighting="learnable" owns trainable per-variable
+    # log-variance parameters — they must join the optimizer explicitly.
+    # (Checkpointing of these parameters is not wired; they re-init on resume.)
+    from credit.losses import BaseLoss
+
+    if isinstance(train_criterion, BaseLoss) and train_criterion.log_variance is not None:
+        train_criterion.to(device)
+        optimizer.add_param_group({"params": list(train_criterion.parameters())})
+        logger.info("BaseLoss learnable variance weights added to the optimizer.")
+    from credit.metrics import load_metric
+
+    metrics = load_metric(conf)
 
     trainer_cls = load_trainer(conf)
     trainer = trainer_cls(model, rank, conf)

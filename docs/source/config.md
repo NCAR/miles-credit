@@ -1385,7 +1385,8 @@ pbs:
 ```
 
 - **`nodes`, `ncpus`, `ngpus`**: Adjust based on compute resources.  
-- **For Casper**: Change `queue: 'casper'` and specify `gpu_type: 'v100'`.  
+- **For Casper**: Change `queue: 'casper'`. `gpu_type` is optional — omit it to run on any
+  available NVIDIA GPGPU (usually a shorter queue wait), or pin a model with e.g. `gpu_type: 'v100'`.
 
 ---
 

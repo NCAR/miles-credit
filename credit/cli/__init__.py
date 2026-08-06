@@ -22,6 +22,7 @@ from ._ask import (
     _ask,
     _collect_run_context,
 )
+from ._check import _Finding, _Report, _check, _run_checks
 from ._common import (
     _AGENT_BASH_BLOCKLIST,
     _PBS_DEFAULTS,
@@ -43,6 +44,7 @@ from ._parser import _build_parser, main
 from ._plot import _build_channel_map, _build_denorm_stats, _metrics, _plot
 from ._submit import (
     _build_pbs_script,
+    _build_preprocess_pbs_script,
     _build_preprocess_slurm_script,
     _build_realtime_pbs_script,
     _build_realtime_slurm_script,
@@ -75,7 +77,9 @@ __all__ = [
     "_AGENT_SYSTEM_PROMPT",
     "_AGENT_TOOL_DEFS",
     "_CREDIT_SYSTEM_PROMPT",
+    "_Finding",
     "_ProviderError",
+    "_Report",
     "_agent",
     "_agent_bash",
     "_agent_list_files",
@@ -85,12 +89,14 @@ __all__ = [
     "_build_denorm_stats",
     "_build_parser",
     "_build_pbs_script",
+    "_build_preprocess_pbs_script",
     "_build_preprocess_slurm_script",
     "_build_realtime_pbs_script",
     "_build_realtime_slurm_script",
     "_build_rollout_pbs_script",
     "_build_rollout_slurm_script",
     "_build_slurm_script",
+    "_check",
     "_collect_run_context",
     "_compute_chain",
     "_convert",
@@ -116,6 +122,7 @@ __all__ = [
     "_resolve_slurm_opts",
     "_rollout",
     "_rollout_ensemble",
+    "_run_checks",
     "_sbatch",
     "_scheduler_ctx",
     "_setup_logging",

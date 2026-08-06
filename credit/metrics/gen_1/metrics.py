@@ -1,7 +1,9 @@
-import torch
+from datetime import UTC, datetime
+
 import numpy as np
-from datetime import datetime
-from credit.losses.weighted_loss import latitude_weights
+import torch
+
+from credit.losses.gen_1.weighted_loss import latitude_weights
 from credit.parallel.domain import shard_lat_weights
 
 
@@ -100,12 +102,12 @@ class LatWeightedMetrics:
                     )
 
         # Calculate metrics averages
-        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k])
-        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "rmse_" in k])
-        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mse_" in k and "rmse_" not in k])
-        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "mae_" in k])
+        loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "acc_" in k])
+        loss_dict["rmse"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "rmse_" in k])
+        loss_dict["mse"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "mse_" in k and "rmse_" not in k])
+        loss_dict["mae"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "mae_" in k])
         if self.ensemble_size > 1:
-            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict.keys() if "std_" in k])
+            loss_dict["std"] = np.mean([loss_dict[k].cpu() for k in loss_dict if "std_" in k])
 
         return loss_dict
 
@@ -142,7 +144,7 @@ class LatWeightedMetricsClimatology:
         if isinstance(forecast_datetime, datetime):
             pass
         elif isinstance(forecast_datetime, int):
-            forecast_datetime = datetime.utcfromtimestamp(forecast_datetime)  # Assumes integer datetime
+            forecast_datetime = datetime.fromtimestamp(forecast_datetime, tz=UTC)  # Assumes integer datetime
         dayofyear = forecast_datetime.timetuple().tm_yday
         hour = forecast_datetime.hour
 
@@ -188,10 +190,10 @@ class LatWeightedMetricsClimatology:
 
             # Compute average metrics
             if anomaly_scores:
-                loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "acc_" in k])
-            loss_dict["rmse"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "rmse_" in k])
-            loss_dict["mse"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "mse_" in k])
-            loss_dict["mae"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict.keys() if "mae_" in k])
+                loss_dict["acc"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "acc_" in k])
+            loss_dict["rmse"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "rmse_" in k])
+            loss_dict["mse"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "mse_" in k])
+            loss_dict["mae"] = np.mean([loss_dict[k].cpu().item() for k in loss_dict if "mae_" in k])
 
         return loss_dict
 
@@ -314,9 +316,11 @@ class LatWeightedMetricsEnsemble:
 
 
 if __name__ == "__main__":
-    import yaml
     import logging
+
     import xarray as xr
+    import yaml
+
     from credit.parser import credit_main_parser
 
     logging.basicConfig(
@@ -326,7 +330,7 @@ if __name__ == "__main__":
     logger = logging.getLogger(__name__)
 
     # Open an example config
-    with open("../config/example-v2026.1.0.yml") as cf:
+    with open("../../../config/example-v2026.1.0.yml") as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
 
     conf = credit_main_parser(conf, parse_training=True, parse_predict=False, print_summary=False)
@@ -359,7 +363,7 @@ if __name__ == "__main__":
     metrics = LatWeightedMetricsClimatology(conf=conf, climatology=climatology_data)
 
     # Define a forecast datetime (should align with the climatology dataset)
-    forecast_datetime = datetime(2024, 6, 15, 12)  # Example forecast datetime
+    forecast_datetime = datetime(2024, 6, 15, 12, tzinfo=UTC)  # Example forecast datetime
 
     # Compute metrics
     results = metrics(pred, true, forecast_datetime=forecast_datetime)

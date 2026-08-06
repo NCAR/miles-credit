@@ -264,7 +264,6 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
 
     # ---- v2 channel bookkeeping ----
     slices, _ = build_channel_layout(conf)
-    n_prog = slices["prognostic"].stop - slices["prognostic"].start
 
     # ---- Preblocks ----
     preblocks = build_preblocks(conf)
@@ -367,8 +366,11 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
                 sample_frc = dataset[(t_next, 1)]  # only dynamic_forcing
                 batch_frc = _sample_to_batch(sample_frc)
                 x_frc = apply_preblocks(preblocks, batch_frc, device=device)["input"].float()
-                y_prog = torch.from_numpy(y_phys[:, :n_prog, np.newaxis]).to(device)
-                x = update_x(x, x_frc, y_prog, slices)
+                # Pass the FULL prediction: update_x indexes the prognostic
+                # channels via each group's src_slice, which with multiple
+                # sources are not a leading contiguous block.
+                y_full = torch.from_numpy(y_phys[:, :, np.newaxis]).to(device)
+                x = update_x(x, x_frc, y_full, slices)
 
     for r in results:
         r.get()

@@ -499,7 +499,9 @@ def _convert(args: argparse.Namespace) -> None:
             new_pbs["ngpus"] = int(prompt("GPUs", default="4"))
             new_pbs["ncpus"] = int(prompt("CPUs per node", default="8"))
             new_pbs["mem"] = prompt("Memory", default="128GB")
-            new_pbs["gpu_type"] = prompt("GPU type", default="a100_80gb")
+            gpu_type = prompt("GPU type ('any' for any NVIDIA GPGPU)", default="any")
+            if gpu_type and gpu_type.lower() not in ("any", "none"):
+                new_pbs["gpu_type"] = gpu_type
             new_pbs["queue"] = prompt("Queue", default="casper")
 
         conf["pbs"] = new_pbs

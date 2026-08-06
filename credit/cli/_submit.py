@@ -16,6 +16,8 @@ from ._common import (
     _SLURM_DEFAULTS,
     _repo_root,
     _resolve_torchrun,
+    casper_mem,
+    queue_cluster_error,
 )
 from ._convert import _write_reload_config
 
@@ -113,11 +115,21 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, pbs_cfg.get("ncpus") or pbs_cfg.get("cpus"), d["cpus"]))
-    r.mem = _first(args.mem, pbs_cfg.get("mem"), d["mem"])
     pbs_server = "casper-pbs" if is_casper else "desched1"
     raw_queue = _first(args.queue, pbs_cfg.get("queue"), d["queue"])
+    # A pbs block written for the other machine (Derecho's 'main' on Casper, say)
+    # generates a script that qsub only rejects at submission time — catch it here.
+    err = queue_cluster_error(raw_queue, args.cluster)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        sys.exit(1)
     r.queue = raw_queue if "@" in raw_queue else f"{raw_queue}@{pbs_server}"
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
+    # On Casper the memory ask scales with the fraction of the node's GPUs in use
+    # (64GB for one GPU up to the whole node's memory for all of them); an explicit
+    # --mem / pbs.mem always wins.
+    fallback_mem = casper_mem(r.gpus, r.gpu_type) if is_casper else d["mem"]
+    r.mem = _first(args.mem, pbs_cfg.get("mem"), fallback_mem)
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
     return r
@@ -478,6 +490,75 @@ def _scheduler_ctx(args: argparse.Namespace) -> dict:
     }
 
 
+def _derecho_nodes(args: argparse.Namespace) -> int:
+    """Return the requested node count, defaulting to 1 when unset."""
+    return int(getattr(args, "nodes", 1) or 1)
+
+
+def _gpu_type_select(args: argparse.Namespace) -> str:
+    """Return the ``:gpu_type=<x>`` fragment of a Casper ``select`` statement.
+
+    Casper hosts a mix of GPUs (V100 / A100 / H100 / L40).  Omitting ``gpu_type``
+    lets PBS schedule the job on *any* NVIDIA GPGPU, which usually queues much
+    faster, so an unset (or ``any``/``none``) gpu_type drops the fragment
+    entirely instead of pinning the job to one model.
+    """
+    gpu_type = getattr(args, "gpu_type", None)
+    if not gpu_type or str(gpu_type).lower() in ("any", "none"):
+        return ""
+    return f":gpu_type={gpu_type}"
+
+
+def _use_pbsdsh(args: argparse.Namespace) -> bool:
+    """True when this job should launch via pbsdsh rather than mpiexec.
+
+    pbsdsh only changes the *multi-node* path; single-node jobs always use
+    ``torchrun --standalone`` regardless of ``--launcher``.
+    """
+    return _derecho_nodes(args) > 1 and (getattr(args, "launcher", "mpiexec") or "mpiexec") == "pbsdsh"
+
+
+def _derecho_launch(args: argparse.Namespace, repo: str, app_relpath: str, app_args: str = "") -> str:
+    """Return the derecho launch block for ``credit/applications/<app_relpath>``.
+
+    One node → ``torchrun --standalone``; many nodes → ``mpiexec`` across
+    ``nodes × gpus`` ranks with the head node's IP as the rendezvous master
+    (``get_rank_info`` picks up rank/size from MPI in that case). Shared by every
+    ``--mode``'s derecho builder so multi-node support stays uniform; the pbsdsh
+    alternative is selected by the caller via :func:`_derecho_pbsdsh_script`.
+
+    Expects the caller's header to define ``REPO`` and ``CONFIG``.
+    """
+    nodes = _derecho_nodes(args)
+    app = f"${{REPO}}/credit/applications/{app_relpath}"
+    extra = f" {app_args}" if app_args else ""
+    torchrun = _resolve_torchrun(getattr(args, "conda_env", None))
+
+    if nodes == 1:
+        return textwrap.dedent(f"""\
+            {torchrun} \\
+                --standalone \\
+                --nnodes=1 \\
+                --nproc-per-node={args.gpus} \\
+                {app} -c ${{CONFIG}}{extra}
+        """)
+
+    cuda_devices = ",".join(str(i) for i in range(args.gpus))
+    return textwrap.dedent(f"""\
+        nodes_arr=( $( cat $PBS_NODEFILE ) )
+        head_node="${{nodes_arr[0]}}"
+        head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
+        echo "Head node : ${{head_node_ip}}"
+        MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
+
+        export CUDA_VISIBLE_DEVICES={cuda_devices}
+
+        MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
+        mpiexec -n {nodes * args.gpus} --ppn {args.gpus} --cpu-bind none \\
+            python {app} -c ${{CONFIG}}{extra}
+    """)
+
+
 def _derecho_pbsdsh_script(
     args: argparse.Namespace,
     config: str,
@@ -486,6 +567,7 @@ def _derecho_pbsdsh_script(
     output_line: str,
     depend_line: str,
     save_loc: str = None,
+    app_args: str = "",
 ) -> str:
     """Return a full derecho PBS script launching *app_relpath* via pbsdsh + torchrun.
 
@@ -494,6 +576,9 @@ def _derecho_pbsdsh_script(
     runs over the libfabric module. The launch logic and its rationale live in
     :func:`credit.pbs._pbsdsh_launch_block`, shared with the standalone launcher in
     ``credit/pbs.py`` so the two stay in lockstep.
+
+    ``app_args`` carries entrypoint-specific flags (e.g. realtime's ``--init-time`` /
+    ``--steps``) appended after ``-c <config>``.
     """
     from credit.pbs import PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
 
@@ -528,6 +613,7 @@ def _derecho_pbsdsh_script(
         config_path=config,
         num_gpus=args.gpus,
         logdir_parent=logs_dir,
+        app_args=app_args,
     )
     return header + block
 
@@ -560,7 +646,7 @@ def _build_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {args.job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -587,9 +673,8 @@ def _build_pbs_script(
         """)
 
     else:  # derecho
-        nodes = args.nodes
-        launcher = getattr(args, "launcher", "mpiexec") or "mpiexec"
-        if nodes > 1 and launcher == "pbsdsh":
+        nodes = _derecho_nodes(args)
+        if _use_pbsdsh(args):
             return _derecho_pbsdsh_script(args, config, repo, "train_gen2.py", output_line, depend_line, save_loc)
         header = textwrap.dedent(f"""\
             #!/bin/bash
@@ -619,34 +704,7 @@ def _build_pbs_script(
             cd ${{REPO}}
         """)
 
-        conda_env = args.conda_env
-        torchrun = _resolve_torchrun(conda_env)
-        cuda_devices = ",".join(str(i) for i in range(args.gpus))
-
-        if nodes == 1:
-            launch = textwrap.dedent(f"""\
-                {torchrun} \\
-                    --standalone \\
-                    --nnodes=1 \\
-                    --nproc-per-node={args.gpus} \\
-                    ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
-            """)
-        else:
-            launch = textwrap.dedent(f"""\
-                nodes_arr=( $( cat $PBS_NODEFILE ) )
-                head_node="${{nodes_arr[0]}}"
-                head_node_ip=$(ssh "${{head_node}}" hostname -i | awk '{{print $1}}')
-                echo "Head node : ${{head_node_ip}}"
-                MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
-
-                export CUDA_VISIBLE_DEVICES={cuda_devices}
-
-                MASTER_ADDR=${{head_node_ip}} MASTER_PORT=${{MASTER_PORT}} \\
-                mpiexec -n "${{total_gpus}}" --ppn {args.gpus} --cpu-bind none \\
-                    python ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
-            """)
-
-        return header + launch
+        return header + _derecho_launch(args, repo, "train_gen2.py")
 
 
 def _qsub(script: str, save_loc: str | None = None) -> str:
@@ -769,7 +827,7 @@ def _build_realtime_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -796,12 +854,20 @@ def _build_realtime_pbs_script(
         """)
 
     else:  # derecho
-        return textwrap.dedent(f"""\
+        nodes = _derecho_nodes(args)
+        app_args = f"--init-time {init_time} --steps {steps}"
+        if _use_pbsdsh(args):
+            args = copy.copy(args)
+            args.job_name = job_name
+            return _derecho_pbsdsh_script(
+                args, config, repo, "rollout_realtime_gen2.py", output_line, "", save_loc, app_args=app_args
+            )
+        header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}
             #PBS -N {job_name}
             #PBS -l walltime={args.walltime}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -l select={nodes}:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
             #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
@@ -815,15 +881,12 @@ def _build_realtime_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
-            echo "Config  : ${{CONFIG}}"
-
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
-                -c ${{CONFIG}} --init-time {init_time} --steps {steps}
+            echo "Config    : ${{CONFIG}}"
+            echo "Nodes     : {nodes}  GPUs/node: {args.gpus}"
         """)
+        return header + _derecho_launch(args, repo, "rollout_realtime_gen2.py", app_args=app_args)
 
 
 def _build_preprocess_pbs_script(
@@ -846,7 +909,7 @@ def _build_preprocess_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -873,18 +936,18 @@ def _build_preprocess_pbs_script(
         """)
 
     else:  # derecho
-        nodes = getattr(args, "nodes", 1) or 1
-        launcher = getattr(args, "launcher", "mpiexec") or "mpiexec"
-        if nodes > 1 and launcher == "pbsdsh":
+        nodes = _derecho_nodes(args)
+        if _use_pbsdsh(args):
             # Preprocess has no chaining, so no depend line.
+            args = copy.copy(args)
             args.job_name = job_name
             return _derecho_pbsdsh_script(args, config, repo, "preprocess.py", output_line, "", save_loc)
-        return textwrap.dedent(f"""\
+        header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}
             #PBS -N {job_name}
             #PBS -l walltime={args.walltime}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -l select={nodes}:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
             #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
@@ -898,14 +961,12 @@ def _build_preprocess_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Preprocessing — scaler fitting"
-            echo "Config  : ${{CONFIG}}"
-
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/credit/applications/preprocess.py -c ${{CONFIG}}
+            echo "Config    : ${{CONFIG}}"
+            echo "Nodes     : {nodes}  GPUs/node: {args.gpus}"
         """)
+        return header + _derecho_launch(args, repo, "preprocess.py")
 
 
 def _do_submit_preprocess(args: argparse.Namespace) -> None:
@@ -933,7 +994,8 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         "  Cluster   : %s\n"
         "  Account   : %s\n"
         "  Config    : %s\n"
-        "  GPUs      : %s\n"
+        "  Nodes     : %s\n"
+        "  GPUs      : %s per node  (%s total)\n"
         "  Walltime  : %s\n"
         "%s",
         sep,
@@ -942,7 +1004,9 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         args.cluster,
         args.account,
         args.config,
+        args.nodes,
         args.gpus,
+        args.nodes * args.gpus,
         args.walltime,
         sep,
     )
@@ -987,7 +1051,8 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
         "  Config    : %s\n"
         "  Init time : %s\n"
         "  Steps     : %s\n"
-        "  GPUs      : %s\n"
+        "  Nodes     : %s\n"
+        "  GPUs      : %s per node  (%s total)\n"
         "  Walltime  : %s\n"
         "%s",
         sep,
@@ -998,7 +1063,9 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
         args.config,
         init_time,
         steps,
+        args.nodes,
         args.gpus,
+        args.nodes * args.gpus,
         args.walltime,
         sep,
     )
@@ -1083,7 +1150,7 @@ def _build_rollout_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -1111,12 +1178,18 @@ def _build_rollout_pbs_script(
         """)
 
     else:  # derecho
-        return textwrap.dedent(f"""\
+        nodes = _derecho_nodes(args)
+        if _use_pbsdsh(args):
+            # Rollout jobs are submitted in parallel, never chained, so no depend line.
+            args = copy.copy(args)
+            args.job_name = job_name
+            return _derecho_pbsdsh_script(args, config, repo, "rollout_gen2.py", output_line, "", save_loc)
+        header = textwrap.dedent(f"""\
             #!/bin/bash
             #PBS -A {args.account}
             #PBS -N {job_name}
             #PBS -l walltime={args.walltime}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
+            #PBS -l select={nodes}:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}
             #PBS -q {args.queue}
             #PBS -j oe
             #PBS -k eod
@@ -1130,16 +1203,17 @@ def _build_rollout_pbs_script(
 
             REPO={repo}
             CONFIG={config}
-            TORCHRUN={_resolve_torchrun(args.conda_env)}
 
             echo "Ensemble rollout — subset {subset} of {n_subsets}"
-            echo "Config  : ${{CONFIG}}"
-
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node={args.gpus} \\
-                ${{REPO}}/credit/applications/rollout_gen2.py \\
-                -c ${{CONFIG}}
-                # -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}  # rollout_gen2.py does not support these flags yet
+            echo "Config    : ${{CONFIG}}"
+            echo "Nodes     : {nodes}  GPUs/node: {args.gpus}"
         """)
+        return (
+            header
+            + _derecho_launch(args, repo, "rollout_gen2.py")
+            + f"    # -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}"
+            "  # rollout_gen2.py does not support these flags yet\n"
+        )
 
 
 def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_forecasts, ensemble_size) -> None:
@@ -1160,7 +1234,8 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
         "  Init times     : %s  (%s per job)\n"
         "  Ensemble size  : %s  →  %s total forecasts\n"
         "  Parallel jobs  : %s  (all start at once, no dependencies)\n"
-        "  GPUs per job   : %s\n"
+        "  Nodes per job  : %s\n"
+        "  GPUs per job   : %s per node  (%s total)\n"
         "  Walltime/job   : %s\n"
         "%s",
         sep,
@@ -1173,7 +1248,9 @@ def _print_ensemble_rollout_plan(args: argparse.Namespace, n_jobs: int, n_foreca
         ensemble_size,
         total_runs,
         n_jobs,
+        args.nodes,
         args.gpus,
+        args.nodes * args.gpus,
         args.walltime,
         sep,
     )
