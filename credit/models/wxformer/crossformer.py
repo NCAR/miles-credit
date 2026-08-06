@@ -176,13 +176,22 @@ class CrossEmbedLayer(nn.Module):
 
         self.convs = nn.ModuleList([])
         for kernel, dim_scale in zip(kernel_sizes, dim_scales):
+            # Symmetric padding = (kernel - stride) // 2 only gives a true "same"
+            # shape (out = ceil(in / stride)) when (kernel - stride) is even. For
+            # an even kernel at stride=1 that's odd, so // 2 rounds down and drops
+            # one cell (e.g. kernel=4, stride=1: padding=1, 480 in -> 479 out). All
+            # kernel branches lose the same cell, so the cat() still succeeds --
+            # silently, at the wrong size. Use explicit asymmetric zero-padding
+            # instead so every (kernel, stride) combination gets the exact "same"
+            # shape; this is a no-op vs. the old formula whenever (kernel - stride)
+            # is even (the previously-working case, e.g. every default stride=2 config).
+            pad_total = kernel - stride
+            pad_left = pad_total // 2
+            pad_right = pad_total - pad_left
             self.convs.append(
-                nn.Conv2d(
-                    dim_in,
-                    dim_scale,
-                    kernel,
-                    stride=stride,
-                    padding=(kernel - stride) // 2,
+                nn.Sequential(
+                    nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
+                    nn.Conv2d(dim_in, dim_scale, kernel, stride=stride, padding=0),
                 )
             )
 
@@ -484,15 +493,15 @@ class CrossFormer(BaseModel):
         use_spectral_norm: bool = True,
         attention_type: str = None,
         interp: bool = True,
-        upsample_with_ps: bool = False,
+        upsample_with_ps: bool = True,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
     ):
         """
         CrossFormer is the base architecture for the WXFormer model. It uses convolutions and long and short distance
-        attention layers in the encoder layer and then uses strided transpose convolution blocks for the decoder
-        layer.
+        attention layers in the encoder layer and then uses sub-pixel conv + PixelShuffle blocks (ICNR-initialized,
+        zero-init bias) for the decoder layer.
 
         Args:
             image_height (int): number of grid cells in the south-north direction.
@@ -516,6 +525,10 @@ class CrossFormer(BaseModel):
             ff_dropout (float): dropout rate for feedforward layers.
             use_spectral_norm (bool): whether to use spectral normalization
             interp (bool): whether to use interpolation
+            upsample_with_ps (bool): unused -- kept only so existing configs that set it
+                don't break. The decoder is always the PixelShuffle (ICNR-initialized,
+                zero-init bias) path; the checkerboard-prone ConvTranspose2d alternative
+                this used to select has been removed.
             padding_conf (dict): padding configuration
             post_conf (dict): configuration for postblock processing
             **kwargs:
@@ -628,42 +641,40 @@ class CrossFormer(BaseModel):
         )
 
         # =================================================================================== #
-        if self.upsample_with_ps:
-            self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
-            self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-            self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
-            scale = 2
-            ps_conv = nn.Conv2d(
-                2 * (last_dim // 8),  # in_channels
-                self.output_channels * (scale**2),  # conv_out = target_channels * 4
-                kernel_size=3,
-                stride=1,
-                padding=1,
+        # Decoder: sub-pixel conv + PixelShuffle, ICNR-initialized, zero-init bias. The
+        # ConvTranspose2d/UpBlock decoder this replaced is a well-documented checkerboard-
+        # artifact generator (Odena et al. 2016, https://distill.pub/2016/deconv-checkerboard/;
+        # Aitken et al. 2017 ICNR fix, https://arxiv.org/abs/1707.02937;
+        # https://github.com/Lasagne/Lasagne/issues/862) -- ICNR init on the weights alone
+        # isn't enough to remove the pattern, since PixelShuffle regroups channels into
+        # space and a nonzero/random bias would differ across those regrouped positions and
+        # reintroduce it; the bias must be zero too. That's no longer optional here.
+        # upsample_with_ps is kept only so existing configs that pass it (all set it to
+        # True already) don't break; the value is otherwise unused.
+        if upsample_with_ps is False:
+            logger.warning(
+                "CrossFormer: upsample_with_ps=False was requested, but the ConvTranspose2d "
+                "decoder it selected has been removed (checkerboard-artifact-prone at init). "
+                "Using the PixelShuffle decoder regardless."
             )
-            icnr_init_(ps_conv.weight, scale)  # checkerboard-free sub-pixel init
-            nn.init.zeros_(ps_conv.bias)
-            self.up_block4 = nn.Sequential(
-                ps_conv,
-                nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
-                nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
-            )
-        else:
-            self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0], attention_type=attention_type)
-            self.up_block2 = UpBlock(
-                2 * (last_dim // 2),
-                last_dim // 4,
-                dim[0],
-                attention_type=attention_type,
-            )
-            self.up_block3 = UpBlock(
-                2 * (last_dim // 4),
-                last_dim // 8,
-                dim[0],
-                attention_type=attention_type,
-            )
-            self.up_block4 = nn.ConvTranspose2d(
-                2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1
-            )
+        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        scale = 2
+        ps_conv = nn.Conv2d(
+            2 * (last_dim // 8),  # in_channels
+            self.output_channels * (scale**2),  # conv_out = target_channels * 4
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+        icnr_init_(ps_conv.weight, scale)  # checkerboard-free sub-pixel init
+        nn.init.zeros_(ps_conv.bias)
+        self.up_block4 = nn.Sequential(
+            ps_conv,
+            nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
+            nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
+        )
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
