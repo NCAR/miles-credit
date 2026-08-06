@@ -134,6 +134,9 @@ After installation, the `credit` command is your single entrypoint for everythin
 # Generate a ready-to-use config (0.25° or 1° ERA5)
 credit init --grid 0.25deg -o my_experiment.yml
 
+# Validate the config before spending a job on it
+credit check -c my_experiment.yml
+
 # Train on the current node (single GPU)
 credit train -c my_experiment.yml
 
@@ -149,6 +152,32 @@ credit --help
 ```
 
 Use `--dry-run` with `credit submit` to preview the PBS script before submitting.
+
+### Validating a config with `credit check`
+
+`credit check` resolves everything a config names without running anything: every
+registry key (`model.type`, `trainer.type`, `loss.type`, `dataset_type`, each
+pre/postblock `type`), every block's `args` against the real constructor
+signature, the channel layout against the model geometry, the BaseLoss
+target-twin postblock chain, and the existence of every file the config points
+at. Each finding comes with the fix where the fix is unambiguous.
+
+```bash
+credit check -c my_experiment.yml            # static checks, no data touched
+credit check -c my_experiment.yml --deep     # also construct model/blocks/loss
+credit check -c my_experiment.yml --strict   # exit non-zero on warnings too
+credit check -c my_experiment.yml --json     # machine-readable output
+```
+
+It exits non-zero when it finds errors, so it can gate a submission:
+
+```bash
+credit check -c my_experiment.yml && credit submit --cluster derecho -c my_experiment.yml
+```
+
+Errors mean the config will raise; warnings mean it will run but probably not
+do what you meant. A not-yet-fitted scaler is a warning, not an error — run
+`credit preprocess` and it clears.
 
 ## Running a pretrained model
 See <project:Inference.md> for more details on how to run one of the pretrained CREDIT models.

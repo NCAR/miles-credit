@@ -5,6 +5,7 @@ import sys
 import textwrap
 
 from ._ask import _ask
+from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
@@ -46,6 +47,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
     )
     p.add_argument("--force", action="store_true", help="Overwrite existing output file")
+
+    # ---- check ----
+    p = sub.add_parser(
+        "check",
+        help="Validate a config: resolve every type, block, and path it names",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Validate a gen2 config without running anything.
+
+            Resolves every registry key (model, trainer, loss, dataset_type,
+            pre/postblock types), binds each block's `args` against its real
+            constructor signature, cross-checks the channel layout against the
+            model geometry, verifies the BaseLoss target-twin postblock chain,
+            and checks that every file the config names exists.  Each finding
+            comes with the fix where the fix is unambiguous.
+
+            Exits 1 if any errors were found (add --strict to fail on warnings
+            too), so it can gate a job submission:
+
+              credit check -c config.yml && credit submit --cluster derecho -c config.yml
+
+            Examples:
+              credit check -c config.yml
+              credit check -c config.yml --deep     # also construct model/blocks/loss
+              credit check -c config.yml --json     # machine-readable output
+        """),
+    )
+    p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
+    p.add_argument(
+        "--deep",
+        action="store_true",
+        help="Also instantiate the model, blocks, loss, and metrics. Needs the scaler JSON on disk "
+        "and allocates the model on CPU.",
+    )
+    p.add_argument("--strict", action="store_true", help="Exit non-zero on warnings as well as errors")
+    p.add_argument("--json", action="store_true", help="Emit findings as JSON instead of text")
 
     # ---- preprocess ----
     p = sub.add_parser("preprocess", help="Fit preprocessing scalers (BridgeScaler) over the training data")
@@ -374,6 +411,7 @@ def main() -> None:
 
     dispatch = {
         "init": _init,
+        "check": _check,
         "preprocess": _preprocess,
         "train": _train,
         "rollout": _rollout,
