@@ -28,6 +28,9 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     pbs_options = config["pbs"]
 
     num_gpus = pbs_options.get("ngpus", 1)
+    # Unset gpu_type => any NVIDIA GPGPU on Casper.
+    gpu_type = pbs_options.get("gpu_type")
+    gpu_type_select = f":gpu_type={gpu_type}" if gpu_type and str(gpu_type).lower() not in ("any", "none") else ""
 
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
@@ -35,7 +38,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options["job_name"]}
-    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}
+    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}{gpu_type_select}
     #PBS -l walltime={pbs_options["walltime"]}
     #PBS -A {pbs_options["project"]}
     #PBS -q {pbs_options["queue"]}

@@ -5,6 +5,7 @@ All tests run on CPU with no data files required.
 """
 
 import logging
+import sys
 import warnings
 
 import pytest
@@ -30,6 +31,21 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Fallback ``save_loc`` for confs that do not set their own.  The autouse
+# fixture below repoints it at a per-test pytest tmp dir: a fixed path under
+# /tmp is shared by every user and run on a login node, so files left there by
+# an earlier run (e.g. a channel_schema.yaml another user owns) get picked up
+# instead of the state the test set up.
+_DEFAULT_SAVE_LOC = "/tmp/credit_test_trainer"
+
+
+@pytest.fixture(autouse=True)
+def _tmp_save_loc(tmp_path, monkeypatch):
+    """Give every conf built by the helpers below a private, empty save_loc."""
+    save_loc = tmp_path / "save_loc"
+    save_loc.mkdir()
+    monkeypatch.setattr(sys.modules[__name__], "_DEFAULT_SAVE_LOC", str(save_loc))
 
 
 def _tiny_model():
@@ -66,7 +82,7 @@ def _minimal_conf(**trainer_overrides):
     trainer.update(trainer_overrides)
     return {
         "trainer": trainer,
-        "save_loc": "/tmp/credit_test_trainer",
+        "save_loc": _DEFAULT_SAVE_LOC,
     }
 
 

@@ -16,6 +16,8 @@ from ._common import (
     _SLURM_DEFAULTS,
     _repo_root,
     _resolve_torchrun,
+    casper_mem,
+    queue_cluster_error,
 )
 from ._convert import _write_reload_config
 
@@ -113,11 +115,21 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, pbs_cfg.get("ncpus") or pbs_cfg.get("cpus"), d["cpus"]))
-    r.mem = _first(args.mem, pbs_cfg.get("mem"), d["mem"])
     pbs_server = "casper-pbs" if is_casper else "desched1"
     raw_queue = _first(args.queue, pbs_cfg.get("queue"), d["queue"])
+    # A pbs block written for the other machine (Derecho's 'main' on Casper, say)
+    # generates a script that qsub only rejects at submission time — catch it here.
+    err = queue_cluster_error(raw_queue, args.cluster)
+    if err:
+        print(f"ERROR: {err}", file=sys.stderr)
+        sys.exit(1)
     r.queue = raw_queue if "@" in raw_queue else f"{raw_queue}@{pbs_server}"
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
+    # On Casper the memory ask scales with the fraction of the node's GPUs in use
+    # (64GB for one GPU up to the whole node's memory for all of them); an explicit
+    # --mem / pbs.mem always wins.
+    fallback_mem = casper_mem(r.gpus, r.gpu_type) if is_casper else d["mem"]
+    r.mem = _first(args.mem, pbs_cfg.get("mem"), fallback_mem)
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
     return r
@@ -483,6 +495,20 @@ def _derecho_nodes(args: argparse.Namespace) -> int:
     return int(getattr(args, "nodes", 1) or 1)
 
 
+def _gpu_type_select(args: argparse.Namespace) -> str:
+    """Return the ``:gpu_type=<x>`` fragment of a Casper ``select`` statement.
+
+    Casper hosts a mix of GPUs (V100 / A100 / H100 / L40).  Omitting ``gpu_type``
+    lets PBS schedule the job on *any* NVIDIA GPGPU, which usually queues much
+    faster, so an unset (or ``any``/``none``) gpu_type drops the fragment
+    entirely instead of pinning the job to one model.
+    """
+    gpu_type = getattr(args, "gpu_type", None)
+    if not gpu_type or str(gpu_type).lower() in ("any", "none"):
+        return ""
+    return f":gpu_type={gpu_type}"
+
+
 def _use_pbsdsh(args: argparse.Namespace) -> bool:
     """True when this job should launch via pbsdsh rather than mpiexec.
 
@@ -620,7 +646,7 @@ def _build_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {args.job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -801,7 +827,7 @@ def _build_realtime_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -883,7 +909,7 @@ def _build_preprocess_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}
@@ -1124,7 +1150,7 @@ def _build_rollout_pbs_script(
         return textwrap.dedent(f"""\
             #!/bin/bash -l
             #PBS -N {job_name}
-            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}:gpu_type={args.gpu_type}
+            #PBS -l select=1:ncpus={args.cpus}:ngpus={args.gpus}:mem={args.mem}{_gpu_type_select(args)}
             #PBS -l walltime={args.walltime}
             #PBS -A {args.account}
             #PBS -q {args.queue}

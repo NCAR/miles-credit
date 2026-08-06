@@ -346,8 +346,55 @@ class TestResolvePbsOpts:
         args = self._minimal_args(cluster="casper")
         r = _resolve_pbs_opts(args, {})
         assert r.cpus == 8
-        assert r.mem == "128GB"
+        # mem scales with the GPU count (4 of 8 "any GPGPU" slots)
+        assert r.mem == "512GB"
         assert r.queue == "casper@casper-pbs"
+
+    def test_casper_mem_scales_with_gpus(self):
+        args = self._minimal_args(cluster="casper", gpus=1)
+        assert _resolve_pbs_opts(args, {}).mem == "64GB"
+
+        args = self._minimal_args(cluster="casper", gpus=4, gpu_type="a100_80gb")
+        assert _resolve_pbs_opts(args, {}).mem == "960GB"
+
+    def test_explicit_mem_beats_gpu_scaling(self):
+        args = self._minimal_args(cluster="casper", gpus=1, mem="256GB")
+        assert _resolve_pbs_opts(args, {}).mem == "256GB"
+
+        args = self._minimal_args(cluster="casper", gpus=1)
+        assert _resolve_pbs_opts(args, {"mem": "200GB"}).mem == "200GB"
+
+    def test_cross_cluster_queue_is_rejected(self, capsys):
+        # A Derecho pbs block submitted to Casper: qsub would reject 'main' only
+        # after submission, so _resolve_pbs_opts must catch it first.
+        args = self._minimal_args(cluster="casper")
+        with pytest.raises(SystemExit) as exc:
+            _resolve_pbs_opts(args, {"queue": "main"})
+        assert exc.value.code == 1
+        assert "Derecho queue" in capsys.readouterr().err
+
+        args = self._minimal_args(cluster="derecho")
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {"queue": "casper"})
+
+    def test_queue_valid_or_unknown_passes(self):
+        # Shared, cluster-correct, ``@server``-suffixed, and site-specific queue
+        # names must all survive the cross-cluster check.
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "gpudev"}).queue.startswith("gpudev@")
+        assert _resolve_pbs_opts(self._minimal_args(cluster="derecho"), {"queue": "gpudev"}).queue.startswith("gpudev@")
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "largemem"}).queue == (
+            "largemem@casper-pbs"
+        )
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "casper@casper-pbs"}).queue == (
+            "casper@casper-pbs"
+        )
+        assert _resolve_pbs_opts(self._minimal_args(cluster="derecho"), {"queue": "some_new_queue"}).queue == (
+            "some_new_queue@desched1"
+        )
+
+    def test_queue_flag_overrides_bad_config_queue(self):
+        args = self._minimal_args(cluster="casper", queue="casper")
+        assert _resolve_pbs_opts(args, {"queue": "main"}).queue == "casper@casper-pbs"
 
     def test_derecho_defaults(self):
         args = self._minimal_args(cluster="derecho")
@@ -1544,9 +1591,8 @@ class TestResolvePbsOptsEnv:
             conda_env=None,
         )
         r = _resolve_pbs_opts(args, {})
-        # gpu_type falls back to hardcoded value; if pbs_cfg has no gpu_type either,
-        # _first returns the hardcoded fallback "a100_80gb"
-        assert r.gpu_type == "a100_80gb"
+        # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
+        assert r.gpu_type is None
         assert r.walltime == "12:00:00"
 
 

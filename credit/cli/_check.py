@@ -26,6 +26,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from ._common import _PBS_QUEUES
+
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
 _INPUT_ONLY_FIELD_TYPES = ("dynamic_forcing", "static")
@@ -963,13 +965,33 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     pbs = conf.get("pbs") or {}
     if not pbs:
         return
-    # gpu_type is only interpolated into the Casper template, which has no default.
+    # gpu_type is only used by the Casper template; leaving it unset requests any
+    # NVIDIA GPGPU, which is a valid (and usually faster-queuing) choice.
     if pbs.get("queue") in ("casper", "gpgpu") and "gpu_type" not in pbs:
-        rep.warn(
+        rep.info(
             "pbs.gpu_type",
-            "Casper job scripts interpolate pbs.gpu_type with no default.",
-            fix="gpu_type: a100_80gb",
+            "Unset; Casper jobs will run on any available NVIDIA GPGPU. "
+            "Set gpu_type (a100_80gb, h100, v100, ...) to pin a specific model.",
         )
+    # The config names a queue but not a cluster, so the queue is what says which
+    # machine this block was written for.  Say so — reusing a Derecho block on
+    # Casper (or vice versa) is rejected by `credit submit`.
+    queue = pbs.get("queue")
+    if queue:
+        name = str(queue).split("@", 1)[0].strip().lower()
+        targets = sorted(c for c, queues in _PBS_QUEUES.items() if name in queues)
+        if not targets:
+            rep.warn(
+                "pbs.queue",
+                f"'{name}' is not a known Casper or Derecho queue.",
+                fix="queue: casper   # or 'main' on Derecho",
+            )
+        elif len(targets) == 1:
+            rep.info(
+                "pbs.queue",
+                f"'{name}' is a {targets[0].capitalize()} queue; "
+                f"`credit submit --cluster {targets[0]}` is the matching target.",
+            )
     for key in ("project", "job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")

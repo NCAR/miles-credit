@@ -146,11 +146,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--jobs", type=int, default=1, metavar="N", help="Number of parallel jobs (default: 1)")
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per job")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job")
-    p.add_argument("--mem", default=None, help="Memory per job")
+    p.add_argument("--mem", default=None, help="Memory per job (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type (default: a100_80gb)")
+    p.add_argument(
+        "--gpu-type",
+        dest="gpu_type",
+        default=None,
+        help="Casper GPU type, e.g. a100_80gb/h100/v100 (default: any NVIDIA GPGPU)",
+    )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda env path")
     p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
@@ -220,7 +225,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node")
     p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node")
-    p.add_argument("--mem", default=None, help="Memory per node")
+    p.add_argument("--mem", default=None, help="Memory per node (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
@@ -231,7 +236,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="SLURM node constraint (-C), e.g. 'gpu' on Perlmutter. Switches GPU requests to --gpus-per-node.",
     )
     p.add_argument("--qos", metavar="QOS", default=None, help="SLURM quality of service (-q), e.g. 'regular'/'debug'")
-    p.add_argument("--gpu-type", dest="gpu_type", default=None, help="Casper GPU type")
+    p.add_argument(
+        "--gpu-type",
+        dest="gpu_type",
+        default=None,
+        help="GPU type, e.g. a100_80gb/h100/v100 (Casper default: any NVIDIA GPGPU)",
+    )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument(

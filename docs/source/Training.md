@@ -98,11 +98,38 @@ pbs:
     walltime: "04:00:00"
     ncpus: 8
     ngpus: 1
-    mem: ‘128GB’
+    mem: ‘128GB’               # optional: omit to scale memory with ngpus
     queue: ‘casper’
-    gpu_type: ‘a100_80gb’      # a100_80gb, v100, h100, etc.
+    gpu_type: ‘a100_80gb’      # optional: a100_80gb, v100, h100, etc.
+                               # omit it to run on any available NVIDIA GPGPU
     conda: "credit"
 ```
+
+**Casper memory scaling** — when `mem` is not set (in the config or via `--mem`), `credit submit`
+sizes the request to the share of the node the job occupies: 64GB for a single GPU, growing
+linearly to (nearly) the whole node's memory when the job takes every GPU on that node type.
+Node sizes come from the [Casper hardware
+table](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/#casper-hardware):
+
+| `gpu_type` | GPUs/node | 1 GPU | 2 GPUs | 4 GPUs | 8 GPUs |
+|---|---|---|---|---|---|
+| unset (any GPGPU) / `v100` | 8 (1152GB) | 64GB | 224GB | 512GB | 1088GB |
+| `a100_80gb` / `h100` | 4 (1024GB) | 64GB | 368GB | 960GB | — |
+
+**Queue / cluster mismatch** — a `pbs:` block written for one machine is easy to reuse against the
+other, and PBS only rejects the bad queue after the job is submitted. `credit submit` therefore fails
+up front when the resolved queue belongs to the other cluster:
+
+```
+$ credit submit --cluster casper -c derecho_config.yml --dry-run
+ERROR: queue 'main' is a Derecho queue, but this job targets casper.
+Casper queues: casper, cpu, gpgpu, gpudev, htc, l40, largemem, rda, vis.
+Fix the 'queue:' in the config's pbs block, or override it with --queue.
+```
+
+Pass `--queue casper` to override the config for a one-off run, or edit the block. Queues valid on
+both machines (`gpudev`) and unrecognized/site-specific queue names are left alone. `credit check`
+reports which cluster a config's queue implies.
 
 **Resolution order** — the same setting can come from three places, highest priority first:
 

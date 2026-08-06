@@ -1076,7 +1076,8 @@ class TestResolvePbsOpts:
         args = _resolve_pbs_opts(self._base_args(cluster="casper"), {})
         assert args.gpus == 4
         assert args.cpus == 8
-        assert args.mem == "128GB"
+        # Casper memory scales with the requested share of the node's GPUs.
+        assert args.mem == "512GB"
         assert "casper" in args.queue
         assert args.walltime == "12:00:00"
         assert args.account == "NAML0001"
