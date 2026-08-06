@@ -1813,3 +1813,29 @@ class TestAgentBashEdgeCases:
     def test_append_redirect_blocked(self):
         result = _agent_bash("echo hello >> /tmp/out.txt")
         assert "Blocked" in result
+
+
+class TestCondaEnvShared:
+    """The PBS, Slurm, and CLI launchers must resolve conda envs identically."""
+
+    def test_all_three_launchers_agree(self):
+        from credit.cli._common import _resolve_torchrun as cli_resolve
+        from credit.conda_env import torchrun_path
+        from credit.slurm import _resolve_torchrun as slurm_resolve
+
+        for env in ("credit", "/opt/envs/credit"):
+            shared = torchrun_path(env)
+            assert cli_resolve(env) == shared, env
+            assert slurm_resolve(env) == shared, env
+
+    def test_no_duplicate_inline_lookup(self):
+        """The awk lookup must live only in credit/conda_env.py."""
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "credit"
+        offenders = [
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*.py")
+            if path.name != "conda_env.py" and "conda info --envs" in path.read_text()
+        ]
+        assert offenders == [], f"inline conda lookup duplicated in: {offenders}"

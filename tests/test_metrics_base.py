@@ -38,12 +38,12 @@ N_LEVELS = 3
 VARIANCES = {VAR_T: [100.0, 25.0, 4.0], VAR_SP: [1.0e6], VAR_PRECIP: [1.0e-8]}
 
 
-def _make_scaler_file(tmp_path):
+def _make_scaler_file(tmp_path, variances_by_var=None, name="scaler.json"):
     from bridgescaler import save_scaler_dict
     from bridgescaler.distributed_tensor import DStandardScalerTensor
 
     scalers = {}
-    for var_key, variances in VARIANCES.items():
+    for var_key, variances in (variances_by_var or VARIANCES).items():
         n = len(variances)
         s = DStandardScalerTensor(channels_last=False)
         s.mean_x_ = torch.zeros(n)
@@ -52,9 +52,23 @@ def _make_scaler_file(tmp_path):
         s.n_ = 100
         s._fit = True
         scalers[var_key] = s
-    path = str(tmp_path / "scaler.json")
+    path = str(tmp_path / name)
     save_scaler_dict({"target": {"ERA5": scalers}}, path)
     return path
+
+
+# Moderate, closely-spaced variances. The default VARIANCES span 14 orders of
+# magnitude, so after normalize_weights one variable dominates the aggregate
+# and 1/sigma vs 1/sigma^2 become numerically indistinguishable — useless for
+# testing that scale_power is honored.
+MODERATE_VARIANCES = {VAR_T: [4.0, 4.0, 4.0], VAR_SP: [16.0], VAR_PRECIP: [64.0]}
+
+
+def _expected_aggregate(metric, variances_by_var, power):
+    """Aggregate the metric's own per-variable scores under 1/sigma**power."""
+    raw = {k: 1.0 / np.mean(v) ** (power / 2) for k, v in variances_by_var.items()}
+    mean_w = np.mean(list(raw.values()))
+    return np.mean([raw[k] / mean_w * metric.last_var_scores[k] for k in raw])
 
 
 def _make_schema():
@@ -409,6 +423,59 @@ def test_forward_inverse_variance_weights(tmp_path):
     assert out["mse"] == pytest.approx(expected, rel=1e-5)
 
 
+def test_scale_power_per_metric():
+    """Each metric declares the power of sigma its score carries."""
+    assert MSEMetric.scale_power == 2
+    assert RMSEMetric.scale_power == 1
+    assert MAEMetric.scale_power == 1
+    assert BiasMetric.scale_power == 1
+    assert R2ScoreMetric.scale_power == 0
+    assert LogVarianceRatioMetric.scale_power == 0
+    assert ForecastActivityMetric.scale_power == 1
+    assert AnomalyCorrelationCoefficientMetric.scale_power == 0
+
+
+def test_inverse_variance_uses_sigma_for_linear_metrics(tmp_path):
+    """RMSE is linear in sigma, so it is weighted by 1/sigma, not 1/sigma^2."""
+    scaler_path = _make_scaler_file(tmp_path, MODERATE_VARIANCES)
+    metric = _make_metric(RMSEMetric, scaler_path)
+    out = metric(_make_state_dict())
+
+    expected = _expected_aggregate(metric, MODERATE_VARIANCES, power=1)
+    assert out["rmse"] == pytest.approx(expected, rel=1e-5)
+
+    # And is measurably different from the 1/sigma^2 weighting it replaced,
+    # so this test actually fails if scale_power is ignored.
+    wrong = _expected_aggregate(metric, MODERATE_VARIANCES, power=2)
+    assert not np.isclose(expected, wrong, rtol=1e-3)
+
+
+def test_inverse_variance_uses_variance_for_quadratic_metrics(tmp_path):
+    """MSE is quadratic in sigma and keeps the 1/sigma^2 weighting."""
+    scaler_path = _make_scaler_file(tmp_path, MODERATE_VARIANCES)
+    metric = _make_metric(MSEMetric, scaler_path)
+    out = metric(_make_state_dict())
+
+    expected = _expected_aggregate(metric, MODERATE_VARIANCES, power=2)
+    assert out["mse"] == pytest.approx(expected, rel=1e-5)
+
+
+def test_inverse_variance_ignores_scaler_for_dimensionless_metrics(tmp_path):
+    """R2 is already normalized, so inverse_variance leaves its weights uniform."""
+    scaler_path = _make_scaler_file(tmp_path)
+    weighted = _make_metric(R2ScoreMetric, scaler_path, var_weighting="inverse_variance")
+    uniform = _make_metric(R2ScoreMetric, scaler_path, var_weighting="none")
+    state = _make_state_dict()
+    assert weighted(state)["r2score"] == pytest.approx(uniform(state)["r2score"], rel=1e-9)
+
+
+def test_dimensionless_metric_needs_no_scaler_path():
+    """A scale_power == 0 metric never consults the scaler, so none is required."""
+    metric = R2ScoreMetric(metric_name="r2score", var_weighting="inverse_variance", channel_schema=_make_schema())
+    out = metric(_make_state_dict())
+    assert np.isfinite(out["r2score"])
+
+
 def test_learnable_mode_rejected(tmp_path):
     with pytest.raises(ValueError, match="learnable"):
         _make_metric(MSEMetric, _make_scaler_file(tmp_path), var_weighting="learnable")
@@ -739,6 +806,94 @@ def test_load_metric_activity(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Climatology loaded from a file
+# ---------------------------------------------------------------------------
+
+
+def _write_climatology_file(tmp_path, height=4, width=5):
+    """netCDF climatology keyed by short name: T is 3-D, SP/precip are 2-D."""
+    import xarray as xr
+
+    rng = np.random.default_rng(11)
+    coords = {
+        "level": np.arange(N_LEVELS),
+        "latitude": np.linspace(-80.0, 80.0, height),
+        "longitude": np.linspace(0.0, 350.0, width),
+    }
+    ds = xr.Dataset(
+        {
+            "T": (("level", "latitude", "longitude"), rng.normal(size=(N_LEVELS, height, width))),
+            "SP": (("latitude", "longitude"), rng.normal(size=(height, width)) * 500.0),
+            "precip": (("latitude", "longitude"), rng.random(size=(height, width)) * 1e-5),
+        },
+        coords=coords,
+    )
+    path = str(tmp_path / "climatology.nc")
+    ds.to_netcdf(path)
+    return path
+
+
+def test_acc_climatology_from_file(tmp_path):
+    """A climatology file with both 2-D and 3-D variables scores without error.
+
+    Regression test: a (level, lat, lon) field must align `level` with the
+    channel axis of (B, C, T, H, W), not the time axis.
+    """
+    path = _write_climatology_file(tmp_path)
+    metric = _make_anomaly_metric(AnomalyCorrelationCoefficientMetric, metric_name="acc", climatology_path=path)
+    out = metric(_make_state_dict())
+    for var_key in metric.var_keys:
+        assert np.isfinite(out[f"acc/{var_key}"]), var_key
+        assert -1.0 - 1e-6 <= out[f"acc/{var_key}"] <= 1.0 + 1e-6, var_key
+
+
+def test_activity_climatology_from_file_matches_manual(tmp_path):
+    """SDAF from a file climatology matches the manual sqrt(mean(d_f^2))."""
+    import xarray as xr
+
+    path = _write_climatology_file(tmp_path)
+    metric = _make_anomaly_metric(ForecastActivityMetric, metric_name="activity", climatology_path=path)
+    state = _make_state_dict()
+    out = metric(state)
+
+    ds = xr.open_dataset(path)
+    # Reshape each short-name field to (1, C, 1, H, W) as _get_clim should.
+    expected_clim = {
+        VAR_T: torch.as_tensor(ds["T"].values, dtype=torch.float32).reshape(1, N_LEVELS, 1, 4, 5),
+        VAR_SP: torch.as_tensor(ds["SP"].values, dtype=torch.float32).reshape(1, 1, 1, 4, 5),
+        VAR_PRECIP: torch.as_tensor(ds["precip"].values, dtype=torch.float32).reshape(1, 1, 1, 4, 5),
+    }
+    for var_key in metric.var_keys:
+        p = state["y_processed"]["ERA5"][var_key].float()
+        c = expected_clim[var_key].expand_as(p)
+        d_f = (p - c) - (p - c).mean()
+        expected = torch.sqrt((d_f**2).mean() + 1e-12)
+        assert out[f"activity/{var_key}"] == pytest.approx(expected.item(), rel=1e-4), var_key
+
+
+def test_climatology_file_level_mismatch_raises(tmp_path):
+    """A climatology whose level count disagrees with the field is rejected."""
+    import xarray as xr
+
+    rng = np.random.default_rng(3)
+    bad_levels = N_LEVELS + 2
+    ds = xr.Dataset(
+        {"T": (("level", "latitude", "longitude"), rng.normal(size=(bad_levels, 4, 5)))},
+        coords={
+            "level": np.arange(bad_levels),
+            "latitude": np.linspace(-80.0, 80.0, 4),
+            "longitude": np.linspace(0.0, 350.0, 5),
+        },
+    )
+    path = str(tmp_path / "bad_climatology.nc")
+    ds.to_netcdf(path)
+
+    metric = _make_anomaly_metric(ForecastActivityMetric, metric_name="activity", climatology_path=path)
+    with pytest.raises(ValueError, match="levels but the field has"):
+        metric(_make_state_dict())
+
+
+# ---------------------------------------------------------------------------
 # Backward-compat re-exports
 # ---------------------------------------------------------------------------
 
@@ -747,3 +902,9 @@ def test_gen1_metrics_reexport():
     assert LatWeightedMetrics is not None
     assert LatWeightedMetricsClimatology is not None
     assert LatWeightedMetricsEnsemble is not None
+
+
+def test_last_var_scores_initialized_before_forward():
+    """The documented attribute exists before any forward pass."""
+    metric = RMSEMetric(metric_name="rmse", var_weighting="none")
+    assert metric.last_var_scores == {}

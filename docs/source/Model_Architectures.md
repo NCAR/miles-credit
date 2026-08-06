@@ -6,8 +6,8 @@ In your configuration file, you can select from multiple supported models. Below
 
 - [WxFormer](#wxformer)
 - [NCAR-FuXi](#ncar-fuxi)
-- [UNet](#unet)
-- [Graph Transformer](#graph-transformer)
+- UNet *(no guide section yet — see the API reference)*
+- Graph Transformer *(no guide section yet — see the API reference)*
 ---
 
 ## WxFormer

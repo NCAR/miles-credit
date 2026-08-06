@@ -312,12 +312,18 @@ metrics:
       rmse: {}
       r2score: {}
       bias: {}
-    # base_metric_overrides:          # optional per-variable metric overrides
-    #   ERA5/diagnostic/2d/total_precipitation: {metric: "mae"}
+    # To score a variable with a different functional, add that metric to the
+    # list above — each entry scores every variable under its own namespace
+    # (e.g. "mae/ERA5/..."). There is no per-variable metric override: unlike
+    # the loss, a combined metric has no single "base" metric to override.
 
     # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
-    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
-    # file. Options: inverse_variance | manual | none (no learnable for metrics).
+    # inverse_variance divides each variable by sigma**scale_power, using the
+    # bridgescaler file. scale_power is a property of the metric, so the
+    # aggregate is dimensionless whatever its order: 2 for mse, 1 for rmse/mae/
+    # bias/activity, and 0 for already-normalized scores like r2score/acc
+    # (which ignore the scaler entirely).
+    # Options: inverse_variance | manual | none (no learnable for metrics).
     var_weighting: "inverse_variance"
     scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
     variable_weights: {}              # manual multipliers per var_key (all modes)

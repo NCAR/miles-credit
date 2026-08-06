@@ -122,6 +122,12 @@ def _make_state_dict(batch=2, height=4, width=5, pred_requires_grad=True, seed=0
 # ---------------------------------------------------------------------------
 
 
+def test_last_var_losses_initialized_before_forward():
+    """The documented attribute exists before any forward pass."""
+    loss = BaseLoss(training_loss="mse", var_weighting="none")
+    assert loss.last_var_losses == {}
+
+
 def test_scaler_channel_variance_standard():
     from bridgescaler.distributed_tensor import DStandardScalerTensor
 

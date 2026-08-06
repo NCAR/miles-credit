@@ -49,9 +49,11 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    Forecast API Server <serve.md>
    AI Agent <agent.md>
    Evaluation and Metrics <Evaluation.md>
+   Verification Metrics <Metrics.md>
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>
    Working with Loss Functions <Losses.md>
+   Gen 1 Losses <Losses_gen1.md>
 
 .. toctree::
    :maxdepth: 2

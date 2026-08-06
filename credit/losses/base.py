@@ -66,7 +66,8 @@ the largest-scale variables. ``var_weighting`` handles this:
     stats when available), ``L = mean_v(m_v * exp(-s_v) * L_v + 0.5 * s_v)``.
     The training application must add the criterion's parameters to the
     optimizer (``train_gen2`` does this automatically); checkpointing of these
-    parameters is currently not wired — they re-initialize on resume.
+    parameters is currently not wired — they re-initialize on resume
+    (tracked in issue #473).
     Learnable mode requires a channel schema and does not support computed
     diagnostics.
   - ``none``: uniform combination; only sensible when variables are already
@@ -272,6 +273,9 @@ class BaseLoss(nn.Module):
         self._combination_weights = None  # {var_key: float} for static modes; built at first forward
         self.log_variance = None  # nn.Parameter for learnable mode
         self.var_keys = None  # full scoring list, resolved at first forward
+        # Populated by forward(); initialized here so the documented attribute
+        # exists (and logging code reading it is safe) before the first pass.
+        self.last_var_losses = {}
         if self.var_weighting == "learnable":
             if self.data_var_keys is None:
                 raise ValueError(
@@ -395,6 +399,10 @@ class BaseLoss(nn.Module):
 
         var_losses = {}
         self.last_var_losses = {}
+        # Device of the scored tensors, captured in the loop below so the
+        # learnable branch does not depend on a leaked loop variable. Falls
+        # back to the parameter's own device, making the .to() a no-op.
+        device = self.log_variance.device if self.log_variance is not None else None
         for var_key in var_keys:
             if var_key not in pred:
                 raise KeyError(
@@ -409,7 +417,8 @@ class BaseLoss(nn.Module):
                 )
             # Physical-unit magnitudes (e.g. SP ~1e5 Pa) overflow fp16 — score in fp32.
             p = pred[var_key].float()
-            t = target[var_key].float().to(p.device)
+            device = p.device
+            t = target[var_key].float().to(device)
             loss_fn = self.overrides.get(var_key, self.base_loss)
             elementwise = loss_fn(t, p)
             if elementwise.shape != p.shape:
@@ -425,7 +434,7 @@ class BaseLoss(nn.Module):
             self.last_var_losses[var_key] = var_loss.detach().item()
 
         if self.var_weighting == "learnable":
-            log_var = self.log_variance.to(p.device)
+            log_var = self.log_variance.to(device)
             terms = []
             for i, var_key in enumerate(var_keys):
                 manual = self.manual_weights.get(var_key, 1.0)
