@@ -43,6 +43,7 @@ from ._parser import _build_parser, main
 from ._plot import _build_channel_map, _build_denorm_stats, _metrics, _plot
 from ._submit import (
     _build_pbs_script,
+    _build_preprocess_pbs_script,
     _build_preprocess_slurm_script,
     _build_realtime_pbs_script,
     _build_realtime_slurm_script,
@@ -85,6 +86,7 @@ __all__ = [
     "_build_denorm_stats",
     "_build_parser",
     "_build_pbs_script",
+    "_build_preprocess_pbs_script",
     "_build_preprocess_slurm_script",
     "_build_realtime_pbs_script",
     "_build_realtime_slurm_script",

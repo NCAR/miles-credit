@@ -434,7 +434,8 @@ credit submit --cluster derecho -c config.yml --nodes 2
 credit submit --cluster derecho -c config.yml --nodes 2 --launcher pbsdsh
 ```
 
-Both launchers apply to `--mode train` and `--mode preprocess`. Single-node jobs always
+Both launchers apply to every `--mode` (`train`, `preprocess`, `rollout`, `realtime`) —
+each mode requests `select=<nodes>` and launches across all of them. Single-node jobs always
 use `torchrun --standalone` regardless of `--launcher`. The `pbsdsh` launcher bakes the
 fully-resolved conda/module environment into a per-node script, because pbsdsh's spawned
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
@@ -445,6 +446,13 @@ libfabric for inter-node communication. Use `--dry-run` to compare the two scrip
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
 Resource settings are read from the `pbs:` section of your config (see above); CLI flags
 override them when provided.
+
+```{note}
+`pbs.nodes` applies to *every* `--mode`, not just `train`. If your config sets
+`nodes: 8` for training, `--mode rollout` / `realtime` / `preprocess` will also request
+8 nodes unless you pass `--nodes 1`. The job plan printed before submission shows the
+node count; use `--dry-run` to check the `select=` line first.
+```
 
 ```bash
 # Minimal — all settings come from the pbs: block in config.yml

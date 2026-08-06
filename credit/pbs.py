@@ -311,7 +311,7 @@ PBSDSH_DERECHO_MODULES = (
 )
 
 
-def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_parent):
+def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_parent, app_args=""):
     r"""Return the bash block that launches *script_path* across all job nodes via pbsdsh.
 
     This is the launcher-specific tail of a PBS script; the caller supplies the ``#PBS``
@@ -367,6 +367,9 @@ def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_pa
         logdir_parent (str): Directory under which a ``pbsdsh_logs/`` dir is created for
             per-node logs, written to disk independently of the job's own stdout so a
             job killed abruptly still leaves diagnostics behind.
+        app_args (str): Extra command-line arguments appended after ``-c <config>``
+            (e.g. ``"--init-time 2024-01-15T00 --steps 40"`` for the realtime entrypoint).
+            Empty for entrypoints that take only a config.
 
     Returns:
         str: The bash launch block (no ``#PBS`` header, no ``module``/``conda`` lines).
@@ -420,7 +423,7 @@ export NCCL_DEBUG=INFO
     --rdzv-backend=static \
     --master-addr=${MASTER_ADDR} \
     --master-port=${MASTER_PORT} \
-    @@APP@@ -c @@CONFIG@@ > "${LOGDIR}/node_${i}.out" 2>&1
+    @@APP@@ -c @@CONFIG@@@@APPARGS@@ > "${LOGDIR}/node_${i}.out" 2>&1
 EOF
     chmod +x "${node_script}"
     # -v: pbsdsh reports each task's exit status to node_<i>.pbsdsh; torchrun's own output
@@ -452,6 +455,7 @@ exit $status
         .replace("@@TORCHRUN@@", str(torchrun))
         .replace("@@APP@@", str(script_path))
         .replace("@@CONFIG@@", str(config_path))
+        .replace("@@APPARGS@@", f" {app_args}" if app_args else "")
     )
 
 
