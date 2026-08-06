@@ -22,6 +22,7 @@ from credit.datasets.gen_2.tisr import (
     _get_instantaneous_toa_tisr,  # pyright: ignore[reportPrivateUsage]
     _get_integrated_toa_tisr,  # pyright: ignore[reportPrivateUsage]
     _get_latlon_grid,  # pyright: ignore[reportPrivateUsage]
+    _cmip6_tsi_data,  # pyright: ignore[reportPrivateUsage]
     _compute_tisr,  # pyright: ignore[reportPrivateUsage]
     TISRDataset,
 )
@@ -530,48 +531,60 @@ class TestComputeTISR:
     def test_output_shape(self, rectangular_nc):
         """Output shape must be (ny, nx) — the spatial grid, no time dim."""
         lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
             latitude=lat,
             longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
         )
         assert result.shape == (4, 8), f"Expected (4, 8), got {result.shape}"
 
     def test_output_dtype(self, rectangular_nc):
         """Output must be float32."""
         lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
             latitude=lat,
             longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
         )
         assert result.dtype == torch.float32, f"Expected float32, got {result.dtype}"
 
     def test_output_nonnegative(self, rectangular_nc):
         """All integrated TISR values must be non-negative."""
         lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
             latitude=lat,
             longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
         )
         assert (result >= 0).all(), "Integrated TISR must be non-negative everywhere"
 
     def test_polar_night_via_compute_tisr(self, rectangular_nc):
         """South pole in June must receive zero TISR via the full _compute_tisr pipeline."""
         lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
         result = _compute_tisr(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             integration_period=pd.Timedelta(hours=1),
             num_integration_steps=360,
             latitude=lat,
             longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
         )
         # rectangular_nc has lat starting at -90; first row is the south pole
         south_pole_row = result[0, :]
@@ -582,11 +595,14 @@ class TestComputeTISR:
     def test_different_integration_period(self, rectangular_nc):
         """6-hour integration period must give more energy than 1-hour."""
         lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
         kwargs = dict(
             t=pd.Timestamp("2020-06-21 12:00:00"),
             num_integration_steps=360,
             latitude=lat,
             longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
         )
         result_1h = _compute_tisr(integration_period=pd.Timedelta(hours=1), **kwargs)
         result_6h = _compute_tisr(integration_period=pd.Timedelta(hours=6), **kwargs)
