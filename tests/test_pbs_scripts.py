@@ -1076,7 +1076,8 @@ class TestResolvePbsOpts:
         args = _resolve_pbs_opts(self._base_args(cluster="casper"), {})
         assert args.gpus == 4
         assert args.cpus == 8
-        assert args.mem == "128GB"
+        # Casper memory scales with the requested share of the node's GPUs.
+        assert args.mem == "512GB"
         assert "casper" in args.queue
         assert args.walltime == "12:00:00"
         assert args.account == "NAML0001"
@@ -1217,12 +1218,105 @@ class TestBuildRolloutPbsScript:
         assert "--no_subset 4" in script
 
     def test_derecho_rollout_has_standalone(self):
-        """Rollout is always single-node, even on Derecho."""
+        """A single-node rollout uses torchrun --standalone, like every other mode."""
         from credit.cli import _build_rollout_pbs_script
 
         args = self._rollout_args(cluster="derecho")
         script = _build_rollout_pbs_script(args, FAKE_CONFIG, FAKE_REPO, subset=1, n_subsets=2)
         assert "--standalone" in script
+
+
+# ---------------------------------------------------------------------------
+# --nodes must be honored by *every* --mode on derecho, not just train.
+#
+# Regression guard: preprocess / rollout / realtime used to hardcode `select=1`
+# and `torchrun --standalone --nnodes=1`, silently downgrading a multi-node
+# request to a single node.
+# ---------------------------------------------------------------------------
+
+
+class TestDerechoNodesHonoredInAllModes:
+    def _args(self, nodes=3, gpus=4, launcher="mpiexec", **kw):
+        from credit.cli import _resolve_pbs_opts
+
+        defaults = dict(
+            cluster="derecho",
+            gpus=gpus,
+            nodes=nodes,
+            cpus=None,
+            mem=None,
+            walltime=None,
+            queue=None,
+            gpu_type=None,
+            torchrun=None,
+            conda_env=None,
+            account=None,
+            launcher=launcher,
+        )
+        defaults.update(kw)
+        return _resolve_pbs_opts(argparse.Namespace(**defaults), {})
+
+    def _script(self, mode, nodes=3, gpus=4, launcher="mpiexec"):
+        from credit.cli import (
+            _build_pbs_script,
+            _build_preprocess_pbs_script,
+            _build_realtime_pbs_script,
+            _build_rollout_pbs_script,
+        )
+
+        args = self._args(nodes=nodes, gpus=gpus, launcher=launcher)
+        if mode == "train":
+            return _build_pbs_script(args, FAKE_CONFIG, FAKE_REPO, FAKE_ACCOUNT)
+        if mode == "preprocess":
+            return _build_preprocess_pbs_script(args, FAKE_CONFIG, FAKE_REPO)
+        if mode == "rollout":
+            return _build_rollout_pbs_script(args, FAKE_CONFIG, FAKE_REPO, subset=1, n_subsets=2)
+        return _build_realtime_pbs_script(args, FAKE_CONFIG, FAKE_REPO, "2024-01-15T00", 40)
+
+    ALL_MODES = ["train", "preprocess", "rollout", "realtime"]
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_select_line_uses_node_count(self, mode):
+        assert "select=3:ncpus=" in self._script(mode, nodes=3)
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_multinode_uses_mpiexec_not_standalone(self, mode):
+        script = self._script(mode, nodes=3)
+        assert "--standalone" not in script
+        assert "mpiexec -n 12 --ppn 4" in script  # 3 nodes x 4 GPUs
+        assert "hostname -i" in script  # head-node rendezvous lookup
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_single_node_still_uses_standalone(self, mode):
+        script = self._script(mode, nodes=1)
+        assert "select=1:ncpus=" in script
+        assert "--standalone" in script
+        assert "mpiexec" not in script
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_pbsdsh_launcher_available_for_every_mode(self, mode):
+        script = self._script(mode, nodes=3, launcher="pbsdsh")
+        assert "select=3:ncpus=" in script
+        assert 'pbsdsh -v -n "$i"' in script
+        assert "mpiexec" not in script
+
+    @pytest.mark.parametrize("launcher", ["mpiexec", "pbsdsh"])
+    def test_realtime_keeps_app_args_multinode(self, launcher):
+        """--init-time / --steps must survive both multi-node launch paths."""
+        script = self._script("realtime", nodes=2, launcher=launcher)
+        assert "--init-time 2024-01-15T00" in script
+        assert "--steps 40" in script
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_each_mode_targets_its_own_entrypoint(self, mode):
+        expected = {
+            "train": "train_gen2.py",
+            "preprocess": "preprocess.py",
+            "rollout": "rollout_gen2.py",
+            "realtime": "rollout_realtime_gen2.py",
+        }[mode]
+        for launcher in ("mpiexec", "pbsdsh"):
+            assert expected in self._script(mode, nodes=2, launcher=launcher)
 
 
 # ---------------------------------------------------------------------------

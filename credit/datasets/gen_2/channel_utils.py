@@ -10,21 +10,30 @@ FIELD_TYPE_RANK / build_channel_layout / update_x
 Derive per-group channel slices directly from the variables config and
 provide a standalone update function for multi-step rollout.
 
-The concat order matches the canonical rank defined by FIELD_TYPE_RANK
-(prognostic < dynamic_forcing < static < diagnostic), with vars_3D before
-vars_2D within each group.  This is the same rank used by
-credit.preblock.concat.ConcatToTensor, so slices returned here always
-correspond to the actual channel positions in the model input tensor.
+Both the input tensor ``x`` and the target tensor ``y_pred`` are laid out
+**source-major** by ``ConcatToTensor`` — every channel of the first source
+precedes every channel of the second.  Within a source the two differ:
+
+* ``x`` orders field types by FIELD_TYPE_RANK (prognostic < static <
+  dynamic_forcing); diagnostics are never inputs.
+* ``y_pred`` is prognostic then diagnostic.
+
+So with more than one source a field type's channels are *not* contiguous
+across the whole tensor, and a source's prognostic block in ``y_pred`` is
+offset by the diagnostics of every source before it.  Each group therefore
+carries both of its positions: ``x_slice`` (where it lives in ``x``) and
+``src_slice`` (where its replacement comes from in ``y_pred`` or
+``x_dynfrc``).  See :class:`ChannelGroup`.
 
 Usage::
 
     from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 
     # once at trainer / rollout init
-    slices, n_pred = build_channel_layout(conf)
+    groups, n_pred = build_channel_layout(conf)
 
-    # at every t > 1 step
-    x = update_x(x, x_dynfrc, y_pred, slices)
+    # at every t > 1 step — y_pred is the FULL prediction, diagnostics included
+    x = update_x(x, x_dynfrc, y_pred, groups)
 
 ChannelSchema
 ~~~~~~~~~~~~~
@@ -61,8 +70,10 @@ the batch has no target — so ``Reconstruct`` recovers every predicted variable
 diagnostics included.
 """
 
+import contextlib
 import logging
 import os
+from dataclasses import dataclass
 
 import yaml
 
@@ -81,73 +92,150 @@ FIELD_TYPE_RANK: dict[str, int] = {
     "diagnostic": 3,
 }
 
-# Semantic roles — determines update behaviour at t > 1.
-_DIAGNOSTIC = frozenset({"diagnostic"})  # target-only, never in x
+# Semantic roles — determines update behaviour at t > 1.  "diagnostic" is
+# absent by construction: it is target-only and excluded from _INPUT_FIELD_TYPES.
 _DATASET_DRIVEN = frozenset({"dynamic_forcing"})
 _MODEL_PREDICTED = frozenset({"prognostic"})
 # "static" (and anything else) falls through as fixed
 
 
-def build_channel_layout(conf):
-    """Return (slices, n_pred) derived from the variables config.
+@dataclass(frozen=True)
+class ChannelGroup:
+    """One ``(source, field_type)`` run of channels in the model input tensor.
 
-    Slices are ordered by FIELD_TYPE_RANK (matching ConcatToTensor), so
-    slice offsets correspond directly to channel positions in the tensor.
+    Attributes:
+        source: Source name as it appears under ``data.source``.
+        field_type: ``"prognostic"``, ``"static"`` or ``"dynamic_forcing"``.
+        x_slice: Where these channels sit in the model input tensor ``x``.
+        src_slice: Where their replacement comes from at the next rollout step —
+            into ``y_pred`` for prognostic groups, into ``x_dynfrc`` for
+            dynamic-forcing groups, and ``None`` for fixed groups (static),
+            which are carried forward unchanged.
+    """
+
+    source: str
+    field_type: str
+    x_slice: slice
+    src_slice: "slice | None"
+
+
+def build_channel_layout(conf):
+    """Return (groups, n_pred) derived from the variables config.
+
+    Handles any number of sources.  ``ConcatToTensor`` lays both ``x`` and
+    ``y_pred`` out source-major, so a field type's channels are contiguous only
+    *within* a source — hence one entry per ``(source, field_type)`` pair rather
+    than one per field type.
+
+    Each source resolves its own level count (``data.source.<name>.levels``,
+    falling back to ``model.levels``), so sources may differ in vertical extent.
 
     Parameters
     ----------
     conf : dict
-        Full CREDIT config dict.  Reads the first entry under
-        conf["data"]["source"] for levels and variable groups.
+        Full CREDIT config dict.
 
     Returns
     -------
-    slices : dict[str, slice]
-        Mapping from group name to its slice in the channel dimension of x.
-        Groups in _DIAGNOSTIC are excluded (they are never in x).
-        Order matches FIELD_TYPE_RANK, not config key order.
+    groups : dict[str, ChannelGroup]
+        Keyed ``"{source}/{field_type}"``, in ``x`` channel order.  Diagnostic
+        groups are excluded (never inputs), but their width is still accounted
+        for when computing prognostic offsets into ``y_pred``.
     n_pred : int
-        Total number of predicted (prognostic) channels.
+        Total number of predicted (prognostic) channels across all sources.
+
+    Raises
+    ------
+    ValueError
+        If a source declares 3D variables but no level count is resolvable, or
+        if ``history_len`` is greater than 1 — the flat rollout paths overwrite
+        channels in place and cannot shift a history window.
     """
-    src_conf = next(iter(conf["data"]["source"].values()))
-    n_levels = len(src_conf["levels"])
-    variables = src_conf["variables"]
+    data_conf = conf["data"]
+    model_levels = (conf.get("model") or {}).get("levels")
 
-    # Sort groups by canonical rank so slice offsets match concat.py output.
-    sorted_groups = sorted(
-        ((name, grp) for name, grp in variables.items() if grp is not None and name not in _DIAGNOSTIC),
-        key=lambda pair: FIELD_TYPE_RANK.get(pair[0], len(FIELD_TYPE_RANK)),
-    )
+    groups: dict[str, ChannelGroup] = {}
+    x_cursor = 0  # position in the model input tensor x
+    pred_cursor = 0  # position in y_pred (prognostic + diagnostic, source-major)
+    dyn_cursor = 0  # position in x_dynfrc (dynamic_forcing only, source-major)
 
-    slices = {}
-    offset = 0
-    for name, grp in sorted_groups:
-        n = len(grp.get("vars_3D", [])) * n_levels + len(grp.get("vars_2D", []))
-        slices[name] = slice(offset, offset + n)
-        offset += n
+    for source_name, src_conf in data_conf["source"].items():
+        src_conf = src_conf or {}
+        variables = src_conf.get("variables") or {}
+        src_levels = src_conf.get("levels")
+        n_levels = len(src_levels) if src_levels else model_levels
 
-    n_pred = sum(sl.stop - sl.start for name, sl in slices.items() if name in _MODEL_PREDICTED)
-    return slices, n_pred
+        history_len = src_conf.get("history_len", data_conf.get("history_len", 1))
+        if history_len != 1:
+            raise ValueError(
+                f"build_channel_layout: source '{source_name}' has history_len={history_len}, but the "
+                "flat rollout paths overwrite channels in place and cannot shift a history window. "
+                "Use the gen2 rollout (credit rollout), which assembles inputs through the preblocks."
+            )
+
+        def _width(field_type, _source=source_name, _variables=variables, _n_levels=n_levels):
+            grp = _variables.get(field_type) or {}
+            n_3d = len(grp.get("vars_3D") or [])
+            n_2d = len(grp.get("vars_2D") or [])
+            if n_3d and not _n_levels:
+                raise ValueError(
+                    f"build_channel_layout: source '{_source}' defines 3D variables but neither "
+                    f"data.source.{_source}.levels nor model.levels is set."
+                )
+            return n_3d * (_n_levels or 0) + n_2d
+
+        # y_pred runs prognostic-then-diagnostic within each source, so this
+        # source's prognostic block starts after every earlier source's
+        # prognostics AND diagnostics.  Reserve both before moving on.
+        prognostic_src = slice(pred_cursor, pred_cursor + _width("prognostic"))
+        pred_cursor += _width("prognostic") + _width("diagnostic")
+
+        for field_type in _INPUT_FIELD_TYPES:
+            width = _width(field_type)
+            if width == 0:
+                continue  # absent or null group contributes no channels
+            if field_type in _MODEL_PREDICTED:
+                src_slice = prognostic_src
+            elif field_type in _DATASET_DRIVEN:
+                src_slice = slice(dyn_cursor, dyn_cursor + width)
+                dyn_cursor += width
+            else:
+                src_slice = None  # static and friends: carried forward
+            groups[f"{source_name}/{field_type}"] = ChannelGroup(
+                source=source_name,
+                field_type=field_type,
+                x_slice=slice(x_cursor, x_cursor + width),
+                src_slice=src_slice,
+            )
+            x_cursor += width
+
+    n_pred = sum(g.x_slice.stop - g.x_slice.start for g in groups.values() if g.field_type in _MODEL_PREDICTED)
+    return groups, n_pred
 
 
-def update_x(x_prev, x_dynfrc, y_pred, slices):
+def update_x(x_prev, x_dynfrc, y_pred, groups):
     """Build the next-step input tensor for autoregressive rollout.
 
     Replaces dataset-driven channels (dynamic_forcing) and model-predicted
     channels (prognostic) in x_prev.  Fixed channels (static, etc.) are
     carried forward unchanged via clone.
 
+    Each group carries an explicit source slice, so this is correct however the
+    sources interleave — it never assumes that a field type's channels are
+    contiguous or that they arrive in the same order as the destination.
+
     Parameters
     ----------
     x_prev : Tensor  [B, C, ...]
         Full input tensor from the previous step.
     x_dynfrc : Tensor  [B, C_dyn, ...]
-        New dynamic-forcing channels from the dataset, in the same relative
-        order as the dataset-driven groups appear in slices.
-    y_pred : Tensor  [B, C_pred, ...]
-        Model output, in the same relative order as the predicted groups
-        appear in slices.
-    slices : dict[str, slice]
+        New dynamic-forcing channels from the dataset, source-major.
+    y_pred : Tensor  [B, C_out, ...]
+        The **full** model output — prognostic and diagnostic channels, exactly
+        as the model emits them.  Do not pre-slice it down to the prognostics:
+        with several sources those are not a leading contiguous block, and the
+        group's ``src_slice`` already indexes them.
+    groups : dict[str, ChannelGroup]
         From build_channel_layout().
 
     Returns
@@ -157,17 +245,11 @@ def update_x(x_prev, x_dynfrc, y_pred, slices):
     """
     x_new = x_prev.clone()
 
-    dyn_offset = 0
-    pred_offset = 0
-    for name, sl in slices.items():
-        n = sl.stop - sl.start
-        if name in _DATASET_DRIVEN:
-            x_new[:, sl, ...] = x_dynfrc[:, dyn_offset : dyn_offset + n, ...]
-            dyn_offset += n
-        elif name in _MODEL_PREDICTED:
-            x_new[:, sl, ...] = y_pred[:, pred_offset : pred_offset + n, ...]
-            pred_offset += n
-        # fixed groups: already present via clone()
+    for group in groups.values():
+        if group.src_slice is None:
+            continue  # fixed group: already present via clone()
+        source = x_dynfrc if group.field_type in _DATASET_DRIVEN else y_pred
+        x_new[:, group.x_slice, ...] = source[:, group.src_slice, ...]
 
     return x_new
 
@@ -293,7 +375,12 @@ class ChannelSchema:
     # ------------------------------------------------------------------
 
     def save(self, path: str) -> None:
-        """Write the schema as YAML (atomically: temp file + rename)."""
+        """Write the schema as YAML (atomically: temp file + rename).
+
+        The staging file is per-process: concurrent writers (multiple ranks
+        saving the schema at init) would otherwise interleave their dumps into
+        one shared ``<path>.tmp`` and rename a corrupted file into place.
+        """
         payload = {
             "schema_version": _SCHEMA_VERSION,
             "input": self.input_layout,
@@ -304,10 +391,15 @@ class ChannelSchema:
         parent = os.path.dirname(path)
         if parent:
             os.makedirs(parent, exist_ok=True)
-        tmp = path + ".tmp"
-        with open(tmp, "w") as f:
-            yaml.safe_dump(payload, f, sort_keys=False)
-        os.replace(tmp, path)
+        tmp = f"{path}.tmp.{os.getpid()}"
+        try:
+            with open(tmp, "w") as f:
+                yaml.safe_dump(payload, f, sort_keys=False)
+            os.replace(tmp, path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
+            raise
         logger.info("ChannelSchema saved to %s", path)
 
     @classmethod

@@ -37,6 +37,7 @@ import logging
 import subprocess
 
 from credit.cli._common import _PERLMUTTER_ENV_SETUP
+from credit.conda_env import torchrun_path
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +147,12 @@ def _module_lines(options):
 
 
 def _resolve_torchrun(conda):
-    """Return the torchrun path for a conda env name or full path."""
-    if "/" in conda:
-        return f"{conda}/bin/torchrun"
-    return f"$(conda info --base)/envs/{conda}/bin/torchrun"
+    """Return the torchrun path for a conda env name or full path.
+
+    Thin wrapper over :func:`credit.conda_env.torchrun_path`, kept as a module
+    -level name because the Slurm script builders call it in several places.
+    """
+    return torchrun_path(conda)
 
 
 def _submit_script(script, save_loc, launch):

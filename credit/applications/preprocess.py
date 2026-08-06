@@ -5,15 +5,16 @@ import os
 import shutil
 import sys
 import warnings
+from datetime import UTC, datetime
 from os.path import expandvars
 
 import torch
 import torch.distributed as dist
 import yaml
-from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import get_rank_info, setup
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
@@ -21,6 +22,24 @@ from credit.seed import seed_everything
 from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
 
 logger = logging.getLogger("preprocess")
+
+
+def _backup_existing_file(path: str) -> str | None:
+    """Move an existing file aside with a UTC timestamp before replacement."""
+    if not os.path.isfile(path):
+        return None
+
+    root, extension = os.path.splitext(path)
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    backup_path = f"{root}_{timestamp}{extension}"
+    suffix = 1
+    while os.path.exists(backup_path):
+        backup_path = f"{root}_{timestamp}_{suffix}{extension}"
+        suffix += 1
+
+    shutil.move(path, backup_path)
+    logger.warning("Existing scaler moved from %s to %s.", path, backup_path)
+    return backup_path
 
 
 def _scaler_probe_range(scaler):
@@ -169,7 +188,7 @@ Examples:
     try:
         with open(args.model_config) as config_file:
             conf = yaml.safe_load(config_file)
-    except Exception as exc:
+    except (OSError, yaml.YAMLError) as exc:
         print(f"ERROR: failed to load config file '{args.model_config}': {exc}", file=sys.stderr)
         sys.exit(1)
     local_rank, world_rank, world_size = get_rank_info(effective_mode(conf))
@@ -273,8 +292,10 @@ Examples:
     if rank == 0:
         logger.info("Combining scalers.")
         combined_scaler = combine_scaler_dicts(all_scalers)
-        save_scaler_dict(combined_scaler, scaler_block.scaler_path)
-        logger.info("Saved fitted scaler to %s", scaler_block.scaler_path)
+        scaler_path = expandvars(scaler_block.scaler_path)
+        _backup_existing_file(scaler_path)
+        save_scaler_dict(combined_scaler, scaler_path)
+        logger.info("Saved fitted scaler to %s", scaler_path)
         logger.info("Fitted scaler values by variable:")
         log_fitted_scalers(combined_scaler, logger)
 

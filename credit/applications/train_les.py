@@ -20,7 +20,7 @@ from credit.distributed import distributed_model_wrapper, setup, get_rank_info
 
 from credit.seed import seed_everything
 
-from credit.losses.les_loss import LESLoss2D
+from credit.losses.gen_1.les_loss import LESLoss2D
 from credit.datasets.gen_1.les_singlestep import LESDataset
 from credit.metrics import LatWeightedMetrics
 

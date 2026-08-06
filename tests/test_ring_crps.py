@@ -77,7 +77,7 @@ class TestGen1Equivalence:
     """
 
     def _gen1_loss(self, members, y):
-        from credit.losses.kcrps import KCRPSLoss
+        from credit.losses.gen_1.kcrps import KCRPSLoss
 
         criterion = KCRPSLoss(reduction="none")  # biased=False default
         gathered = torch.cat(members, dim=0)  # Gather concatenates on dim 0

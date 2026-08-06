@@ -34,6 +34,7 @@ _CLASS_SOURCES = {
     "TISRDataset": ("credit.datasets.gen_2.tisr", "TISRDataset"),
     "build_channel_layout": ("credit.datasets.gen_2.channel_utils", "build_channel_layout"),
     "update_x": ("credit.datasets.gen_2.channel_utils", "update_x"),
+    "ChannelGroup": ("credit.datasets.gen_2.channel_utils", "ChannelGroup"),
 }
 
 

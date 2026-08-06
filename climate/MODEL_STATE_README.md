@@ -68,9 +68,9 @@ u_wind = state[:, u_start:u_end, :, :, :]
 ### After (Variable Access):
 ```python
 # Clear, self-documenting, bulletproof
-accessor = StateVariableAccessor(conf, tensor_type='state')
-u_wind = accessor.get_state_var(state, 'U')
-taux = accessor.get_state_var(prediction, 'TAUX')  # Automatically handles different tensor types
+accessor = StateVariableAccessor(conf, tensor_type="state")
+u_wind = accessor.get_state_var(state, "U")
+taux = accessor.get_state_var(prediction, "TAUX")  # Automatically handles different tensor types
 ```
 
 ## Three Tensor Types
@@ -82,11 +82,11 @@ The accessor handles three different tensor structures:
 **When:** After `shift_state_forward()`, before forcing added
 **Example:**
 ```python
-accessor = StateVariableAccessor(conf, tensor_type='state')
-u = accessor.get_state_var(state, 'U')      # ✓ Works
-ps = accessor.get_state_var(state, 'PS')    # ✓ Works
-taux = accessor.get_state_var(state, 'TAUX') # ✗ Error - not in state
-sst = accessor.get_state_var(state, 'SST')   # ✗ Error - forcing not in state
+accessor = StateVariableAccessor(conf, tensor_type="state")
+u = accessor.get_state_var(state, "U")  # ✓ Works
+ps = accessor.get_state_var(state, "PS")  # ✓ Works
+taux = accessor.get_state_var(state, "TAUX")  # ✗ Error - not in state
+sst = accessor.get_state_var(state, "SST")  # ✗ Error - forcing not in state
 ```
 
 ### 2. **'input'** - Model Input (with Forcing)
@@ -94,10 +94,10 @@ sst = accessor.get_state_var(state, 'SST')   # ✗ Error - forcing not in state
 **When:** After `build_input_with_forcing()`, ready for model
 **Example:**
 ```python
-accessor = StateVariableAccessor(conf, tensor_type='input')
-u = accessor.get_state_var(model_input, 'U')      # ✓ Works
-sst = accessor.get_state_var(model_input, 'SST')  # ✓ Works - forcing available!
-taux = accessor.get_state_var(model_input, 'TAUX') # ✗ Error - diagnostics not in input
+accessor = StateVariableAccessor(conf, tensor_type="input")
+u = accessor.get_state_var(model_input, "U")  # ✓ Works
+sst = accessor.get_state_var(model_input, "SST")  # ✓ Works - forcing available!
+taux = accessor.get_state_var(model_input, "TAUX")  # ✗ Error - diagnostics not in input
 ```
 
 ### 3. **'output'** - Model Prediction (with Diagnostics)
@@ -105,26 +105,26 @@ taux = accessor.get_state_var(model_input, 'TAUX') # ✗ Error - diagnostics not
 **When:** Model prediction output
 **Example:**
 ```python
-accessor = StateVariableAccessor(conf, tensor_type='output')
-u = accessor.get_state_var(prediction, 'U')       # ✓ Works
-taux = accessor.get_state_var(prediction, 'TAUX') # ✓ Works - diagnostics available!
-sst = accessor.get_state_var(prediction, 'SST')   # ✗ Error - forcing not in output
+accessor = StateVariableAccessor(conf, tensor_type="output")
+u = accessor.get_state_var(prediction, "U")  # ✓ Works
+taux = accessor.get_state_var(prediction, "TAUX")  # ✓ Works - diagnostics available!
+sst = accessor.get_state_var(prediction, "SST")  # ✗ Error - forcing not in output
 ```
 
 ## Use Cases
 
 ### 1. **Nudging to Observations**
 ```python
-accessor = StateVariableAccessor(conf, tensor_type='state')
+accessor = StateVariableAccessor(conf, tensor_type="state")
 
 # Get model state
-u_model = accessor.get_state_var(state, 'U')
+u_model = accessor.get_state_var(state, "U")
 
 # Apply nudging
 u_nudged = 0.9 * u_model + 0.1 * u_observations
 
 # Set back
-accessor.set_state_var(state, 'U', u_nudged)
+accessor.set_state_var(state, "U", u_nudged)
 ```
 
 ### 2. **Ocean-Atmosphere Coupling**
@@ -135,58 +135,58 @@ stepper = CAMulatorStepper(model, conf, device)
 prediction = stepper.step(state, dynamic_forcing, static_forcing)
 
 # Extract surface stresses for ocean
-taux = stepper.get_state_var(prediction, 'TAUX', tensor_type='output')
-tauy = stepper.get_state_var(prediction, 'TAUY', tensor_type='output')
+taux = stepper.get_state_var(prediction, "TAUX", tensor_type="output")
+tauy = stepper.get_state_var(prediction, "TAUY", tensor_type="output")
 
 # Send to ocean model
 ocean_model.set_surface_stress(taux, tauy)
 
 # Get SST from ocean for next timestep
 sst_new = ocean_model.get_sst()
-stepper.set_state_var(dynamic_forcing, 'SST', sst_new, tensor_type='input')
+stepper.set_state_var(dynamic_forcing, "SST", sst_new, tensor_type="input")
 ```
 
 ### 3. **Flux Correction**
 ```python
-output_accessor = StateVariableAccessor(conf, tensor_type='output')
+output_accessor = StateVariableAccessor(conf, tensor_type="output")
 
 # Get predicted fluxes
-shflx = output_accessor.get_state_var(prediction, 'SHFLX')
-lhflx = output_accessor.get_state_var(prediction, 'LHFLX')
+shflx = output_accessor.get_state_var(prediction, "SHFLX")
+lhflx = output_accessor.get_state_var(prediction, "LHFLX")
 
 # Apply correction
 shflx_corrected = apply_bias_correction(shflx, climatology)
 lhflx_corrected = apply_bias_correction(lhflx, climatology)
 
 # Set back
-output_accessor.set_state_var(prediction, 'SHFLX', shflx_corrected)
-output_accessor.set_state_var(prediction, 'LHFLX', lhflx_corrected)
+output_accessor.set_state_var(prediction, "SHFLX", shflx_corrected)
+output_accessor.set_state_var(prediction, "LHFLX", lhflx_corrected)
 ```
 
 ### 4. **Custom Physics Parameterizations**
 ```python
 # Extract state variables
-t = accessor.get_state_var(state, 'T')
-q = accessor.get_state_var(state, 'Qtot')
-ps = accessor.get_state_var(state, 'PS')
+t = accessor.get_state_var(state, "T")
+q = accessor.get_state_var(state, "Qtot")
+ps = accessor.get_state_var(state, "PS")
 
 # Apply custom convection scheme
 t_conv, q_conv, prect = my_convection_scheme(t, q, ps)
 
 # Update state
-accessor.set_state_var(state, 'T', t_conv)
-accessor.set_state_var(state, 'Qtot', q_conv)
+accessor.set_state_var(state, "T", t_conv)
+accessor.set_state_var(state, "Qtot", q_conv)
 
 # After model run, update precipitation
-output_accessor.set_state_var(prediction, 'PRECT', prect, tensor_type='output')
+output_accessor.set_state_var(prediction, "PRECT", prect, tensor_type="output")
 ```
 
 ### 5. **Testing and Debugging**
 ```python
 # Zero out a variable for sensitivity test
-accessor = StateVariableAccessor(conf, tensor_type='state')
-u_zeros = torch.zeros_like(accessor.get_state_var(state, 'U'))
-accessor.set_state_var(state, 'U', u_zeros)
+accessor = StateVariableAccessor(conf, tensor_type="state")
+u_zeros = torch.zeros_like(accessor.get_state_var(state, "U"))
+accessor.set_state_var(state, "U", u_zeros)
 
 # Check what variables are available
 available = accessor.list_available_vars()
@@ -199,18 +199,18 @@ print(f"Available in state: {list(available.keys())}")
 
 ```python
 # Initialize
-accessor = StateVariableAccessor(conf, tensor_type='state')  # or 'input', 'output'
+accessor = StateVariableAccessor(conf, tensor_type="state")  # or 'input', 'output'
 
 # Get variable
-var = accessor.get_state_var(tensor, 'VAR_NAME')
-var_t0 = accessor.get_state_var(tensor, 'VAR_NAME', time_idx=0)
+var = accessor.get_state_var(tensor, "VAR_NAME")
+var_t0 = accessor.get_state_var(tensor, "VAR_NAME", time_idx=0)
 
 # Set variable
-accessor.set_state_var(tensor, 'VAR_NAME', new_data)
-accessor.set_state_var(tensor, 'VAR_NAME', new_data, time_idx=0)
+accessor.set_state_var(tensor, "VAR_NAME", new_data)
+accessor.set_state_var(tensor, "VAR_NAME", new_data, time_idx=0)
 
 # Query info
-info = accessor.get_var_info('VAR_NAME')
+info = accessor.get_var_info("VAR_NAME")
 available = accessor.list_available_vars()
 ```
 
@@ -225,12 +225,12 @@ prediction = stepper.step(state, dynamic_forcing, static_forcing)
 new_state = stepper.state_manager.shift_state_forward(state, prediction)
 
 # Variable access (convenience methods)
-var = stepper.get_state_var(tensor, 'VAR', tensor_type='state')
-stepper.set_state_var(tensor, 'VAR', new_data, tensor_type='state')
+var = stepper.get_state_var(tensor, "VAR", tensor_type="state")
+stepper.set_state_var(tensor, "VAR", new_data, tensor_type="state")
 
 # Direct accessor access
-stepper.state_accessor   # For 'state' tensors
-stepper.input_accessor   # For 'input' tensors
+stepper.state_accessor  # For 'state' tensors
+stepper.input_accessor  # For 'input' tensors
 stepper.output_accessor  # For 'output' tensors
 ```
 
@@ -249,8 +249,8 @@ from Model_State import StateVariableAccessor, StateManager, CAMulatorStepper
 stepper = CAMulatorStepper(model, conf, device)
 
 # Access variables anywhere
-u_wind = stepper.get_state_var(state, 'U', tensor_type='state')
-taux = stepper.get_state_var(prediction, 'TAUX', tensor_type='output')
+u_wind = stepper.get_state_var(state, "U", tensor_type="state")
+taux = stepper.get_state_var(prediction, "TAUX", tensor_type="output")
 ```
 
 ## Error Handling
@@ -259,17 +259,17 @@ The accessor provides clear error messages:
 
 ```python
 # Variable not in config
-accessor.get_state_var(state, 'INVALID')
+accessor.get_state_var(state, "INVALID")
 # ValueError: Variable 'INVALID' not found in config. Available variables: ['U', 'V', ...]
 
 # Variable not in current tensor type
-accessor.get_state_var(state, 'TAUX')  # state accessor
+accessor.get_state_var(state, "TAUX")  # state accessor
 # ValueError: Variable 'TAUX' not available in 'state' tensor.
 #             Reason: Diagnostics not in state tensor
 
 # Shape mismatch
 wrong_shape = torch.randn(1, 16, 1, 192, 288)
-accessor.set_state_var(state, 'U', wrong_shape)
+accessor.set_state_var(state, "U", wrong_shape)
 # ValueError: Shape mismatch for 'U'. Expected (1, 32, 1, 192, 288), got (1, 16, 1, 192, 288)
 ```
 

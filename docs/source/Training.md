@@ -98,11 +98,38 @@ pbs:
     walltime: "04:00:00"
     ncpus: 8
     ngpus: 1
-    mem: ‘128GB’
+    mem: ‘128GB’               # optional: omit to scale memory with ngpus
     queue: ‘casper’
-    gpu_type: ‘a100_80gb’      # a100_80gb, v100, h100, etc.
+    gpu_type: ‘a100_80gb’      # optional: a100_80gb, v100, h100, etc.
+                               # omit it to run on any available NVIDIA GPGPU
     conda: "credit"
 ```
+
+**Casper memory scaling** — when `mem` is not set (in the config or via `--mem`), `credit submit`
+sizes the request to the share of the node the job occupies: 64GB for a single GPU, growing
+linearly to (nearly) the whole node's memory when the job takes every GPU on that node type.
+Node sizes come from the [Casper hardware
+table](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/#casper-hardware):
+
+| `gpu_type` | GPUs/node | 1 GPU | 2 GPUs | 4 GPUs | 8 GPUs |
+|---|---|---|---|---|---|
+| unset (any GPGPU) / `v100` | 8 (1152GB) | 64GB | 224GB | 512GB | 1088GB |
+| `a100_80gb` / `h100` | 4 (1024GB) | 64GB | 368GB | 960GB | — |
+
+**Queue / cluster mismatch** — a `pbs:` block written for one machine is easy to reuse against the
+other, and PBS only rejects the bad queue after the job is submitted. `credit submit` therefore fails
+up front when the resolved queue belongs to the other cluster:
+
+```
+$ credit submit --cluster casper -c derecho_config.yml --dry-run
+ERROR: queue 'main' is a Derecho queue, but this job targets casper.
+Casper queues: casper, cpu, gpgpu, gpudev, htc, l40, largemem, rda, vis.
+Fix the 'queue:' in the config's pbs block, or override it with --queue.
+```
+
+Pass `--queue casper` to override the config for a one-off run, or edit the block. Queues valid on
+both machines (`gpudev`) and unrecognized/site-specific queue names are left alone. `credit check`
+reports which cluster a config's queue implies.
 
 **Resolution order** — the same setting can come from three places, highest priority first:
 
@@ -299,7 +326,7 @@ to its column-parallel and row-parallel projection layers:
 
 ```python
 class MyBlock(nn.Module):
-    _tp_col = "proj_up"   # attribute path for the column-parallel layer
+    _tp_col = "proj_up"  # attribute path for the column-parallel layer
     _tp_row = "proj_out"  # attribute path for the row-parallel layer
     ...
 ```
@@ -321,9 +348,10 @@ class FeedForward(nn.Module):
     _tp_col = "layers.1"  # Conv2d(dim → dim*mult)
     _tp_row = "layers.4"  # Conv2d(dim*mult → dim)
 
+
 class Attention(nn.Module):
-    _tp_col = "to_qkv"   # Conv2d(dim → inner_dim*3)
-    _tp_row = "to_out"   # Conv2d(inner_dim → dim)
+    _tp_col = "to_qkv"  # Conv2d(dim → inner_dim*3)
+    _tp_row = "to_out"  # Conv2d(inner_dim → dim)
 ```
 
 Any model block that does **not** declare `_tp_col`/`_tp_row` is left
@@ -433,7 +461,8 @@ credit submit --cluster derecho -c config.yml --nodes 2
 credit submit --cluster derecho -c config.yml --nodes 2 --launcher pbsdsh
 ```
 
-Both launchers apply to `--mode train` and `--mode preprocess`. Single-node jobs always
+Both launchers apply to every `--mode` (`train`, `preprocess`, `rollout`, `realtime`) —
+each mode requests `select=<nodes>` and launches across all of them. Single-node jobs always
 use `torchrun --standalone` regardless of `--launcher`. The `pbsdsh` launcher bakes the
 fully-resolved conda/module environment into a per-node script, because pbsdsh's spawned
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
@@ -444,6 +473,13 @@ libfabric for inter-node communication. Use `--dry-run` to compare the two scrip
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
 Resource settings are read from the `pbs:` section of your config (see above); CLI flags
 override them when provided.
+
+```{note}
+`pbs.nodes` applies to *every* `--mode`, not just `train`. If your config sets
+`nodes: 8` for training, `--mode rollout` / `realtime` / `preprocess` will also request
+8 nodes unless you pass `--nodes 1`. The job plan printed before submission shows the
+node count; use `--dry-run` to check the `select=` line first.
+```
 
 ```bash
 # Minimal — all settings come from the pbs: block in config.yml
