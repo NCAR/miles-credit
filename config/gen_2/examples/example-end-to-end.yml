@@ -155,6 +155,12 @@ trainer:
 # for forecast_len > 1 rollout.
 preblocks:
   per_step:
+    # Move every tensor to the GPU first, so log_transform / scaler / concat
+    # operate on device-resident data instead of copying on every block.
+    to_device:
+      type: to_device
+      args:
+        device: cuda
     log_trans:
       type: "log_transform"
       args:
