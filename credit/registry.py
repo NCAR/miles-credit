@@ -58,7 +58,9 @@ def load_custom_objects(conf):
     - ``credit.models.base_model.BaseModel`` for models
     - ``credit.postblock.base.BasePostblock`` for postblocks
     - ``torch.nn.Module`` for losses
-    - ``torch.nn.Module`` for metrics
+    - ``torch.nn.Module`` for metrics, but a metric is called as
+      ``metric(full_data_dict)``, so subclass
+      ``credit.metrics.base.BaseVariableMetric`` unless it handles that itself
 
     Note: CREDIT's built-in types use snake_case (``unet``, ``log_transform``).
     Use a distinct key to avoid accidentally overwriting a built-in.
@@ -122,15 +124,24 @@ def load_custom_objects(conf):
             my_post:
               type: MyPostBlock
 
-        # loss: referenced as loss.training_loss
+        # loss: a whole custom loss goes in loss.type, replacing "base" (BaseLoss)
         loss:
-          training_loss: MyLoss
+          type: MyLoss
 
-        # metric: referenced under metrics.type (single) or metrics.args.metrics (combined)
+        # a custom *univariate* loss — one BaseLoss applies to each variable —
+        # goes in args.training_loss instead (same for validation_loss)
+        loss:
+          type: base
+          args:
+            training_loss: MyLoss
+
+        # metric: one entry in the combined group, or alone as metrics.type
         metrics:
           type: combined
           args:
             metrics: {rmse: {}, MyMetric: {}}
+        metrics:
+          type: MyMetric
 
     Args:
         conf (dict): Top-level config dict. If ``custom_objects`` is absent or
