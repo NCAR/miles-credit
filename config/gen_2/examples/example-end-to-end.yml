@@ -366,6 +366,24 @@ inference:
   mode: ddp                        # none | ddp | fsdp
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/rollout'
 
+  # Rollout has no truth, so the y_target_processed twin above dies on KeyError: 'y'.
+  # Same chain minus the twin; keep the scaler settings in sync with training.
+  postblocks:
+    per_step:
+      reconstruct:
+        type: reconstruct
+      scaler:
+        type: bridgescaler_transform
+        args:
+          scaler_path: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+          variables: []
+          spatial_variables: ['ERA5/prognostic/2d/SP']
+          method: inverse_transform
+      log_trans:
+        type: "exp_transform"
+        args:
+          variables: 'ERA5/diagnostic/2d/total_precipitation'
+
   batch_forecast:
     forecast_length: "10d"             # total forecast duration (total valid lead time)
     first_init_date: "2020-01-01"      # first init time; must be within data date range
