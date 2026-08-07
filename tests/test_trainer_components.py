@@ -48,6 +48,33 @@ def _tmp_save_loc(tmp_path, monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "_DEFAULT_SAVE_LOC", str(save_loc))
 
 
+@pytest.fixture(autouse=True)
+def _pin_trainer_device(monkeypatch):
+    """Keep constructed trainers on the cuda-or-cpu device this module targets.
+
+    ``select_device()`` prefers MPS on Apple Silicon, but the toy models and
+    fake batches here live on CPU (see the module docstring). Left unpinned the
+    trainer would move batches to MPS while the model params stay on CPU, so
+    every train/validate step raises a device mismatch. Skipping MPS restores
+    the original CPU/CUDA behaviour without touching production code. The real
+    ``credit.distributed.select_device`` is untouched (see the device test).
+    """
+    if not _TRAINER_GEN2_AVAILABLE:
+        return
+    import credit.trainers.base_trainer as base_trainer
+
+    def _cuda_or_cpu(local_rank=0, device=None):
+        if device is not None:
+            return torch.device(device)
+        if torch.cuda.is_available():
+            idx = local_rank % torch.cuda.device_count()
+            torch.cuda.set_device(idx)
+            return torch.device(f"cuda:{idx}")
+        return torch.device("cpu")
+
+    monkeypatch.setattr(base_trainer, "select_device", _cuda_or_cpu)
+
+
 def _tiny_model():
     return nn.Linear(4, 2)
 
@@ -189,13 +216,17 @@ class TestBaseTrainerInit:
         assert trainer.distributed is False
         assert trainer.rank == 0
 
-    def test_device_is_cpu_when_no_cuda(self, tmp_path):
-        conf = _minimal_conf()
-        conf["save_loc"] = str(tmp_path)
-        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
-        # In a CPU-only test environment device should be cpu
+    def test_select_device_without_cuda(self):
+        """Without CUDA, select_device falls back to MPS (Apple Silicon) or CPU.
+
+        Tests the real credit.distributed.select_device, not the trainer's
+        device — the module autouse fixture pins the trainer to cuda-or-cpu, so
+        trainer.device would not reflect the real fallback here.
+        """
+        from credit.distributed import select_device
+
         if not torch.cuda.is_available():
-            assert trainer.device.type == "cpu"
+            assert select_device(0).type in ("cpu", "mps")
 
     def test_default_display_metrics(self, tmp_path):
         conf = _minimal_conf()

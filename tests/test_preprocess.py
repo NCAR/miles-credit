@@ -213,9 +213,9 @@ def test_batches_have_expected_structure(processed_batches):
         inp = batch["input"][SOURCE]
         for var in (VAR_T, VAR_Q, VAR_SP):
             assert var in inp
-        # (B, n_levels, T, lat, lon); 64x32 store -> lat=64, lon=32.
-        assert inp[VAR_T].shape == (2, len(LEVELS), 1, 64, 32)
-        assert inp[VAR_SP].shape == (2, 1, 1, 64, 32)
+        # (B, n_levels, T, lat, lon); WB2 "64x32" is 64 lon x 32 lat -> lat=32, lon=64.
+        assert inp[VAR_T].shape == (2, len(LEVELS), 1, 32, 64)
+        assert inp[VAR_SP].shape == (2, 1, 1, 32, 64)
         assert not torch.isnan(inp[VAR_T]).any()
 
 
