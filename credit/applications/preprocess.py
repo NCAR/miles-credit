@@ -236,6 +236,28 @@ Examples:
         setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
+    # Build preblocks and validate the scaler layout *before* touching the dataset,
+    # so a config error fails fast without waiting on (network-backed) data loading.
+    preblocks = build_preblocks(conf)
+    # Collect *every* scaler block, not just the first: a config may pair a
+    # standard-scaled group of variables with a quantile-scaled group, which
+    # requires two BridgeScalerTransform blocks (scaler_type is one value per block).
+    scaler_block_keys = [k for k, v in preblocks.items() if isinstance(v, BridgeScalerTransform)]
+    if not scaler_block_keys:
+        raise ValueError("BridgeScalerTransform not found in preblocks.")
+    # Each scaler is saved to its own scaler_path (training loads each block's file
+    # independently). Two blocks sharing a path would overwrite each other here, so
+    # reject it early — `credit check` flags the same condition statically.
+    seen_paths: dict[str, str] = {}
+    for scaler_key in scaler_block_keys:
+        path = expandvars(preblocks[scaler_key].scaler_path)
+        if path in seen_paths:
+            raise ValueError(
+                f"BridgeScalerTransform blocks '{seen_paths[path]}' and '{scaler_key}' both write to "
+                f"scaler_path '{path}'. Each scaler preblock must use a distinct scaler_path."
+            )
+        seen_paths[path] = scaler_key
+
     # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
     # Using forecast_len > 1 would feed the same timestamps at multiple step
     # offsets into the scaler fit, duplicating samples and skewing statistics.
@@ -250,14 +272,6 @@ Examples:
     )
     seed = conf.get("seed", 42) + rank
     seed_everything(seed)
-    preblocks = build_preblocks(conf)
-    scaler_block_key = None
-    for k, v in preblocks.items():
-        if isinstance(v, BridgeScalerTransform):
-            scaler_block_key = k
-            break
-    if scaler_block_key is None:
-        raise ValueError("BridgeScalerTransform not found in preblocks.")
     _bpe = trainer_conf.get("batches_per_epoch", 0) or 0
     if hasattr(train_loader.sampler, "batches_per_epoch"):
         dataset_batches = train_loader.sampler.batches_per_epoch()
@@ -270,29 +284,38 @@ Examples:
     for i in range(batches_per_epoch):
         logger.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
         batch = next(dl)
-        processed_batch = apply_preblocks_before_scaler(preblocks, batch, device)
-        preblocks[scaler_block_key].fit_scaler_batch(processed_batch)
+        # Fit each scaler on the batch as it exists just before that scaler in the
+        # preblock chain. Re-applying the pre-scaler preblocks per scaler is safe
+        # because preblocks never mutate the raw batch (see apply_preblocks_before_scaler).
+        for scaler_key in scaler_block_keys:
+            processed_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=scaler_key)
+            preblocks[scaler_key].fit_scaler_batch(processed_batch)
     del dl  # iterator lives only here; refcount → 0, workers shut down immediately
     del train_loader
 
-    scaler_block = preblocks[scaler_block_key]
-    # Gather the per-rank fitted scaler dicts onto rank 0 (or run single-process).
+    # In multi-GPU runs every rank must reach the gather collectives together and
+    # in the same order; the ModuleDict preserves config order identically on all ranks.
     if dist.is_initialized() and world_size > 1:
         barrier()
-        all_scalers = [None] * world_size if rank == 0 else None
-        gather_object(move_scaler_dict_to_cpu(scaler_block.scaler), all_scalers, dst=0)
-    else:
-        all_scalers = [scaler_block.scaler]
 
-    if rank == 0:
-        logger.info("Combining scalers.")
-        combined_scaler = combine_scaler_dicts(all_scalers)
-        scaler_path = expandvars(scaler_block.scaler_path)
-        _backup_existing_file(scaler_path)
-        save_scaler_dict(combined_scaler, scaler_path)
-        logger.info("Saved fitted scaler to %s", scaler_path)
-        logger.info("Fitted scaler values by variable:")
-        log_fitted_scalers(combined_scaler, logger)
+    for scaler_key in scaler_block_keys:
+        scaler_block = preblocks[scaler_key]
+        # Gather the per-rank fitted scaler dicts onto rank 0 (or run single-process).
+        if dist.is_initialized() and world_size > 1:
+            all_scalers = [None] * world_size if rank == 0 else None
+            gather_object(move_scaler_dict_to_cpu(scaler_block.scaler), all_scalers, dst=0)
+        else:
+            all_scalers = [scaler_block.scaler]
+
+        if rank == 0:
+            logger.info("Combining scalers for preblock '%s'.", scaler_key)
+            combined_scaler = combine_scaler_dicts(all_scalers)
+            scaler_path = expandvars(scaler_block.scaler_path)
+            _backup_existing_file(scaler_path)
+            save_scaler_dict(combined_scaler, scaler_path)
+            logger.info("Saved fitted scaler for preblock '%s' to %s", scaler_key, scaler_path)
+            logger.info("Fitted scaler values for preblock '%s' by variable:", scaler_key)
+            log_fitted_scalers(combined_scaler, logger)
 
     if dist.is_initialized():
         dist.destroy_process_group()

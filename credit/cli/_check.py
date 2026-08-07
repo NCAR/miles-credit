@@ -479,6 +479,36 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                     except Exception as exc:  # noqa: BLE001 — surfacing any construction failure is the point
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
+    _check_scaler_paths_unique(conf, rep)
+
+
+def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
+    """Ensure no two bridgescaler_transform preblocks share a scaler_path.
+
+    `credit preprocess` fits and saves each scaler block to its own scaler_path;
+    two blocks pointing at the same file would overwrite each other, and training
+    would then load the same (single-scaler-type) file for both groups.
+    """
+    seen: dict[str, str] = {}
+    for section in ("ic_only", "per_step"):
+        for name, block in ((conf.get("preblocks") or {}).get(section) or {}).items():
+            if not isinstance(block, dict) or block.get("type") != "bridgescaler_transform":
+                continue
+            path = (block.get("args") or {}).get("scaler_path")
+            if not isinstance(path, str) or not path:
+                continue
+            resolved = os.path.expandvars(path)
+            where = f"preblocks.{section}.{name}"
+            if resolved in seen:
+                rep.error(
+                    where,
+                    f"scaler_path '{path}' is also used by '{seen[resolved]}'. Each bridgescaler_transform "
+                    "block must use a distinct scaler_path, or preprocess overwrites one with the other.",
+                    fix="Give each scaler preblock its own scaler_path.",
+                )
+            else:
+                seen[resolved] = where
+
 
 def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
     from credit.models import _MODEL_REGISTRY, _load_model_entry

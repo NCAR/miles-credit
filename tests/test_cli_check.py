@@ -236,6 +236,33 @@ def test_preblock_scaler_accepts_scaler_params(conf):
     assert "preblocks.per_step.norm" not in _wheres(_run(conf))
 
 
+def _two_preblock_scalers(conf, path_a, path_b):
+    """Add standard + quantile scaler preblocks on disjoint variables."""
+    conf["preblocks"]["per_step"]["scaler_standard"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": path_a, "variables": ["ERA5/prognostic"], "scaler_type": "standard"},
+    }
+    conf["preblocks"]["per_step"]["scaler_quantile"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": path_b, "variables": ["ERA5/diagnostic"], "scaler_type": "quantile"},
+    }
+
+
+def test_two_preblock_scalers_distinct_paths_ok(conf, tmp_path):
+    """Standard + quantile scaler preblocks with their own paths are valid."""
+    _two_preblock_scalers(conf, str(tmp_path / "std.json"), str(tmp_path / "quant.json"))
+    assert not any("scaler_standard" in w or "scaler_quantile" in w for w in _wheres(_run(conf)))
+
+
+def test_two_preblock_scalers_shared_path_errors(conf, tmp_path):
+    """Two scaler preblocks writing to the same scaler_path is an error."""
+    shared = str(tmp_path / "shared.json")
+    _two_preblock_scalers(conf, shared, shared)
+    rep = _run(conf)
+    assert "preblocks.per_step.scaler_quantile" in _wheres(rep)
+    assert "distinct scaler_path" in _text(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
