@@ -9,7 +9,7 @@ import torch
 import torch.distributed as dist
 import tqdm
 
-from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema, resolve_num_levels
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.losses import BaseLoss, is_crps_loss
 from credit.metrics import BaseCombinedMetric, BaseVariableMetric
@@ -119,7 +119,7 @@ class TrainerERA5Gen2(BaseTrainer):
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         diag = vars_conf.get("diagnostic") or {}
-        num_levels = len(source.get("levels", []))
+        num_levels = resolve_num_levels(source, conf)
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         self.retain_graph = data_conf.get("retain_graph", False)

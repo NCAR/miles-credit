@@ -33,7 +33,12 @@ import torch
 import xarray as xr
 
 from credit.datasets.gen_2.local import LocalDataset
-from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
+from credit.datasets.gen_2.channel_utils import (
+    build_channel_layout,
+    resolve_level_ids,
+    resolve_num_levels,
+    update_x,
+)
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -69,7 +74,8 @@ def _inject_flat_schema(conf):
     # diagnostic_variables is the list of names shown in xarray output
     conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
     # level_ids: actual pressure/model-level values for xarray coordinate
-    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
+    # (positional indices when levels is null/omitted -> "all levels")
+    conf["data"]["level_ids"] = resolve_level_ids(src, conf)
     # scaler_type needed by save_netcdf_increment
     if "scaler_type" not in conf["data"]:
         conf["data"]["scaler_type"] = "std_new"
@@ -81,7 +87,7 @@ def _inject_tracer_inds(conf):
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
     src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
     vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
@@ -108,9 +114,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     """
     data_conf = conf["data"]
     src = data_conf["source"]["ERA5"]
-    levels = src["levels"]
+    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
     level_coord = src["level_coord"]
-    n_levels = len(levels)
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -124,8 +130,11 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
             n = n_levels if is_3d else 1
             return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
         if is_3d:
-            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
-            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+            # Explicit level subset -> select it; else take every level in file order.
+            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
+            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
+            m = torch.tensor(m_da.values, dtype=dtype)
+            s = torch.tensor(s_da.values, dtype=dtype)
         else:
             m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
             s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
@@ -204,7 +213,7 @@ def predict(rank, world_size, conf, p):
     src = conf["data"]["source"]["ERA5"]
     v = src["variables"]
     diag = v.get("diagnostic") or {}
-    n_levels = len(src["levels"])
+    n_levels = resolve_num_levels(src, conf)
     varnum_diag = len(diag.get("vars_2D", [])) + len(diag.get("vars_3D", [])) * n_levels
 
     lead_time_periods = conf["data"].get("lead_time_periods") or int(
