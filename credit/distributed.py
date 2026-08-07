@@ -28,6 +28,19 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Modes that run under a launcher (torchrun/mpirun) with more than one process.
+# Anything else is single-process. Keep this in sync with the values
+# ``credit.trainers.utils.effective_mode`` can return — omitting "fsdp2" here
+# silently collapses every rank to LOCAL_RANK=0, which puts all of a node's
+# ranks on cuda:0 and disables dataset sharding.
+DISTRIBUTED_MODES = (
+    "fsdp",
+    "fsdp2",
+    "ddp",
+    "domain_parallel",
+    "fsdp+domain_parallel",
+)
+
 
 def select_device(local_rank: int = 0, device: str | torch.device | None = None) -> torch.device:
     """Pick the torch device with precedence cuda → mps → cpu.
@@ -165,12 +178,13 @@ def get_rank_info(trainer_mode):
     """Gets rank and size information for distributed training.
 
     Args:
-        trainer_mode (str): The mode of training (e.g., 'fsdp', 'ddp').
+        trainer_mode (str): The mode of training (e.g., 'fsdp', 'ddp'). Anything
+            outside ``DISTRIBUTED_MODES`` is treated as single-process.
 
     Returns:
         tuple: A tuple containing LOCAL_RANK (int), WORLD_RANK (int), and WORLD_SIZE (int).
     """
-    if trainer_mode in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+    if trainer_mode in DISTRIBUTED_MODES:
         try:
             if "LOCAL_RANK" in os.environ:
                 # Environment variables set by torch.distributed.launch or torchrun

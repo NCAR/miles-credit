@@ -150,7 +150,9 @@ class TestRemapConvStateDict:
         model = NextGenWXFormer(**_tiny_model_conf())
         sd = remap_conv_state_dict(model.state_dict())
         assert sd["up_block1.conv.weight"].dim() == 4
-        assert sd["layers.0.0.convs.0.weight"].dim() == 4
+        # CrossEmbedLayer wraps each conv as Sequential(ZeroPad2d, Conv2d), so the
+        # conv itself is at index 1 within each `convs` entry.
+        assert sd["layers.0.0.convs.0.1.weight"].dim() == 4
 
     def test_unexpected_qkv_suffix_raises(self):
         with pytest.raises(KeyError, match="to_qkv"):
