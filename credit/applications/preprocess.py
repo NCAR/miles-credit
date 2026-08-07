@@ -15,7 +15,7 @@ from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
-from credit.distributed import get_rank_info, setup
+from credit.distributed import DISTRIBUTED_MODES, get_rank_info, setup
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.seed import seed_everything
@@ -237,7 +237,7 @@ Examples:
 
     # Preprocess only gathers CPU scaler objects, so gloo suffices regardless of trainer mode.
     backend = args.backend or "gloo"
-    if effective_mode(conf) in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+    if effective_mode(conf) in DISTRIBUTED_MODES:
         setup(rank, world_size, effective_mode(conf), backend)
 
     trainer_conf = conf["trainer"]
