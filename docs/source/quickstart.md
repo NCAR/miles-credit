@@ -1,39 +1,19 @@
 # Quickstart
 
-Get from zero to a running training job in under 10 minutes.
-This page covers the full loop — install, configure, submit, monitor, visualise, get help.
-Every command is copy-pasteable.
+With these instructions, you can get from zero to running a training session in under 10 minutes.
 
 ---
 
-## 1. Set up your environment
-
-:::{note}
-**NCAR users on Casper** — pre-built environment, no conda create needed:
-
+## 1. Install CREDIT 
+### NCAR Casper
+The [NCAR Casper](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/) is a heterogeneous cluster
+for data analysis, visualization, and AI/ML. For ML activities, it contains nodes with multiple generations of GPUs
+ranging from NVIDIA V100s, A100s, and H100s as well as AMD MI300As. 
 ```bash
-conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-casper
-
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-# Installs credit into the .local directory in your home directory.
-pip install --user -e .
+conda create -n credit-casper -y python=3.13 uv 
+uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/cu126
 ```
-:::
 
-:::{note}
-**NCAR users on Derecho:**
-
-```bash
-conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-derecho
-
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-pip install --user -e .
-```
-:::
-
-:::{note}
 **Other systems:**
 
 ```bash
