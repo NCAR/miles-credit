@@ -455,9 +455,9 @@ pbs: #derecho
   conda: "credit-derecho"
   project: "NAML0001"
   job_name: "wxformer_1deg_6hr_gen2"
-  walltime: "12:00:00"
-  nodes: 8
+  walltime: "08:00:00"
+  nodes: 1
   ncpus: 64
   ngpus: 4
-  mem: '480GB'
+  mem: '490GB'
   queue: 'main'
