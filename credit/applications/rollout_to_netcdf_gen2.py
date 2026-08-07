@@ -23,7 +23,6 @@ import yaml
 import logging
 import warnings
 import traceback
-from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
 from datetime import datetime, timedelta
@@ -47,7 +46,6 @@ from credit.models.checkpoint import load_model_state, load_state_dict_error_han
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.forecast import load_forecasts
-from credit.pbs import launch_script, launch_script_mpi
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -356,7 +354,6 @@ def _load_model(conf, device):
 def main():
     parser = ArgumentParser(description="Rollout AI-NWP forecasts (v2 data schema)")
     parser.add_argument("-c", dest="model_config", type=str, required=True, help="Path to v2 model configuration YAML.")
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit to PBS if 1.")
     parser.add_argument("-m", "--mode", type=str, default="none", help="Override predict mode: none | ddp | fsdp")
     parser.add_argument("-cpus", "--num_cpus", type=int, default=4, help="Number of CPU workers for async save pool.")
     parser.add_argument(
@@ -432,14 +429,6 @@ def main():
 
     if args.ensemble_size is not None:
         conf.setdefault("predict", {})["ensemble_size"] = args.ensemble_size
-
-    if args.launch:
-        script_path = Path(__file__).absolute()
-        if conf.get("pbs", {}).get("queue") == "casper":
-            launch_script(args.model_config, script_path)
-        else:
-            launch_script_mpi(args.model_config, script_path)
-        sys.exit()
 
     # load_forecasts returns [init_str, end_str] pairs; extract init times and
     # normalise to the T%HZ format expected by _save_worker / save_netcdf_increment.
