@@ -556,6 +556,27 @@ def effective_mode(conf):
     return trainer.get("mode", "none")
 
 
+def _migrate_legacy_checkpoint(model, checkpoint):
+    """Bring a just-loaded checkpoint up to the current parameter layout, in place.
+
+    The model's own load_state_dict pre-hooks handle this for the plain/DDP paths,
+    but FSDP2's ``set_model_state_dict`` reconciles the checkpoint against current
+    parameter names before load_state_dict runs, so the hooks fire too late there.
+    Applying the migration to the raw dict makes every path behave the same.
+
+    A no-op for architectures with nothing to migrate.
+    """
+    state_dict = checkpoint.get("model_state_dict") if isinstance(checkpoint, dict) else None
+    if state_dict is None:
+        return
+    # Local import: credit.models pulls in the full model registry, and importing it
+    # at module scope makes credit.trainers.utils circular with it.
+    from credit.models.wxformer.crossformer import migrate_legacy_state_dict
+
+    # Checkpoints are written from the unwrapped module, so match names against it.
+    migrate_legacy_state_dict(getattr(model, "module", model), state_dict)
+
+
 def load_model_states_and_optimizer(conf, model, device):
     """Load model weights, optimizer, scheduler, and gradient scaler.
 
@@ -637,6 +658,7 @@ def load_model_states_and_optimizer(conf, model, device):
             # only adds an OOM-sized memory spike for the models that needed
             # sharding in the first place.
             checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
+            _migrate_legacy_checkpoint(model, checkpoint)
             if mode == "fsdp2":
                 from credit.parallel.fsdp2 import fsdp2_load_state_dict
 
@@ -657,6 +679,7 @@ def load_model_states_and_optimizer(conf, model, device):
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
+        _migrate_legacy_checkpoint(model, checkpoint)
 
         if mode == "fsdp":
             optimizer = _make_optimizer(model)
