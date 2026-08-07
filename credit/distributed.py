@@ -29,6 +29,35 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def select_device(local_rank: int = 0, device: str | torch.device | None = None) -> torch.device:
+    """Pick the torch device with precedence cuda → mps → cpu.
+
+    Centralizes device selection so every application entry point agrees on
+    MPS support for Apple Silicon Macs (previously only the rollout apps had
+    an MPS branch; training and preprocessing fell back to CPU).
+
+    Args:
+        local_rank: Local rank for multi-GPU device assignment. Ignored when
+            ``device`` is provided or when CUDA is unavailable.
+        device: Optional explicit device override (e.g. from a CLI ``--device``
+            arg). When provided it takes precedence over auto-detection.
+
+    Returns:
+        torch.device — and as a side effect calls ``torch.cuda.set_device`` and
+        enables ``cudnn.benchmark`` when CUDA is selected.
+    """
+    if device is not None:
+        return torch.device(device)
+    if torch.cuda.is_available():
+        dev = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(local_rank % torch.cuda.device_count())
+        torch.backends.cudnn.benchmark = True
+        return dev
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def setup(rank, world_size, mode, backend="nccl", device_id=None):
     """Initializes the distributed process group.
 

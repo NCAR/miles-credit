@@ -32,7 +32,7 @@ data:
                     "surface_sensible_heat_flux"]
         dynamic_forcing: null
         static:
-          vars_2d: ["geopotential_at_surface",
+          vars_2D: ["geopotential_at_surface",
                     "standard_deviation_of_orography",
                     "land_sea_mask",
                     "low_vegetation_cover",
@@ -52,7 +52,7 @@ data:
         prognostic: null
         diagnostic: null
         dynamic_forcing:
-          var_2d: ['tisr']
+          vars_2D: ['tisr']
   start_datetime: "1979-01-01"
   end_datetime: "2018-12-31"
   timestep: "6h"

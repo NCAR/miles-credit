@@ -42,7 +42,7 @@ from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info, setup, distributed_model_wrapper
+from credit.distributed import get_rank_info, select_device, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
@@ -253,12 +253,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
         pool:        multiprocessing.Pool for async saves.
         rank/world_size: For DDP; single-GPU callers use (0, 1).
     """
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    else:
-        device = torch.device("cpu")
-
+    device = select_device(rank)
     dt = pd.Timedelta(conf["data"]["timestep"])
     fhr_per_step = int(dt.total_seconds() / 3600)
 

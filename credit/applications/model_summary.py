@@ -8,14 +8,13 @@ import logging
 from pathlib import Path
 from argparse import ArgumentParser
 
-import torch
 import torch.distributed as dist
 from torchsummary import summary
 
 from credit.models import load_model
 from credit.pbs import launch_script, launch_script_mpi
 from credit.seed import seed_everything
-from credit.distributed import distributed_model_wrapper
+from credit.distributed import distributed_model_wrapper, select_device
 
 
 warnings.filterwarnings("ignore")
@@ -49,10 +48,7 @@ def main(rank, world_size, conf, frames=1, height=640, width=1280):
 
     # Set device
 
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    )
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    device = select_device(rank)
 
     # Load model
 

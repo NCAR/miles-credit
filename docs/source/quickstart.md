@@ -8,66 +8,85 @@ With these instructions, you can get from zero to running a training session in 
 ### NCAR Casper
 The [NCAR Casper](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/) is a heterogeneous cluster
 for data analysis, visualization, and AI/ML. For ML activities, it contains nodes with multiple generations of GPUs
-ranging from NVIDIA V100s, A100s, and H100s as well as AMD MI300As. 
+ranging from NVIDIA V100s, A100s, and H100s as well as AMD MI300As. All NVIDIA GPUs on Casper work with CUDA 12.6. 
+Only A100s and H100s work with newer versions of CUDA. CUDA 13 (the default CUDA for PyTorch) does not work on Casper.
+
+If you want to use the AMD GPUs, you will need to build a separate environment with a PyTorch built on ROCm 6.4.
+
+Casper is well-suited for single node CREDIT training and inference and can support CREDIT training for 1 degree
+global models and short experimental runs or interactive applications. 
+
+To install CREDIT on Casper:
 ```bash
+module load conda
 conda create -n credit-casper -y python=3.13 uv 
+conda activate credit-casper
+# NVIDIA GPUs 
 uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/cu126
+# AMD GPUs
+uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/rocm6.4
 ```
 
-**Other systems:**
+### NCAR Derecho
+The NCAR Derecho system contains GPU nodes with 40 GB NVIDIA A100s linked with Cray Slingshot interconnect. If 
+you plan to conduct multi-node training or inference, you will need to use our special install script
+for Derecho to ensure that PyTorch is configured to route distributed operations over the fastest network.
 
+To install CREDIT on Derecho:
 ```bash
-conda create -n credit python=3.12
+module load conda
+git clone https://github.com/NCAR/miles-credit.git
+cd miles-credit
+./create_derecho_env.sh # Will install in the credit-derecho conda environment
+```
+
+### Other systems
+If you are running CREDIT on a Mac or a system with up-to-date GPU libraries
+and no other weirdness, you can follow the following path to installing CREDIT.
+```bash
+conda create -n credit -y python=3.13 uv
 conda activate credit
-pip install miles-credit
+uv pip install miles-credit
 ```
 
 Or install the main development branch:
 
 ```bash
+conda create -n credit -y python=3.13 uv
+conda activate credit
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install -e .
+uv pip install -e ".[develop]"
 ```
 :::
 
-Verify the install worked:
+Quick verify the install worked:
 
 ```bash
 credit --help
 ```
 
-> **More detail**: [Installation](installation.md) | [Getting Started](getting-started.md)
-
----
-
 ## 2. Generate a config
 
-CREDIT ships with ready-to-use configs for ERA5. Pick your resolution:
+After installing CREDIT, use `credit begin` to create a config file and
+an experiment directory. The wizard will ask you questions about datasets 
+and some model settings. Modify the config file later with more advanced options.
+
+### Validating a config with `credit check`
+
+`credit check` resolves everything a config names without running anything: every
+registry key (`model.type`, `trainer.type`, `loss.type`, `dataset_type`, each
+pre/postblock `type`), every block's `args` against the real constructor
+signature, the channel layout against the model geometry, the BaseLoss
+target-twin postblock chain, and the existence of every file the config points
+at. Each finding comes with the fix where the fix is unambiguous.
 
 ```bash
-# 1-degree ERA5 — good starting point, fast to train
-credit init --grid 1deg -o my_run.yml
-
-# 0.25-degree ERA5 — full resolution, needs more memory and time
-credit init --grid 0.25deg -o my_run.yml
+credit check -c my_experiment.yml            # static checks, no data touched
+credit check -c my_experiment.yml --deep     # also construct model/blocks/loss
+credit check -c my_experiment.yml --strict   # exit non-zero on warnings too
+credit check -c my_experiment.yml --json     # machine-readable output
 ```
-
-::::{note}
-**NCAR users**: data paths in these configs already point to
-`/glade/campaign/cisl/aiml/ksha/CREDIT_data/` — readable by all NCAR staff.
-`save_loc` defaults to `/glade/derecho/scratch/$USER/CREDIT_runs/...`
-**No edits required to get started.**
-::::
-
-Open `my_run.yml` and find the `# USER SETTINGS` block. The only things you
-may want to change before your first run:
-
-| Field | Default | Notes |
-|-------|---------|-------|
-| `trainer.num_epoch` | `5` | Epochs per PBS job. Increase if walltime allows. |
-| `trainer.train_batch_size` | `8` | Per-GPU. Reduce if you hit OOM. |
-| `save_loc` | scratch dir | Where checkpoints and logs are written. |
 
 > **More detail**: [Config reference](config.md) | [Training guide](Training.md)
 
@@ -170,7 +189,7 @@ On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](t
 
 ---
 
-## 5. Visualise a prediction
+## 5. Visualize a prediction
 
 Once at least one checkpoint exists, run a forward pass and produce a
 3-panel global map (truth | prediction | difference) for any field:

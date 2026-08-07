@@ -476,7 +476,6 @@ def _build_config(state: dict) -> dict:
     pad_lat, pad_lon = _padding_totals(state["preset"]["height"], state["preset"]["width"])
     scaler_path = os.path.join(state["save_loc"], "standard_scaler.json")
     static = state["preset"].get("static", [])
-    fill_variables = [f"ERA5/static/2d/{name}" for name in static if name == "sea_ice_cover"]
     config = {
         "save_loc": state["save_loc"],
         "seed": state["seed"],
@@ -486,7 +485,7 @@ def _build_config(state: dict) -> dict:
             "per_step": {
                 "fill_vals": {
                     "type": "fill_values",
-                    "args": {"rules": [{"search": "nan", "fill": 0.0}], "variables": fill_variables},
+                    "args": {"rules": [{"search": "nan", "fill": 0.0}], "variables": []},
                 },
                 "scaler": {
                     "type": "bridgescaler_transform",
@@ -582,10 +581,10 @@ def _build_config(state: dict) -> dict:
             "load_scheduler": False,
             "learning_rate": 1.0e-3,
             "weight_decay": 0,
-            "train_batch_size": 4,
-            "valid_batch_size": 4,
-            "batches_per_epoch": 5,
-            "valid_batches_per_epoch": 5,
+            "train_batch_size": state.get("batch_size", 4),
+            "valid_batch_size": state.get("batch_size", 4),
+            "batches_per_epoch": state.get("batches_per_epoch", 5),
+            "valid_batches_per_epoch": state.get("batches_per_epoch", 5),
             "start_epoch": 0,
             "num_epoch": 2,
             "epochs": 2,
@@ -769,6 +768,8 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
     start, end, timestep, valid_start, valid_end = _date_range(preset)
     vars_3d = _prompt_list("Prognostic 3D variables", preset["vars_3D"])
     vars_2d = _prompt_list("Prognostic 2D variables", preset["vars_2D"])
+    batch_size = _prompt_int("Batch size", 4)
+    batches_per_epoch = _prompt_int("Batches per epoch", 5)
     parallelism_data = _parallelism_data()
     nodes = gpus = 1
     pbs = None
@@ -790,6 +791,8 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
         "valid_end": valid_end,
         "vars_3D": vars_3d,
         "vars_2D": vars_2d,
+        "batch_size": batch_size,
+        "batches_per_epoch": batches_per_epoch,
         "parallelism_data": parallelism_data,
         "nodes": nodes,
         "gpus": gpus,

@@ -86,11 +86,11 @@ the metric's key:
 
 ```python
 {
-  "rmse/ERA5/prognostic/3d/temperature": 1.83,
-  "rmse/ERA5/prognostic/2d/SP": 142.6,
-  "rmse": 0.97,            # weighted aggregate across variables
-  "r2score/ERA5/...": 0.94,
-  "r2score": 0.91,
+    "rmse/ERA5/prognostic/3d/temperature": 1.83,
+    "rmse/ERA5/prognostic/2d/SP": 142.6,
+    "rmse": 0.97,  # weighted aggregate across variables
+    "r2score/ERA5/...": 0.94,
+    "r2score": 0.91,
 }
 ```
 
@@ -286,9 +286,7 @@ class HuberMetric(BaseVariableMetric):
         self.delta = float(delta)
 
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.huber_loss(
-            pred, target, reduction="none", delta=self.delta
-        )
+        return torch.nn.functional.huber_loss(pred, target, reduction="none", delta=self.delta)
 ```
 
 Set `scale_power` to match your metric's order in σ, or `inverse_variance`

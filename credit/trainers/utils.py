@@ -529,12 +529,15 @@ def load_dataloader(
     )
 
     _persistent_workers = (num_workers > 0) if persistent_workers is None else persistent_workers
+    # pin_memory only accelerates host->CUDA copies; on MPS it is unsupported
+    # (PyTorch emits a UserWarning) and on CPU it is a no-op, so gate it on CUDA.
+    _pin_memory = torch.cuda.is_available()
     return DataLoader(
         dataset,
         batch_sampler=sampler,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
-        pin_memory=True,
+        pin_memory=_pin_memory,
         persistent_workers=_persistent_workers,
         multiprocessing_context="spawn" if num_workers > 0 else None,
     )

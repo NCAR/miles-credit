@@ -20,7 +20,7 @@ from argparse import ArgumentParser
 import torch
 import yaml
 
-from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, setup
+from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
 from credit.losses import is_crps_loss
 from credit.models import load_model
 from credit.seed import seed_everything
@@ -141,12 +141,7 @@ def main_cli():
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(local_rank % torch.cuda.device_count())
-        torch.backends.cudnn.benchmark = True
-    else:
-        device = torch.device("cpu")
+    device = select_device(local_rank)
 
     if world_size > 1:
         setup(rank, world_size, "ddp", backend, device_id=device if torch.cuda.is_available() else None)

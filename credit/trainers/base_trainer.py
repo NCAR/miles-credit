@@ -28,6 +28,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from credit.distributed import select_device
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
 from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
@@ -233,11 +234,7 @@ class BaseTrainer(ABC):
         super().__init__()
         self.model = model
         self.rank = rank
-        self.device = (
-            torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-            if torch.cuda.is_available()
-            else torch.device("cpu")
-        )
+        self.device = select_device(rank)
 
         # Store full conf for subclass method bodies that still need it
         self.conf = conf

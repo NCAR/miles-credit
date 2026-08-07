@@ -41,7 +41,7 @@ import cftime
 import logging
 from typing import Any
 
-from gcsfs import GCSFileSystem
+import obstore.store as obs
 import pandas as pd
 import torch
 import xarray as xr
@@ -152,18 +152,12 @@ class ARCOERA5Dataset(BaseDataset):
         self._fs = None
 
     def _init_fs(self):
-        """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data."""
-        fs_config: dict[str, Any] = {
-            "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
-            "access": "read_only",
-            "block_size": 8**20,
-            "asynchronous": True,
-            "skip_instance_cache": True,
-        }
-        self._fs = GCSFileSystem(**fs_config)
-        self.pres_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.pressure_lev_era5_path)
-        self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path)
+        """Initialize the obstore GCS stores and zarr stores for pressure-level and model-level ERA5 data."""
+        pres_obs = obs.from_url(self.pressure_lev_era5_path)
+        mod_obs = obs.from_url(self.model_lev_era5_path)
+        self._fs = True  # marker: stores initialized
+        self.pres_level_store = zarr.storage.ObjectStore(pres_obs, read_only=True)
+        self.mod_level_store = zarr.storage.ObjectStore(mod_obs, read_only=True)
 
     def _cache_grid(self, ds: xr.Dataset) -> None:
         """Cache this source's native grid, once — call only when not yet cached.
@@ -429,16 +423,9 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def _init_fs(self) -> None:
-        fs_config = {
-            "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
-            "access": "read_only",
-            "block_size": 8**20,
-            "asynchronous": True,
-            "skip_instance_cache": True,
-        }
-        self._fs = GCSFileSystem(**fs_config)
-        self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
+        obs_store = obs.from_url(self.store_path)
+        self._fs = True  # marker: store initialized
+        self.store = zarr.storage.ObjectStore(obs_store, read_only=True)
 
     def _cache_grid(self, ds: xr.Dataset) -> None:
         """Cache this source's native grid, once — call only when not yet cached.
@@ -497,14 +484,16 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             else:
                 ds_t = ds
 
+            # WeatherBench2 stores spatial dims as (longitude, latitude); transpose
+            # to (latitude, longitude) to match the CREDIT (lat, lon) convention.
             for vname in vars_3D:
-                arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                arr = ds_t[vname].sel({self.level_coord: self.levels}).transpose(..., "latitude", "longitude").values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
                 key = self._get_field_name(field_type, "3d", vname)
                 sample[key] = tensor
 
             for vname in vars_2D:
-                arr = ds_t[vname].values
+                arr = ds_t[vname].transpose(..., "latitude", "longitude").values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                 key = self._get_field_name(field_type, "2d", vname)
                 sample[key] = tensor

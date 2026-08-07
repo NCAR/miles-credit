@@ -37,7 +37,7 @@ from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info, setup, distributed_model_wrapper
+from credit.distributed import get_rank_info, select_device, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
@@ -196,14 +196,7 @@ def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-
+    device = select_device(rank)
     seed_everything(conf["seed"])
 
     # ---- Data schema helpers ----

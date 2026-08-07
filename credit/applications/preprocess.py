@@ -15,7 +15,7 @@ from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
-from credit.distributed import get_rank_info, setup
+from credit.distributed import get_rank_info, select_device, setup
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.seed import seed_everything
@@ -226,14 +226,9 @@ Examples:
             )
 
     if args.device is not None:
-        device = torch.device(args.device)
-    elif torch.cuda.is_available():
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        device = select_device(local_rank, device=args.device)
     else:
-        device = torch.device("cpu")
-    if device.type == "cuda":
-        torch.cuda.set_device(device)
-        torch.backends.cudnn.benchmark = True
+        device = select_device(local_rank)
 
     # Preprocess only gathers CPU scaler objects, so gloo suffices regardless of trainer mode.
     backend = args.backend or "gloo"

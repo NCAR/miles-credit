@@ -29,7 +29,7 @@ from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
 from credit.transforms import load_transforms, Normalize_ERA5_and_Forcing
 from credit.metrics import LatWeightedMetrics, LatWeightedMetricsClimatology
 from credit.forecast import load_forecasts
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper, get_rank_info, select_device, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.parser import credit_main_parser, predict_data_check
@@ -105,13 +105,7 @@ def predict(rank, world_size, conf, backend=None, p=None):
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = select_device(rank)
 
     # config settings
     seed = conf["seed"]
