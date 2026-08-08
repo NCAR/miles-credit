@@ -153,8 +153,10 @@ class ARCOERA5Dataset(BaseDataset):
 
     def _init_fs(self):
         """Initialize the obstore GCS stores and zarr stores for pressure-level and model-level ERA5 data."""
-        pres_obs = obs.from_url(self.pressure_lev_era5_path)
-        mod_obs = obs.from_url(self.model_lev_era5_path)
+        # skip_signature -> anonymous access to the public ARCO ERA5 bucket; without it
+        # obstore tries to fetch a token from the GCP metadata server (fails off-GCP, e.g. CI).
+        pres_obs = obs.from_url(self.pressure_lev_era5_path, config={"skip_signature": True})
+        mod_obs = obs.from_url(self.model_lev_era5_path, config={"skip_signature": True})
         self._fs = True  # marker: stores initialized
         self.pres_level_store = zarr.storage.ObjectStore(pres_obs, read_only=True)
         self.mod_level_store = zarr.storage.ObjectStore(mod_obs, read_only=True)
@@ -423,7 +425,9 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def _init_fs(self) -> None:
-        obs_store = obs.from_url(self.store_path)
+        # skip_signature -> anonymous access to the public WeatherBench2 bucket; without it
+        # obstore tries to fetch a token from the GCP metadata server (fails off-GCP, e.g. CI).
+        obs_store = obs.from_url(self.store_path, config={"skip_signature": True})
         self._fs = True  # marker: store initialized
         self.store = zarr.storage.ObjectStore(obs_store, read_only=True)
 
