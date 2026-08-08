@@ -4,9 +4,24 @@ seed: 2525
 data:
   source: &data_sources
     ERA5:
-      dataset_type: "arcoera5"
-      levels: []
-      level_coord: "level"
+      dataset_type: "arco_era5"
+      level_coord: "hybrid"
+      # All 137 ERA5 hybrid model levels, listed rather than omitted. The dataset
+      # would default to range(1, 138) either way, but build_channel_layout (used
+      # by the realtime and netcdf rollout paths) reads this key directly and
+      # raises KeyError when it is absent. Note an empty list is NOT "all levels"
+      # — it selects zero.
+      levels: [
+        1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
+        17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,
+        33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,
+        65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,
+        81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,  96,
+        97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+       113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
+       129, 130, 131, 132, 133, 134, 135, 136, 137
+      ]
       variables:
         prognostic:
           vars_3D: ["temperature",
@@ -53,6 +68,7 @@ data:
         diagnostic: null
         dynamic_forcing:
           vars_2D: ['tisr']
+        static: null
   start_datetime: "1979-01-01"
   end_datetime: "2018-12-31"
   timestep: "6h"
@@ -159,24 +175,27 @@ preblocks:
 
 postblocks:
   per_step:
+    # ---- Prediction chain: y_pred -> y_processed, in physical units ---- #
+    # detach: false is REQUIRED — BaseLoss scores y_processed, so gradients must
+    # flow back through the postblocks into y_pred. The default (true) severs the
+    # graph and the model silently never learns.
     reconstruct:
       type: reconstruct
+      args:
+        detach: false
     scaler:
       type: bridgescaler_transform
       args:
         scaler_path: *scaler_path
         variables: []
-        scaler_type: "standard"
-        scaler_params:
-          channels_last: False
-          method: inverse_transform
+        method: inverse_transform
     log_trans:
       type: "exp_transform"
       args:
         variables: *log_vars
     geopotential:
       type: "geopotential_diagnostic"
-      args:
+      args: &geopotential_args
         output_name: "ERA5/computed_diagnostic/3d/geopotential"
         surface_geopotential_var: "ERA5/static/2d/geopotential_at_surface"
         surface_pressure_var: "ERA5/prognostic/2d/surface_pressure"
@@ -190,6 +209,34 @@ postblocks:
         static_source_key: "ic_raw"
         chunk_size: 1000
 
+    # ---- Target twin: y -> y_target_processed ---- #
+    # BaseLoss compares y_processed against y_target_processed, so the target has
+    # to run the identical chain — split, inverse-scale, un-log — or the two sides
+    # are in different units. The geopotential twin is required by
+    # loss.include_computed_diagnostics: true; drop it if you set that to false.
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: "y"
+        out_key: "y_target_processed"
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: *scaler_path
+        variables: []
+        method: inverse_transform
+        key: "y_target_processed"
+    log_trans_target:
+      type: "exp_transform"
+      args:
+        variables: *log_vars
+        key: "y_target_processed"
+    geopotential_target:
+      type: "geopotential_diagnostic"
+      args:
+        <<: *geopotential_args
+        key: "y_target_processed"
+
 
 model:
   type: "wxformer"
@@ -202,7 +249,10 @@ model:
   input_only_channels: 11
   output_only_channels: 9
 
-  dim: [256, 256, 256, 256]
+  # Must be a pyramid: the decoder normalises its narrowest upsample block
+  # (dim[-1] // 8) into dim[0] GroupNorm groups, so dim[0] has to divide
+  # dim[-1] // 8. A flat [256, 256, 256, 256] fails to construct.
+  dim: [128, 256, 512, 1024]
   depth: [2, 2, 2, 2]
 
   global_window_size: [8, 4, 2, 1]
@@ -254,11 +304,3 @@ pbs: #derecho
   ngpus: 4
   mem: '480GB'
   queue: 'main'
-
-
-
-
-
-
-
-          

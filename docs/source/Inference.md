@@ -1,5 +1,14 @@
 # Prediction Rollouts
 
+:::{note}
+This page covers both generations of the inference pipeline. If you trained
+with the gen2 trainer (`trainer.type: era5-gen2`), skip ahead to
+[Running Rollouts with the v2 Data Schema](#running-rollouts-with-the-v2-data-schema) — the gen2 commands are
+`credit rollout`, `credit realtime`, and `credit submit --mode rollout`. The
+sections before it (Prediction Ingredients, `credit_rollout_realtime`,
+`credit_gfs_init`, and the mean/std scaler files) describe the gen1 pipeline.
+:::
+
 ## Prediction Ingredients
 Before beginning rollouts of a CREDIT model, you will need the following ingredients/files 
 available on your machine.
@@ -36,9 +45,9 @@ predict:
     forecast_end_time: "2025-04-24 12:00:00" # Should be sometime after init date
     forecast_timestep: "6h" # Needs to contain h for hours and should match 1 or 6 hour model.
   initial_condition_path: "/path/to/gfs_init/" # change 
-  static_fields: "/Users/dgagne/data/CREDIT_data/LSM_static_variables_ERA5_zhght.nc" # Static forcing file.
-  metadata: '/Users/dgagne/miles-credit/credit/metadata/era5.yaml' # Path to metadata for output
-  save_forecast: '/Users/dgagne/data/wxformer_6h_test/' # path to save forecast data
+  static_fields: "/path/to/CREDIT_data/LSM_static_variables_ERA5_zhght.nc" # Static forcing file.
+  metadata: '/path/to/miles-credit/credit/metadata/era5.yaml' # Path to metadata for output
+  save_forecast: '/path/to/wxformer_6h_test/' # path to save forecast data
 ```
 If you want to use GFS initial conditions, run `python applications/gfs_init.py -c <config file>`.
 It will download fields from a GFS initial condition on model levels, which are archived for the past 10 days
@@ -100,24 +109,25 @@ credit rollout -c config.yml -m ddp
 
 ### Submitting PBS jobs
 
-Use `credit submit` to submit rollout jobs to the cluster. The `--rollout` flag switches from
-training submission to parallel rollout submission. `--jobs N` splits init times across N
-independent PBS jobs (all start at once, no afterok chain).
+Use `credit submit` to submit rollout jobs to the cluster. `--mode rollout` switches from
+training submission to rollout submission (rollout jobs are independent — no afterok chain).
 
 ```bash
-# Submit 10 parallel rollout jobs on Casper (deterministic or ensemble — set by config)
-credit submit --cluster casper -c config.yml --rollout --jobs 10
+# Submit a rollout job on Casper (deterministic or ensemble — set by config)
+credit submit --cluster casper -c config.yml --mode rollout
 
-# Override ensemble size at submission time
-credit submit --cluster casper -c config.yml --rollout --jobs 10 --gpus 1
+# Set GPU count at submission time
+credit submit --cluster casper -c config.yml --mode rollout --gpus 1
 
-# Dry run — inspect the PBS scripts before submitting
-credit submit --cluster casper -c config.yml --rollout --jobs 10 --dry-run
+# Dry run — inspect the PBS script before submitting
+credit submit --cluster casper -c config.yml --mode rollout --dry-run
 ```
 
-`--jobs` controls how many PBS nodes split the init-time work. `ensemble_size` in the config
-(or `--ensemble-size` at the CLI) controls how many ensemble members are run per init time.
-These are independent settings.
+`--jobs N` submits N parallel PBS rollout jobs, but per-job init-time subsetting is not yet
+implemented for gen2 configs: each job currently runs the full set of init times, so `N > 1`
+submits N redundant copies rather than splitting the work. Leave it at the default (`--jobs 1`)
+for now. `ensemble_size` in the config (or `--ensemble-size` at the CLI) is independent and
+controls how many ensemble members are run per init time.
 
 ### Multi-node rollout (MPI)
 
@@ -207,13 +217,13 @@ The same YAML config used for training drives inference — no separate rollout 
 and writes one NetCDF file per forecast:
 
 ```bash
-credit rollout -c config/wxformer_1dg_6hr_v2.yml
+credit rollout -c my_experiment.yml
 ```
 
 To run on multiple GPUs pass `--mode ddp`:
 
 ```bash
-credit rollout -c config/wxformer_1dg_6hr_v2.yml --mode ddp
+credit rollout -c my_experiment.yml --mode ddp
 ```
 
 The `predict` block in your config controls which dates are run and where output goes:
@@ -245,7 +255,7 @@ Output files land in `save_forecast/`. Filename format is
 writing output as it steps (useful for operational or near-realtime use):
 
 ```bash
-credit realtime -c config/wxformer_1dg_6hr_v2.yml \
+credit realtime -c my_experiment.yml \
     --init-time 2024-01-15T00 \
     --steps 40
 ```
@@ -265,16 +275,16 @@ The fastest way to verify a freshly trained model produces sensible output:
 
 ```bash
 # Plot 2m temperature in physical units (Kelvin) — recommended starting point
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T --denorm
+credit plot -c my_experiment.yml --field VAR_2T --denorm
 
 # Multiple fields at once
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T SP --denorm
+credit plot -c my_experiment.yml --field VAR_2T SP --denorm
 
 # 3D variable: temperature at level index 5 (pressure-level ordering)
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field temperature --level 5 --denorm
+credit plot -c my_experiment.yml --field temperature --level 5 --denorm
 
 # Point at a specific checkpoint or date
-credit plot -c config/wxformer_1dg_6hr_v2.yml --field VAR_2T \
+credit plot -c my_experiment.yml --field VAR_2T \
     --checkpoint /glade/derecho/scratch/$USER/CREDIT_runs/my_run/checkpoint.pt \
     --sample-date 2020-06-15T00 --denorm
 ```

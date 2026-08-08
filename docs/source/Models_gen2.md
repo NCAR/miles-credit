@@ -38,7 +38,8 @@ Two more concepts recur in every architecture:
   does. `mode: earth` wraps longitude around the dateline and reflects across
   the poles so the model sees a seamless globe instead of hard borders. The pad
   widths (`pad_lat`, `pad_lon`) are also chosen so the padded grid divides
-  cleanly through every downsampling stage (see the comments in the examples).
+  cleanly through every downsampling stage (see the comments in
+  `config/gen_2/examples/example-v2026.2.yml`).
 - **Postblocks do the physics** — the network predicts normalized values; the
   conversion back to physical units, conservation of mass/energy, and derived
   diagnostics all happen *after* the model in the postblock chain (see
@@ -52,7 +53,7 @@ Two more concepts recur in every architecture:
 
 **AutoAPI:** {py:obj}`credit.models.wxformer.crossformer.CrossFormer`
 
-**Config type:** `wxformer` (alias `wxformer_base`)
+**Config type:** `wxformer_base` (`wxformer` is kept as a backward-compatibility alias; prefer `wxformer_base` in new configs, since plain `wxformer` is ambiguous now that `nextgen_wxformer` also exists)
 
 WXFormer is the flagship MILES/NCAR model. It is a hierarchical
 **encoder–decoder** built on the **CrossFormer** attention backbone:
@@ -78,7 +79,9 @@ controlled from the config:
 - **Spherical boundary padding** (`padding_conf: {mode: earth}`) removes the
   artificial seams at the dateline and poles that a plain grid introduces.
 - **Checkerboard-free upsampling** (`upsample_with_ps: True`) replaces plain
-  transposed convolutions with ICNR-initialized *pixel shuffle*, eliminating the
+  transposed convolutions with *pixel shuffle* initialized via ICNR (Initialized
+  Convolution with No Resizing artifacts — an initialization scheme for
+  pixel-shuffle upsampling that avoids checkerboard artifacts), eliminating the
   grid-scale "checkerboard" artifacts those layers are prone to. A final light
   bilinear resize (`interp: True`) further suppresses any residual pattern and
   lands the output exactly on the target grid.
@@ -113,7 +116,7 @@ like 640×1280 to keep attention memory bounded).
 
 ```yaml
 model:
-  type: "wxformer"
+  type: "wxformer_base"
   frames: 1               # one input time step
 
   # --- Grid and channel layout (must match the data) ---
@@ -149,8 +152,10 @@ model:
   padding_conf:
     activate: True
     mode: earth           # wrap longitude, reflect across poles
-    pad_lat: [37, 38]
-    pad_lon: [12, 12]
+    pad_lat: [37, 38]     # 181 + 37 + 38 = 256 → stage heights 128, 64, 32, 16
+    pad_lon: [12, 12]     # 360 + 12 + 12 = 384 → stage widths 192, 96, 48, 24
+                          # every stage divisible by local_window_size (4) and
+                          # that stage's global_window_size ([8, 4, 2, 1])
 ```
 
 **The parameters that matter most:**
@@ -165,7 +170,8 @@ model:
 - **Window sizes and padding divisibility** — after four stride-2 downsamples,
   every stage's height and width must be divisible by both `local_window_size`
   and that stage's `global_window_size`. The `pad_lat`/`pad_lon` values are
-  chosen to guarantee this (the examples show the arithmetic in comments). If you
+  chosen to guarantee this (see the arithmetic comments in the example above and
+  in `config/gen_2/examples/example-v2026.2.yml`). If you
   change the grid, re-check the math or `credit check` will flag it.
 - **`padding_conf.mode: earth`** — keep this on for global models; it is the
   difference between a seamless globe and visible artifacts at the edges.

@@ -123,6 +123,6 @@ kept for reference/reproducibility, including `arXiv_2024/` configs). Top-level 
 ## Docs
 
 Full docs source is in `docs/source/*.md` (Sphinx + MyST, published to readthedocs). Key pages:
-`Model_Architectures.md`, `Training.md`, `config.md`, `DataSets.md`, `postblock.md`, `Inference.md`,
+`Model_Architectures.md`, `Training.md`, `config.md`, `Datasets.md`, `postblock.md`, `Inference.md`,
 `EnsemblesInference.md`. When changing config schema, model registry entries, or CLI behavior, update the
 matching doc page.

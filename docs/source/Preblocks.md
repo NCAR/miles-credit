@@ -47,6 +47,14 @@ Most preblocks accept a `data_types` argument that scopes which batch splits
 they process (default: `["input", "target"]`). A data type absent from the
 batch — e.g. no `"target"` during inference — is skipped silently.
 
+Environment variables in path arguments (e.g. `$SCRATCH`) are expanded via
+`os.path.expandvars` for the preblock file paths `regrid.weight_file`,
+`bridgescaler_transform.scaler_path`, and `rename.mapping_file`, as well as for
+the top-level `save_loc` and `predict.save_forecast` keys (`credit check` also
+expands them when verifying that paths exist). Not every path argument is
+expanded, however — `era5_normalizer`'s `mean_path`/`std_path` are used
+verbatim — so when in doubt, use absolute paths.
+
 ## Preblock Types
 
 ### `fill_values` (FillValues)
@@ -109,6 +117,12 @@ args:
 
 **AutoAPI:** {py:obj}`credit.preblock.norm.ERA5Normalizer`
 
+**Which normalization route?** CREDIT has two: `era5_normalizer` uses
+gen1-style pre-computed mean/std NetCDF files, while `bridgescaler_transform`
+(below) uses a scaler JSON fitted by `credit preprocess`. Prefer
+`bridgescaler_transform` for new gen2 work; `era5_normalizer` mainly exists to
+reuse existing gen1 statistics files.
+
 Normalizes per-variable ERA5 tensors using pre-computed mean/std NetCDF files.
 Normalization `(x - mean) / std` is applied per variable; variables not found
 in the statistics file are passed through unchanged. The mean/std may be scalar
@@ -125,6 +139,10 @@ args:
 ### `bridgescaler_transform` (BridgeScalerTransform)
 
 **AutoAPI:** {py:obj}`credit.preblock.scaler.BridgeScalerTransform`
+
+`bridgescaler` is the external [bridgescaler](https://github.com/NCAR/bridgescaler)
+package — NCAR's distributed scaler library, installed as a CREDIT dependency —
+whose fitted scalers are saved to and loaded from JSON via `credit preprocess`.
 
 Scaling preblock using a dictionary of `bridgescaler` scalers to fit and
 transform CREDIT state dictionaries. Applies per-variable z-score scaling (or

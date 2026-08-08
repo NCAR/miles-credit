@@ -58,7 +58,6 @@ git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 uv pip install -e ".[develop]"
 ```
-:::
 
 Quick verify the install worked:
 
@@ -71,6 +70,10 @@ credit --help
 After installing CREDIT, use `credit begin` to create a config file and
 an experiment directory. The wizard will ask you questions about datasets 
 and some model settings. Modify the config file later with more advanced options.
+
+For a laptop-runnable starting point, see
+`config/gen_2/examples/weatherbench2_era5_wxformer_tiny.yml`, which streams a
+small WeatherBench2 ERA5 subset from the cloud — no local data required.
 
 ### Validating a config with `credit check`
 
@@ -88,9 +91,41 @@ credit check -c my_experiment.yml --strict   # exit non-zero on warnings too
 credit check -c my_experiment.yml --json     # machine-readable output
 ```
 
-> **More detail**: [Config reference](config.md) | [Training guide](Training.md)
+Note that gen2 `forecast_len` is 1-indexed: `forecast_len: 1` means a
+single-step prediction, unlike gen1's 0-indexed convention where `0` meant a
+single step.
 
-## 3. Submit a training job
+> **More detail**: the fully annotated gen2 reference config
+> [`config/gen_2/examples/example-v2026.2.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-v2026.2.yml)
+> | [Datasets guide](Datasets.md) | [Models](Models_gen2.md) | [Training guide](Training.md)
+
+## 3. Fit the scalers with `credit preprocess`
+
+Before training, run the preprocessing step once per config:
+
+```bash
+credit preprocess -c my_experiment.yml
+```
+
+`credit preprocess` streams through the training data and fits the
+bridgescaler normalization scalers used by the `bridgescaler_transform`
+preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
+config. Training will fail without this file, so run it once before your first
+training job (and re-run it if you change the variable list or date range).
+
+## 4. Start a training job
+
+### Train locally (laptop / workstation / single GPU)
+
+If you are not on an HPC cluster, run training directly:
+
+```bash
+credit train -c my_experiment.yml
+```
+
+This works on a Mac, a CPU-only machine, or a single-GPU workstation. The rest
+of this step covers batch submission on NCAR HPC (Casper/Derecho) with
+`credit submit`.
 
 ### Submit
 
@@ -156,15 +191,16 @@ reload flags automatically — no manual YAML editing required.
 
 > **More detail**: [Training guide](Training.md) | `credit submit --help`
 
-## 4. Monitor progress
+## 5. Monitor progress
 
 ### Training log
 
-The trainer writes a CSV after every epoch:
+The trainer writes a CSV after every epoch to your config's `save_loc`
+directory (e.g. `/glade/derecho/scratch/$USER/CREDIT_runs/my_run` on NCAR HPC):
 
 ```bash
 # Quick check: last 5 epochs
-tail -5 /glade/derecho/scratch/$USER/CREDIT_runs/my_run/training_log.csv
+tail -5 <save_loc>/training_log.csv
 ```
 
 Columns: `epoch`, `train_loss`, `val_loss`, `lr`, `epoch_time_s`.
@@ -177,14 +213,14 @@ Columns: `epoch`, `train_loss`, `val_loss`, `lr`, `epoch_time_s`.
 ### TensorBoard
 
 ```bash
-tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
+tensorboard --logdir <save_loc>/tensorboard
 ```
 
 Then open `http://localhost:6006` in your browser.
 On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](tensorboard.md).
 
 
-## 5. Visualize a prediction
+## 6. Visualize a prediction
 
 Once at least one checkpoint exists, run a forward pass and produce a
 3-panel global map (truth | prediction | difference) for any field:
@@ -208,12 +244,12 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 |---|---|
 | Recognisable weather patterns after ~10 epochs | Training is going well |
 | Uniform grey prediction | Too few epochs, or LR/normalisation problem |
-| Loss > 100 or growing | Check `mean_path` / `std_path` in config |
+| Loss > 100 or growing | Check `scaler_path` in the `bridgescaler_transform` preblock (or `mean_path` / `std_path` if using the gen1-style `era5_normalizer`) |
 | Small smooth difference map | Model is converging correctly |
 
 > **More detail**: `credit plot --help`
 
-## 6. Get help from the AI assistant
+## 7. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat

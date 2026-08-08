@@ -60,7 +60,9 @@ Then, start training as usual:
 credit_train -c config/model.yml
 ```
 
-This command generates a PBS script and submits it via `qsub`.
+This command runs training directly in your current session (single- or
+multi-GPU, according to `trainer.mode`). To generate a PBS batch script and
+submit it via `qsub`, use `credit submit` instead.
 Job resources are controlled by the `pbs:` section of your config — see below.
 
 ### PBS configuration in your config file
@@ -78,8 +80,8 @@ pbs:
     nodes: 1                   # number of nodes (derecho only; casper is always 1)
     ncpus: 64                  # CPUs per node
     ngpus: 4                   # GPUs per node
-    mem: ‘480GB’               # memory per node
-    queue: ‘main’              # queue name
+    mem: '480GB'               # memory per node
+    queue: 'main'              # queue name
     conda: "credit-derecho"    # conda env name or full path
 ```
 
@@ -91,9 +93,9 @@ pbs:
     walltime: "04:00:00"
     ncpus: 8
     ngpus: 1
-    mem: ‘128GB’               # optional: omit to scale memory with ngpus
-    queue: ‘casper’
-    gpu_type: ‘a100_80gb’      # optional: a100_80gb, v100, h100, etc.
+    mem: '128GB'               # optional: omit to scale memory with ngpus
+    queue: 'casper'
+    gpu_type: 'a100_80gb'      # optional: a100_80gb, v100, h100, etc.
                                # omit it to run on any available NVIDIA GPGPU
     conda: "credit"
 ```

@@ -4,6 +4,16 @@ CREDIT v2 is the recommended path for all new experiments. It uses a cleaner nes
 data schema with explicit variable categories (`prognostic`, `diagnostic`,
 `dynamic_forcing`, `static`) and a unified `credit` command for everything.
 
+## Training locally
+
+On a laptop, CPU-only machine, or single-GPU workstation, skip PBS entirely and
+run the trainer directly (after fitting the scalers once with
+`credit preprocess -c my_experiment.yml`):
+
+```bash
+credit train -c my_experiment.yml
+```
+
 ## Start Training on Casper or Derecho
 
 ```bash
@@ -11,13 +21,15 @@ data schema with explicit variable categories (`prognostic`, `diagnostic`,
 credit begin     
 
 # 2. Set your allocation in the pbs: section of my_experiment.yml, then submit.
-#    --chain auto-computes job count from ceil(epochs / num_epoch) in the config.
-credit submit --cluster casper  -c my_experiment.yml --chain 3
-credit submit --cluster derecho -c my_experiment.yml --chain 3
+#    Omit --chain to auto-compute the job count from ceil(trainer.epochs / trainer.num_epoch);
+#    pass --chain N to override it.
+credit submit --cluster casper  -c my_experiment.yml
+credit submit --cluster derecho -c my_experiment.yml --chain 3   # explicit 3-job chain
 ```
 
 That's it. `--chain 3` submits 3 back-to-back jobs via PBS `afterok` dependencies —
-no manual resubmission needed.
+no manual resubmission needed. Without `--chain`, the job count is computed
+automatically from the config.
 
 :::{note}
 **NCAR users**: data paths in the built-in configs point to
@@ -49,9 +61,10 @@ credit submit --cluster derecho -c my_experiment.yml --chain 10 --dry-run
 
 | Grid | File | Notes |
 |------|------|-------|
-| 1° | `config/wxformer_1dg_6hr_v2.yml` | ERA5 model-level — good starting point |
-| 0.25° | `config/wxformer_025deg_6hr_v2.yml` | Full-res pressure-level, 13 levels |
-| starter | `config/starter_v2.yml` | Minimal template with `USER SETTINGS` comments |
+| 1° | `config/gen_2/examples/example-v2026.2.yml` | Fully annotated starter: 1° ERA5 model-level, 6-hourly WXFormer, `USER SETTINGS` comments — the reference config |
+| 1° | `config/gen_2/examples/example-end-to-end.yml` | Same 1° ERA5 setup with the newer `inference:` block; runs `credit preprocess` → `train` → `rollout` end to end |
+| 0.25° | `config/gen_2/examples/wxformer_era5_025deg_6hr.yml` | Full-res 0.25° ERA5 pressure-level (721 × 1440, 13 levels), 6-hourly WXFormer |
+| tiny (240×121) | `config/gen_2/examples/weatherbench2_era5_wxformer_tiny.yml` | Tiny WeatherBench2 ERA5 subset (2 levels, few variables) streamed from the cloud — runs on a laptop |
 
 ## What does a healthy training run look like?
 
