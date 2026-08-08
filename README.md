@@ -18,40 +18,27 @@ to be under active development. Please contact [the MILES group](mailto:milescor
 
 **New to CREDIT?** See [QUICKSTART.md](QUICKSTART.md) to get up and running locally, or the [full online Quickstart](https://miles-credit.readthedocs.io/en/latest/quickstart.html) for detailed guidance.
 
-## AI assistant
+## Getting started
 
-`credit ask` is a unified AI assistant — it automatically runs in agent mode (reads your
-files, runs shell commands, iterates until it has a confident answer) when an Anthropic key
-is available, or falls back to simple chat (Groq, OpenRouter, Gemini, or OpenAI) otherwise.
+Install CREDIT and launch the interactive config wizard:
 
 ```bash
-pip install "miles-credit[ask]"
-
-# Free — no card needed (pick either)
-export GROQ_API_KEY=gsk_...          # https://console.groq.com
-export OPENROUTER_API_KEY=sk-or-...  # https://openrouter.ai
-
-# Or use your own Anthropic key for full agent mode (~$0.01–0.05/session)
-export ANTHROPIC_API_KEY=sk-ant-...  # https://console.anthropic.com
-
-credit ask "why is my loss not decreasing?"
-credit ask -c my_run.yml "why did my training run crash?"
+conda create -n credit -y python=3.13 uv
+conda activate credit
+uv pip install miles-credit
+credit begin
 ```
 
-The assistant picks the first provider with an available API key. Supported keys:
+`credit begin` walks you through creating a starter config, then validates it
+with `credit check` and prints the `credit preprocess` / `credit train`
+commands to run next. See [QUICKSTART.md](QUICKSTART.md) for the NCAR
+Casper/Derecho install paths and the rest of the workflow.
 
-| Env var | Provider / model | Mode |
-|---------|------------------|------|
-| `ANTHROPIC_API_KEY` | Anthropic (Claude) | full agent mode |
-| `GROQ_API_KEY` | Groq (Llama 3, free) | simple chat |
-| `OPENROUTER_API_KEY` | OpenRouter (Qwen3-Next-80B, free) | simple chat |
-| `GOOGLE_API_KEY` | Google (Gemini) | simple chat |
-| `OPENAI_API_KEY` | OpenAI (GPT-4o) | simple chat |
+## Documentation
 
-See the [AI Assistant documentation](https://miles-credit.readthedocs.io/en/latest/agent.html) for the full reference.
-
-MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
-instructions, how to get started training and deploying models, how to interpret the config files, and full API docs.
+The [full documentation](https://miles-credit.readthedocs.io/en/latest/) covers installation,
+training and deploying models, the config file schema, datasets, and the gen2 pipeline, along
+with complete [API docs](https://miles-credit.readthedocs.io/en/latest/api/index.html).
 
 ## Citing CREDIT
 If you are interested in using CREDIT as part of your research, please cite the following paper:
@@ -59,11 +46,12 @@ Schreck, J.S., Sha, Y., Chapman, W. et al. Community Research Earth Digital Inte
 for AI-driven Earth System Modeling. npj Clim Atmos Sci 8, 239 (2025). https://doi.org/10.1038/s41612-025-01125-6
 
 # Model Weights and Data
-Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFormer are available on huggingface.
+Model weights for the CREDIT 6-hour WXFormer and FuXi models, the 1-hour WXFormer, and the CAMulator climate emulator are available on huggingface.
 
 * [6-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_6h)
 * [1-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_1h)
 * [6-Hour FuXi](https://huggingface.co/djgagne2/fuxi_6h)
+* [CAMulator](https://huggingface.co/willychap/camulator)
 
 Processed ERA5 Zarr Data are available for download through Globus (requires free account) through the [CREDIT ERA5 Zarr Files](https://app.globus.org/file-manager/collections/2fc90d8f-10b7-44e1-a6a5-cf844112822e/overview) collection.
 
@@ -77,4 +65,4 @@ This software is based upon work supported by the NSF National Center for Atmosp
 U.S. National Science Foundation  under Cooperative Agreement No. 1852977 and managed by the University Corporation for Atmospheric Research. Any opinions, findings and conclusions or recommendations 
 expressed in this material do not necessarily reflect the views of NSF. Additional support for development was provided by 
 The NSF AI Institute for Research on Trustworthy AI for Weather, Climate, and Coastal Oceanography (AI2ES)  with grant
-number RISE-2019758 and by Schmidt Sciences, LLC. 
+number RISE-2019758, NSF Grant [RISE-2425659](https://www.nsf.gov/awardsearch/show-award/?AWD_ID=2425659), and by Schmidt Sciences, LLC. 
