@@ -48,7 +48,7 @@ Both local and remote modes use the same ``.idx`` + byte-range pipeline:
 
 1. Reads the ``.idx`` sidecar from disk,
 2. Uses ``file.seek()`` + ``file.read()`` — identical byte-range approach, no
-full-file scan.
+   full-file scan.
 
 The ``.idx`` sidecar must be present alongside the grib2;
 download it with ``hrrr_download.py``.

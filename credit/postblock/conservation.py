@@ -124,8 +124,8 @@ class GlobalMassFixer(nn.Module):
     Args:
         q_var: specific total water variable key.
         sp_var: surface pressure variable key.
-        plus the physics-core setup keys (``save_loc_physics``,
-        ``lon_lat_level_name``, ``grid_type``, ``midpoint``).
+        **physics: physics-core setup keys (``save_loc_physics``,
+            ``lon_lat_level_name``, ``grid_type``, ``midpoint``).
     """
 
     def __init__(self, q_var, sp_var, input_source_key="x_physical", **physics):
@@ -185,7 +185,7 @@ class GlobalWaterFixer(nn.Module):
     Args:
         q_var, sp_var, precip_var, evapor_var: variable keys.
         lead_time_periods: forecast step length in hours (sets ``N_seconds``).
-        plus the physics-core setup keys.
+        **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
     def __init__(
@@ -252,10 +252,10 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surface_geopotential_name: variable name of PHIS in the statics file.
         toa_down_solar_input_var: SOLIN key in the input dict.
         toa_up_solar_var, toa_up_olr_var: TOA upwelling flux keys.
-        surf_down_solar_var, surf_up_solar_var, surf_down_lw_var,
-        surf_up_lw_var, surf_sh_var, surf_lh_var: surface flux keys.
+        surf_down_solar_var, surf_up_solar_var, surf_down_lw_var, surf_up_lw_var, surf_sh_var, surf_lh_var:
+            surface flux keys.
         lead_time_periods: forecast step length in hours.
-        plus the physics-core setup keys.
+        **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
     def __init__(

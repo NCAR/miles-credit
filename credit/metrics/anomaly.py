@@ -6,7 +6,7 @@ Anomaly-based verification metrics for the Gen 2 metrics framework.
 Implements the anomaly correlation coefficient (ACC) and forecast activity
 (SDAF) as described in Bonavita & Geer (2026), "Forecast verification using
 information and noise", *Q. J. R. Meteorol. Soc.*, 152, e70109,
-:doi:`10.1002/qj.70109`.
+https://doi.org/10.1002/qj.70109.
 
 Both metrics require a **climatology** field — a per-variable spatial mean
 representing the long-term average state. The climatology is subtracted from
