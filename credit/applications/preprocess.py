@@ -226,9 +226,9 @@ Examples:
             )
 
     if args.device is not None:
-        device = select_device(local_rank, device=args.device)
+        device = select_device(local_rank, device=args.device, set_benchmark=True)
     else:
-        device = select_device(local_rank)
+        device = select_device(local_rank, set_benchmark=True)
 
     # Preprocess only gathers CPU scaler objects, so gloo suffices regardless of trainer mode.
     backend = args.backend or "gloo"
@@ -250,7 +250,9 @@ Examples:
     # reject it early — `credit check` flags the same condition statically.
     seen_paths: dict[str, str] = {}
     for scaler_key in scaler_block_keys:
-        path = expandvars(preblocks[scaler_key].scaler_path)
+        # Normalize aggressively so `~/x.json`, `$HOME/x.json`, and relative
+        # spellings of the same file all collide.
+        path = os.path.realpath(os.path.expanduser(expandvars(preblocks[scaler_key].scaler_path)))
         if path in seen_paths:
             raise ValueError(
                 f"BridgeScalerTransform blocks '{seen_paths[path]}' and '{scaler_key}' both write to "

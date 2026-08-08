@@ -42,7 +42,11 @@ DISTRIBUTED_MODES = (
 )
 
 
-def select_device(local_rank: int = 0, device: str | torch.device | None = None) -> torch.device:
+def select_device(
+    local_rank: int = 0,
+    device: str | torch.device | None = None,
+    set_benchmark: bool = False,
+) -> torch.device:
     """Pick the torch device with precedence cuda → mps → cpu.
 
     Centralizes device selection so every application entry point agrees on
@@ -54,17 +58,29 @@ def select_device(local_rank: int = 0, device: str | torch.device | None = None)
             ``device`` is provided or when CUDA is unavailable.
         device: Optional explicit device override (e.g. from a CLI ``--device``
             arg). When provided it takes precedence over auto-detection.
+        set_benchmark: When True, enable ``cudnn.benchmark`` if a CUDA device
+            is selected. Off by default because trainers call this *after*
+            ``seed_everything`` has set ``cudnn.benchmark = False`` for
+            determinism — flipping it back on would silently re-enable
+            nondeterministic autotuning.
 
     Returns:
-        torch.device — and as a side effect calls ``torch.cuda.set_device`` and
-        enables ``cudnn.benchmark`` when CUDA is selected.
+        torch.device — and as a side effect calls ``torch.cuda.set_device``
+        when a CUDA device (auto-detected or explicit with an index) is
+        selected.
     """
     if device is not None:
-        return torch.device(device)
+        dev = torch.device(device)
+        if dev.type == "cuda" and dev.index is not None:
+            torch.cuda.set_device(dev)
+            if set_benchmark:
+                torch.backends.cudnn.benchmark = True
+        return dev
     if torch.cuda.is_available():
         dev = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
         torch.cuda.set_device(local_rank % torch.cuda.device_count())
-        torch.backends.cudnn.benchmark = True
+        if set_benchmark:
+            torch.backends.cudnn.benchmark = True
         return dev
     if torch.backends.mps.is_available():
         return torch.device("mps")

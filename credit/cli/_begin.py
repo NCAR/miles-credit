@@ -33,10 +33,16 @@ _DATASET_CHOICES = (
     "mrms",
     "goes",
 )
+# (height, width, lat_spec, lon_spec) verified against the actual WB2 zarr
+# store coordinates. The specs feed torch.linspace with inclusive endpoints,
+# and the regridded stores differ from the raw 0.25° ones: 240x121 and 64x32
+# use ascending latitude, 64x32 is pole-offset, and neither wraps longitude
+# back to the prime meridian — a mismatch here silently misaligns the SOLAR
+# channel with the ERA5 channels.
 _WB2_GRIDS = {
     "1440x721": (721, 1440, [90, -90, 721], [0, 359.75, 1440]),
-    "240x121": (121, 240, [90, -90, 121], [0, 359, 240]),
-    "64x32": (32, 64, [90, -90, 32], [0, 360, 64]),
+    "240x121": (121, 240, [-90, 90, 121], [0, 358.5, 240]),
+    "64x32": (32, 64, [-87.1875, 87.1875, 32], [0, 354.375, 64]),
     "full": (721, 1440, [90, -90, 721], [0, 359.75, 1440]),
 }
 _WB2_LEVELS = [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
@@ -75,9 +81,12 @@ _BeginDumper.add_representer(_QuotedVariable, _represent_quoted_variable)
 def _detect_system() -> dict:
     """Return a friendly summary of the current host, environment, and GPUs."""
     hostname = socket.gethostname().lower()
-    if any(name in hostname for name in ("derecho", "casper", "crhtc", "dec", "crlogin")):
+    # Compute nodes are matched with anchored digit patterns (dec0123, nid001234)
+    # rather than bare substrings, so ordinary hostnames that merely contain
+    # "dec"/"nid" (e.g. "decode-box", "unidata") are not misread as HPC systems.
+    if any(name in hostname for name in ("derecho", "casper", "crhtc", "crlogin")) or re.match(r"dec\d+", hostname):
         system = "derecho" if "derecho" in hostname else "casper" if "casper" in hostname else "ncar"
-    elif any(name in hostname for name in ("perlmutter", "nid")):
+    elif "perlmutter" in hostname or re.match(r"nid\d+", hostname):
         system = "perlmutter"
     else:
         system = "local"
@@ -298,10 +307,49 @@ def _glob_suggestions(top_path: str) -> tuple[str, str, str]:
     matches = sorted(glob.glob(os.path.join(top_path, "**"), recursive=True))
     files = [path for path in matches if path.endswith((".nc", ".nc4", ".zarr"))]
     if not files:
-        return os.path.join(top_path, "*"), os.path.join(top_path, "*"), os.path.join(top_path, "*")
+        fallback = os.path.join(top_path, "*")
+        return fallback, "", fallback
     static = next((path for path in files if "static" in os.path.basename(path).lower()), files[-1])
-    dynamic = next((path for path in files if "diag" in path.lower()), files[0])
+    dynamic = next((path for path in files if "diag" in path.lower()), "")
     return files[0], dynamic, static
+
+
+def _read_level_values(path_pattern: str, level_coord: str) -> list | None:
+    """Read the actual vertical-coordinate values from the first file matching *path_pattern*.
+
+    Returns None when no file matches, the file cannot be opened, or the
+    coordinate is absent/non-1D — callers then fall back to prompting for a
+    level count.
+    """
+    if not level_coord:
+        return None
+    try:
+        import xarray as xr
+
+        matches = sorted(glob.glob(path_pattern))
+        if not matches:
+            return None
+        first = matches[0]
+        ds = xr.open_zarr(first) if first.endswith(".zarr") else xr.open_dataset(first)
+        try:
+            if level_coord in ds.variables:
+                values = ds[level_coord].values
+                if values.ndim == 1 and values.size:
+                    return [value.item() for value in values]
+        finally:
+            ds.close()
+    except Exception:
+        return None
+    return None
+
+
+def _parse_level(text: str) -> int | float | str:
+    for cast in (int, float):
+        try:
+            return cast(text)
+        except ValueError:
+            continue
+    return text
 
 
 def _local_details(preset: dict) -> dict:
@@ -313,13 +361,43 @@ def _local_details(preset: dict) -> dict:
     prog_path, diag_path, static_path = _glob_suggestions(top)
     print("  Suggested file paths were inferred from the directory contents.")
     prog_path = _prompt("Prognostic path", prog_path)
-    diag_path = _prompt("Diagnostic path (blank disables diagnostics)", diag_path)
-    static_path = _prompt("Static path (blank disables static fields)", static_path)
+    diag_path = _prompt("Diagnostic path (enter 'none' to disable diagnostics)", diag_path or "none")
+    if diag_path.lower() in ("", "none"):
+        diag_path = ""
+        preset["diagnostic"] = []
+    else:
+        preset["diagnostic"] = _prompt_list("Diagnostic 2D variables", preset.get("diagnostic", []))
+        if not preset["diagnostic"]:
+            print("  No diagnostic variables given; diagnostics disabled.")
+            diag_path = ""
+    static_path = _prompt("Static path (enter 'none' to disable static fields)", static_path)
+    if static_path.lower() in ("", "none"):
+        static_path = ""
+        preset["static"] = []
+    else:
+        preset["static"] = _prompt_list("Static 2D variables", preset.get("static", []))
+        if not preset["static"]:
+            print("  No static variables given; static fields disabled.")
+            static_path = ""
     preset["level_coord"] = _prompt("Vertical coordinate name", preset["level_coord"])
     preset["height"] = _prompt_int("Grid height", preset["height"])
     preset["width"] = _prompt_int("Grid width", preset["width"])
-    n_levels = _prompt_int("Number of vertical levels", len(preset["levels"]))
-    preset["levels"] = list(range(1, n_levels + 1))
+    level_values = _read_level_values(prog_path, preset["level_coord"])
+    if level_values is not None:
+        # LocalDataset selects levels with nearest-neighbor matching, so the
+        # config must carry the file's real coordinate values — fabricated IDs
+        # like 1..N would all snap to the nearest actual level.
+        print(f"  Found {len(level_values)} '{preset['level_coord']}' values in {prog_path}.")
+        chosen = _prompt_list("Vertical levels to use", [str(value) for value in level_values])
+        preset["levels"] = [_parse_level(item) for item in chosen]
+    else:
+        print(
+            "  Could not read the vertical coordinate from the data; using level IDs 1..N.\n"
+            "  Warning: level selection matches these IDs to the file's coordinate values by\n"
+            "  nearest neighbor — edit 'levels' in the config to the real values before training."
+        )
+        n_levels = _prompt_int("Number of vertical levels", len(preset["levels"]))
+        preset["levels"] = list(range(1, n_levels + 1))
     preset["local_paths"] = {"prognostic": prog_path, "diagnostic": diag_path, "static": static_path}
     preset["local_top"] = top
     years = [
@@ -402,7 +480,7 @@ def _source_config(name: str, preset: dict, variables: dict) -> dict:
     return source
 
 
-def _make_data(state: dict) -> tuple[dict, dict, int, int, int, int]:
+def _make_data(state: dict) -> tuple[dict, dict, int, int, int, int, int]:
     preset = state["preset"]
     local_paths = preset.get("local_paths", {})
     group = {"vars_3D": state["vars_3D"], "vars_2D": state["vars_2D"]}
@@ -411,23 +489,27 @@ def _make_data(state: dict) -> tuple[dict, dict, int, int, int, int]:
     variables = {"prognostic": group}
 
     static = preset.get("static", [])
-    if local_paths.get("static"):
+    if local_paths.get("static") and static:
         variables["static"] = {
             "vars_2D": static,
             "path": local_paths["static"],
         }
-    elif static:
+    elif static and preset["dataset_type"] != "local":
+        # Cloud-backed datasets carry no per-group path; LocalDataset requires one.
         variables["static"] = {"vars_2D": static}
     else:
         variables["static"] = None
+        static = []
 
-    if local_paths.get("diagnostic") and preset.get("diagnostic"):
+    diagnostic = preset.get("diagnostic") or []
+    if local_paths.get("diagnostic") and diagnostic:
         variables["diagnostic"] = {
-            "vars_2D": [],
+            "vars_2D": diagnostic,
             "path": local_paths["diagnostic"],
         }
     else:
         variables["diagnostic"] = None
+        diagnostic = []
 
     source = _source_config("ERA5", preset, variables)
     sources = {"ERA5": source}
@@ -468,11 +550,11 @@ def _make_data(state: dict) -> tuple[dict, dict, int, int, int, int]:
     }
     n_levels = len(preset["levels"])
     n_input_only = len(static) + (1 if preset.get("tisr") else 0)
-    return data, validation, n_levels, len(state["vars_3D"]), len(state["vars_2D"]), n_input_only
+    return data, validation, n_levels, len(state["vars_3D"]), len(state["vars_2D"]), n_input_only, len(diagnostic)
 
 
 def _build_config(state: dict) -> dict:
-    data, validation, n_levels, channels, surface_channels, input_only = _make_data(state)
+    data, validation, n_levels, channels, surface_channels, input_only, output_only = _make_data(state)
     pad_lat, pad_lon = _padding_totals(state["preset"]["height"], state["preset"]["width"])
     scaler_path = os.path.join(state["save_loc"], "standard_scaler.json")
     static = state["preset"].get("static", [])
@@ -532,7 +614,7 @@ def _build_config(state: dict) -> dict:
             "channels": channels,
             "surface_channels": surface_channels,
             "input_only_channels": input_only,
-            "output_only_channels": 0,
+            "output_only_channels": output_only,
             "patch_height": 1,
             "patch_width": 1,
             "dim": [32, 64, 128, 256],
@@ -720,15 +802,7 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
 def _run_check(path: str) -> int:
     command = [sys.executable, "-m", "credit.cli", "check", "-c", path]
     result = subprocess.run(command, capture_output=True, text=True)
-    output = result.stdout + result.stderr
-    if result.returncode and "No module named credit.cli.__main__" in output:
-        result = subprocess.run(
-            [sys.executable, "-c", "from credit.cli._parser import main; main()", "check", "-c", path],
-            capture_output=True,
-            text=True,
-        )
-        output = result.stdout + result.stderr
-    print(output.rstrip())
+    print((result.stdout + result.stderr).rstrip())
     return result.returncode
 
 

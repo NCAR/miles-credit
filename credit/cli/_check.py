@@ -497,7 +497,9 @@ def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
             path = (block.get("args") or {}).get("scaler_path")
             if not isinstance(path, str) or not path:
                 continue
-            resolved = os.path.expandvars(path)
+            # Normalize aggressively so `~/x.json`, `$HOME/x.json`, and relative
+            # spellings of the same file all collide.
+            resolved = os.path.realpath(os.path.expanduser(os.path.expandvars(path)))
             where = f"preblocks.{section}.{name}"
             if resolved in seen:
                 rep.error(
