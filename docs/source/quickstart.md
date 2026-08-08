@@ -90,8 +90,6 @@ credit check -c my_experiment.yml --json     # machine-readable output
 
 > **More detail**: [Config reference](config.md) | [Training guide](Training.md)
 
----
-
 ## 3. Submit a training job
 
 ### Submit
@@ -158,8 +156,6 @@ reload flags automatically — no manual YAML editing required.
 
 > **More detail**: [Training guide](Training.md) | `credit submit --help`
 
----
-
 ## 4. Monitor progress
 
 ### Training log
@@ -187,7 +183,6 @@ tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
 Then open `http://localhost:6006` in your browser.
 On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](tensorboard.md).
 
----
 
 ## 5. Visualize a prediction
 
@@ -217,8 +212,6 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 | Small smooth difference map | Model is converging correctly |
 
 > **More detail**: `credit plot --help`
-
----
 
 ## 6. Get help from the AI assistant
 
@@ -257,8 +250,6 @@ credit ask "what PBS jobs are running and how much walltime do they have left?"
 
 See the full [AI Assistant documentation](agent.md) for all examples, options, and cost details.
 
----
-
 ## Common problems
 
 | Symptom | Fix |
@@ -269,18 +260,3 @@ See the full [AI Assistant documentation](agent.md) for all examples, options, a
 | PBS chain cancelled after job failure | Expected — PBS `afterok` cancels remaining jobs. Use `--reload --chain N` to restart. |
 | Checkpoint not found on first run | Normal — set `load_weights: False` in config (the default). |
 | Out of GPU memory | Reduce `train_batch_size`. For 0.25° start with `train_batch_size: 1`. |
-
----
-
-## What's next
-
-| Goal | Where to go |
-|------|------------|
-| Understand every config field | [Config reference](config.md) |
-| Multi-node training details | [Training guide](Training.md) |
-| Run a forecast from a trained model | [Inference guide](Inference.md) |
-| Serve forecasts over HTTP | [Forecast API Server](serve.md) |
-| Set up TensorBoard on HPC | [TensorBoard](tensorboard.md) |
-| Evaluate your model against baselines | [Evaluation](Evaluation.md) |
-| Use a custom dataset | [Dataset structure](Datasets.md) |
-| Add a new model architecture | [Model architectures](Model_Architectures.md) |

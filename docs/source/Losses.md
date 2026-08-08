@@ -1,4 +1,4 @@
-# Working with Loss Functions
+# Loss Functions
 
 CREDIT has two loss configuration formats, selected by whether the `loss` section
 has a `type` key:
@@ -386,15 +386,3 @@ loss:
     use_latitude_weights: true
     latitude_weights: '/path/to/static.zarr'
 ```
-
-## Summary
-
-- Gen 2 uses a `{type, args}` `loss` section; `type: base` selects `BaseLoss`.
-- `BaseLoss` scores the postblock output per variable in physical units, so the
-  `per_step` chain **must** build a `y_target_processed` twin and use
-  `detach: false` on the prediction `reconstruct`.
-- `var_weighting` matters: `inverse_variance` is the sensible default because
-  physical-unit variables differ by orders of magnitude.
-- The univariate loss must be elementwise; CRPS-family losses are rejected.
-- Per-variable scores are logged automatically as `train_loss_var/<var_key>`.
-- `learnable` weighting works but does not survive a checkpoint resume yet.

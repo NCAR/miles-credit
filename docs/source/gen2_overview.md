@@ -20,29 +20,41 @@ of artifacts, oversmoothing, and improper coupling. We have made it much easier 
 constraints at any point in the data and modeling pipeline. Not even the sky is the limit on what you could do with
 this framework!
 
-## Datasets
+## [Datasets](Datasets.md)
 CREDIT Gen 2 has simplified the process for adding new Datasets and created
 new Datasets for both local and cloud-based Datasets. We have also created
 a new data schema that can support multiple data sources, 3D and 2D variables,
 and a mix of prognostic, diagnostic, dynamic forcing, and static variables.
 
-New Gen 2 Datasets include:
-* **LocalDataset**: Supports any locally stored set of netCDF or Zarr files
-with a regular directory structure and file format.
-* **GOESDataset**: Supports cloud-based GOES 16, 17, 18, and 19 geostationary satellite
-data stored on AWS.
-* **ARCOERA5Dataset**: Provides direct cloud streaming from the Analysis-Ready Cloud-Optimized ERA5 dataset 
-on Google Cloud.
-* **WeatherBench2ERA5Dataset**: Direct cloud streaming from the WeatherBench2 ERA5 archive. Supports multiple resolutions.
-* **HRRRDataset**: NOAA High-Resolution Rapid Refresh on AWS.
-* **MRMSDataset**: NOAA Multi-Radar Multi-Sensor 3D radar mosaic over the US.
+## [Preblocks](Preblocks.md)
+CREDIT Gen 2 has added a new suite of Preblocks for pre-processing and 
+transforming data prior to entering the emulator. Preblocks are written in
+PyTorch to maximize processing speed and enable processing to happen on GPU
+if needed. Preblocks are also differentiable to enable backprop through
+time and for XAI in the input space.
 
-## Preblocks
+## [Models](Models_gen2.md)
+The WXFormer model sees some significant upgrades in Gen 2 with new settings and 
+features that are designed to minimize artifacts and improve the sharpness of predictions.
+All models can now be trained with PyTorch's updates to its distributed package, including
+support for Fully Sharded Data Parallel v2 and sharded tensors for high resolution models. 
+Your favorite models from Gen 1, including the original ERA5 WXFormers and CAMulator, also work
+in Gen 2. Newer flagship models are now being designed and trained.
 
-## Models
+## [Postblocks](postblocks_gen2.md)
+Postblocks in Gen 1 have been migrated to Gen 2, and new postblocks for diagnostic calculation
+and pressure interpolation in PyTorch have been developed. With GPU parallelism, post-processing 
+is no longer a major bottleneck for training or inference.
 
-## Postblocks
+## [Interfaces](cli.md)
+CREDIT now has an easily accessible command line interface to create config files and
+access all major functionality of the platform. You can preprocess, train, and rollout models directly
+or submit those jobs to the supercomputer with most of the configuration magic happening behind the scenes.
 
-## Interfaces
+## [Custom Objects](Custom.md)
+Want to use CREDIT with a dataset or model not currently supported? Want to make your own preblocks, 
+postblocks, loss functions, or metrics? You can now register all of your own creations as custom
+objects in CREDIT without having to modify the source code! See the [custom objects guide](Custom.md)
+to learn how.
 
 

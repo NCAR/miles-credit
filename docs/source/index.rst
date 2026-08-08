@@ -10,7 +10,7 @@ Welcome to the documentation for **MILES-CREDIT**,
 the **NSF NCAR Community Research Earth Digital Intelligence Twin** project.
 CREDIT is an open foundational research platform for building machine learning Earth system prediction emulators.
 It is developed and maintained primarily by the NSF NCAR **Machine Integration and Learning for Earth Systems**
- (`MILES <https://ncar.github.io/miles>`_) group along with significant contributions from other NSF NCAR scientists
+(`MILES <https://ncar.github.io/miles>`_) group along with significant contributions from other NSF NCAR scientists
 and engineers, interns, visitors, and collaborators across the world.
 
 CREDIT enables users to train, run, and evaluate AI-based numerical weather and climate models. This documentation

@@ -246,30 +246,17 @@ reading the docs end-to-end.
 
 ## Quick reference
 
-| Command | What it does | Needs a trained model? |
-|---|---|---|
-| `credit begin` | Interactive config wizard | No |
-| `credit init` | Copy a built-in template | No |
-| `credit check` | Validate a config | No |
-| `credit preprocess` | Fit normalization scalers | No |
-| `credit train` | Train a model | No |
-| `credit rollout` | Generate forecasts | Yes |
-| `credit realtime` | Single forecast from a given init time | Yes |
-| `credit submit` | Submit any of the above to a scheduler | Depends on mode |
-| `credit convert` | Upgrade a v1 config to v2 | No |
-| `credit plot` | Quick truth-vs-prediction map | Yes |
-| `credit metrics` | WeatherBench2-style skill scores | Yes |
-| `credit ask` | AI assistant | No |
-
----
-
-## Where to go next
-
-| Goal | Page |
-|------|------|
-| Step-by-step from install to first forecast | [Quickstart](quickstart.md) |
-| Every config field explained | [Config reference](config.md) |
-| Training details (multi-node, resuming) | [Training guide](Training.md) |
-| Forecast rollout and realtime inference | [Inference guide](Inference.md) |
-| Evaluation and skill scores | [Evaluation](Evaluation.md) |
-| Using a custom dataset | [Datasets](Datasets.md) |
+| Command             | What it does                           | Needs a trained model? |
+|---------------------|----------------------------------------|------------------------|
+| `credit begin`      | Interactive config wizard              | No                     |
+| `credit init`       | Copy a built-in template               | No                     |
+| `credit check`      | Validate a config                      | No                     |
+| `credit preprocess` | Fit normalization scalers              | No                     |
+| `credit train`      | Train a model                          | No                     |
+| `credit rollout`    | Generate forecasts                     | Yes                    |
+| `credit realtime`   | Single forecast from a given init time | Yes                    |
+| `credit submit`     | Submit any of the above to a scheduler | Depends on mode        |
+| `credit convert`    | Upgrade a gen 1 config to gen 2        | No                     |
+| `credit plot`       | Quick truth-vs-prediction map          | Yes                    |
+| `credit metrics`    | WeatherBench2-style skill scores       | Yes                    |
+| `credit ask`        | AI assistant                           | No                     |
