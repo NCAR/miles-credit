@@ -4,7 +4,7 @@
 
 [PyPI](https://pypi.org/project/miles-credit/)
 
-[CREDIT npj Climate and Atmospheric Science Article](nature.com/articles/s41612-025-01125-6)
+[CREDIT npj Climate and Atmospheric Science Article](https://www.nature.com/articles/s41612-025-01125-6)
 
 ## About
 CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models
