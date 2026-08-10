@@ -1,47 +1,59 @@
-# NSF NCAR MILES Community Research Earth Digital Intelligence Twin (CREDIT)
+# DOP+: GOES-East Full-Disk AI Nowcasting of Cloud Evolution in Observation Space
 
-[![DOI](https://zenodo.org/badge/710968229.svg)](https://doi.org/10.5281/zenodo.14361005)
-[![arXiv](https://img.shields.io/badge/arXiv-2411.07814-b31b1b.svg)](https://arxiv.org/abs/2411.07814)
+This repository contains the code for training, deploying, and evaluating the DOP+ model described in:
 
-[PyPI](https://pypi.org/project/miles-credit/)
+> Kimpara, D., Bagheri, O., Hernandez Banos, I., Jung, B.-J., & Snyder, C. (2025). GOES-East full-disk AI nowcasting of cloud evolution in observation space.
 
-[CREDIT npj Climate and Atmospheric Science Article](nature.com/articles/s41612-025-01125-6)
+DOP+ forecasts GOES-East full-disk infrared brightness temperatures at 10-minute resolution out to 6-hour lead times by extending direct observation prediction (DOP) with conditioning on ERA5 meteorological fields via Feature-wise Linear Modulation (FiLM). The domain covers ~10^8 km^2, spanning tropical, midlatitude, and marine regimes across the Americas and adjacent ocean basins.
 
-## About
-CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models 
-that can be flexibly configured both in terms of input data and neural network architecture. The interface is designed
-to be user-friendly and enable fast spin-up and iteration. CREDIT is backed by the AI and atmospheric science expertise
-of the MILES group and the NSF National Center for Atmospheric Research, leading to design choices that balance advanced
-AI/ML with our physical knowledge of the atmosphere.
+This software is built on the [CREDIT](https://github.com/NCAR/miles-credit) (Community Research Earth Digital Intelligence Twin) framework.
 
-CREDIT has reached its first stable release with a full set of models, training, and deployment options. It continues
-to be under active development. Please contact [the MILES group](mailto:milescore@ucar.edu) if you have any questions about CREDIT.
+## Repository Structure
 
-MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
-instructions, how to get started training and deploying models, how to interpret the config files, and full API docs. 
+```
+credit/              Core library (models, datasets, trainers, transforms, verification)
+config_goes/         YAML configuration files for GOES training and evaluation runs
+goes_preproc/        GOES ABI and ERA5 data preprocessing and regridding pipelines
+  goes_regrid/         Regridding and local zenith angle computation
+  streamlined_preproc/ Parallelized GOES I/O, Zarr store creation, and validation
+  statistics/          Climatology and data statistics computation
+  process_era5.py      ERA5 field subsetting and regridding
+scripts/             HPC job submission scripts (PBS on Derecho/Casper)
+notebooks/           Analysis, verification, and figure generation notebooks
+```
 
-## Citing CREDIT
-If you are interested in using CREDIT as part of your research, please cite the following paper:
-Schreck, J., Sha, Y., Chapman, W., Kimpara, D., Berner, J., McGinnis, S., Kazadi, A., Sobhani, N., Kirk, B., Gagne, D.J. (2024, November 9). 
-Community Research Earth Digital Intelligence Twin (CREDIT). arXiv [cs.AI]. http://arxiv.org/abs/2411.07814
+## Data
 
-# Model Weights and Data
-Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFormer are available on huggingface.
+- **GOES ABI Level 1b**: Channels 4, 7, 8, 9, 10, 13 coarse-grained to 0.1 degree resolution. Training: Apr 2018 -- Jul 2022; validation: Jul -- Dec 2022; evaluation: Jun -- Jul 2025. Available from the [AWS GOES archive](https://registry.opendata.aws/noaa-goes/).
+- **ERA5 reanalysis**: 11 model levels plus single-level and static fields, bilinearly interpolated to 0.1 degrees. Available from the [NSF NCAR Research Data Archive](https://doi.org/10.5065/XV5R5344).
+- **MPAS-JEDI simulated brightness temperatures**: Available via [Globus](https://app.globus.org/file-manager?origin_id=22275241-02e7-425a-89d6-5686435fdd46).
 
-* [6-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_6h)
-* [1-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_1h)
-* [6-Hour FuXi](https://huggingface.co/djgagne2/fuxi_6h)
+## Installation
 
-Processed ERA5 Zarr Data are available for download through Globus (requires free account) through the [CREDIT ERA5 Zarr Files](https://app.globus.org/file-manager/collections/2fc90d8f-10b7-44e1-a6a5-cf844112822e/overview) collection.
+```bash
+git clone https://github.com/dkimpara/goes-deterministic.git
+cd goes-deterministic
+pip install -e .
+```
 
-Scaling/transform values for normalizing the data are available through Globus [here](https://app.globus.org/file-manager/collections/c5a23e21-1bee-4d1e-bb59-77c5dcee7c76). 
+## Usage
 
-CREDIT also supports realtime runs generated from deterministic [Google Cloud GFS files](https://console.cloud.google.com/marketplace/product/noaa-public/gfs)
-and raw cube sphere [GEFS files](https://console.cloud.google.com/marketplace/product/noaa-public/gfs-ensemble-forecast-system).
+Training and rollout are launched via the CREDIT CLI entry points with a YAML config file. Example configs are in `config_goes/`.
 
-# Support
-This software is based upon work supported by the NSF National Center for Atmospheric Research, a major facility sponsored by the 
-U.S. National Science Foundation  under Cooperative Agreement No. 1852977 and managed by the University Corporation for Atmospheric Research. Any opinions, findings and conclusions or recommendations 
-expressed in this material do not necessarily reflect the views of NSF. Additional support for development was provided by 
-The NSF AI Institute for Research on Trustworthy AI for Weather, Climate, and Coastal Oceanography (AI2ES)  with grant
-number RISE-2019758 and by Schmidt Sciences, LLC. 
+```bash
+# Training
+credit_train --config config_goes/goes_era5_forcing.yml
+
+# Rollout / inference
+credit_rollout_to_netcdf --config config_goes/example_eval.yml
+```
+
+See the [CREDIT documentation](https://miles-credit.readthedocs.io/en/latest/) for detailed configuration options.
+
+## Support
+
+This research was supported by the United States Air Force (grant no. NA21OAR4310383) and the NSF National Center for Atmospheric Research, a major facility sponsored by the U.S. National Science Foundation under Cooperative Agreement No. 1852977.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).
