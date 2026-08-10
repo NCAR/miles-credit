@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "GOES-East full-disk AI nowcasting of cloud evolution in observation space: Code and Models"
+type: software
+license: Apache-2.0
+authors:
+  - family-names: Kimpara
+    given-names: Dhamma
+    affiliation: "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+  - family-names: Bagheri
+    given-names: Omid
+    affiliation: "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+  - family-names: Hernandez Banos
+    given-names: Ivette
+    affiliation: "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+  - family-names: Jung
+    given-names: Byoung-Joo
+    affiliation: "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+  - family-names: Snyder
+    given-names: Chris
+    affiliation: "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+keywords:
+  - machine learning
+  - nowcasting
+  - GOES
+  - satellite
+  - clouds
+  - brightness temperature
+  - deep learning
+  - weather prediction
+repository-code: "https://github.com/NCAR/miles-credit"

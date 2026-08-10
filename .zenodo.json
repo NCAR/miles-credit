@@ -1,0 +1,50 @@
+{
+  "title": "GOES-East full-disk AI nowcasting of cloud evolution in observation space: Code and Models",
+  "description": "Software for training and deploying AI nowcasting models for GOES-East full-disk infrared brightness temperatures. Extends the CREDIT (Community Research Earth Digital Intelligence Twin) framework with direct observation prediction (DOP+) conditioned on meteorological fields. Forecasts cloud evolution at 10-minute resolution across the GOES-East full disk (~10^8 km^2) out to 6-hour lead times.",
+  "upload_type": "software",
+  "license": "Apache-2.0",
+  "creators": [
+    {
+      "name": "Kimpara, Dhamma",
+      "affiliation": "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+    },
+    {
+      "name": "Bagheri, Omid",
+      "affiliation": "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+    },
+    {
+      "name": "Hernandez Banos, Ivette",
+      "affiliation": "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+    },
+    {
+      "name": "Jung, Byoung-Joo",
+      "affiliation": "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+    },
+    {
+      "name": "Snyder, Chris",
+      "affiliation": "NSF National Center for Atmospheric Research, Boulder, Colorado, USA"
+    }
+  ],
+  "keywords": [
+    "machine learning",
+    "nowcasting",
+    "GOES",
+    "satellite",
+    "clouds",
+    "brightness temperature",
+    "deep learning",
+    "weather prediction"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "10.5281/zenodo.14361005",
+      "relation": "isDerivedFrom",
+      "scheme": "doi"
+    }
+  ],
+  "grants": [
+    {
+      "id": "10.13039/100000001::1852977"
+    }
+  ]
+}
