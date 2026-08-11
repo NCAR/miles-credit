@@ -1409,6 +1409,72 @@ class TestBaseTrainerAdditionalInit:
         assert trainer.grad_max_norm == 1.0
 
 
+class TestSelectLogMetricNames:
+    """Column selection for training_log.csv (BaseTrainer._select_log_metric_names)."""
+
+    _train_results = {
+        "train_loss": [0.5],
+        "train_rmse": [1.0],
+        "train_rmse/ERA5/prognostic/3d/temperature": [1.8],
+        "train_rmse/ERA5/prognostic/2d/SP": [140.0],
+        "train_loss_var/ERA5/prognostic/3d/temperature": [0.2],
+        "train_forecast_len": [1],
+        "train_history_len": [1],
+    }
+    _valid_results = {
+        "valid_loss": [0.6],
+        "valid_rmse": [1.1],
+        "valid_rmse/ERA5/prognostic/3d/temperature": [1.9],
+        "valid_rmse/ERA5/prognostic/2d/SP": [150.0],
+        "valid_acc/ERA5/prognostic/3d/temperature": [0.9],  # validation-only key
+        "valid_forecast_len": [1],
+        "valid_history_len": [1],
+    }
+
+    def _trainer(self, tmp_path, **overrides):
+        conf = _minimal_conf(**overrides)
+        conf["save_loc"] = str(tmp_path)
+        return _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+    def test_default_saves_per_variable_and_combined(self, tmp_path):
+        """Default (unset) writes per-variable columns alongside the aggregates."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" in names
+        assert "loss_var/ERA5/prognostic/3d/temperature" in names
+        # validation-only keys are not dropped
+        assert "acc/ERA5/prognostic/3d/temperature" in names
+
+    def test_list_filters_per_variable_keeps_combined(self, tmp_path):
+        """A variable list restricts per-variable columns but keeps the aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=["temperature"])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" not in names
+        assert "loss" in names and "rmse" in names
+
+    def test_false_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: False writes only the combined aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=False)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert not any("/" in name for name in names)
+
+    def test_empty_list_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: [] behaves like False (aggregates only)."""
+        trainer = self._trainer(tmp_path, save_metric_vars=[])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert not any("/" in name for name in names)
+
+    def test_no_duplicate_columns(self, tmp_path):
+        """Aggregate names already in the results are not duplicated."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert len(names) == len(set(names))
+
+
 # ---------------------------------------------------------------------------
 # BaseTrainer._save_checkpoint — non-fsdp branch
 # ---------------------------------------------------------------------------

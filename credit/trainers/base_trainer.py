@@ -274,7 +274,10 @@ class BaseTrainer(ABC):
         # Defaults to a large sentinel so `epochs` is the effective limit when
         # num_epoch is not set in the config.
         self.num_epoch = trainer_conf.get("num_epoch", int(1e8))
-        self.save_metric_vars = trainer_conf.get("save_metric_vars", [])
+        # True (default): log every per-variable metric column alongside the
+        # combined aggregates. A list restricts per-variable columns to matching
+        # variable names; False or [] logs the combined aggregates only.
+        self.save_metric_vars = trainer_conf.get("save_metric_vars", True)
         self.train_one_epoch_mode = trainer_conf.get("train_one_epoch", False)
 
         metrics_conf = conf.get("metrics") or {}
@@ -411,6 +414,43 @@ class BaseTrainer(ABC):
                 parts.append(f"{phase}_{name}: {np.mean(values):.6f}")
         if len(parts) > 1 and self.rank == 0:
             logger.info("%s", " ".join(parts))
+
+    def _select_log_metric_names(self, train_results: dict, valid_results: dict) -> list:
+        """Choose which metric columns are written to training_log.csv/TensorBoard.
+
+        Names are phase-agnostic (``train_``/``valid_`` prefix stripped); fit()
+        writes each as ``train_<name>`` / ``valid_<name>`` where present. The
+        combined aggregates (loss, the display metrics, forecast/history len)
+        are always included. Per-variable columns (``rmse/ERA5/...``,
+        ``loss_var/...``) follow ``trainer.save_metric_vars``:
+
+          - ``True`` (default): every per-variable column.
+          - list of variable names: only per-variable columns whose key contains
+            one of the names.
+          - ``False`` or ``[]``: combined aggregates only.
+        """
+        required_metrics = ["loss", *self.display_metrics, "forecast_len", "history_len"]
+
+        # Union across phases so validation-only keys are not dropped.
+        all_names = list(
+            dict.fromkeys(
+                key.removeprefix(prefix)
+                for prefix, results in (("train_", train_results), ("valid_", valid_results))
+                for key in results
+                if key.startswith(prefix)
+            )
+        )
+        if isinstance(self.save_metric_vars, list):
+            names = (
+                [name for name in all_names if any(var in name for var in self.save_metric_vars)]
+                if self.save_metric_vars
+                else []
+            )
+        elif self.save_metric_vars:
+            names = all_names
+        else:
+            names = []
+        return list(dict.fromkeys(names + required_metrics))  # preserves order; set() randomizes column order
 
     # ------------------------------------------------------------------
     # Checkpointing
@@ -657,18 +697,7 @@ class BaseTrainer(ABC):
             # ---- Collect results ----
             results_dict["epoch"].append(epoch)
 
-            required_metrics = ["loss", *self.display_metrics, "forecast_len", "history_len"]
-            if isinstance(self.save_metric_vars, list) and len(self.save_metric_vars) > 0:
-                names = [
-                    key.replace("train_", "")
-                    for key in train_results
-                    if any(var in key for var in self.save_metric_vars)
-                ]
-            elif isinstance(self.save_metric_vars, bool) and self.save_metric_vars:
-                names = [key.replace("train_", "") for key in train_results]
-            else:
-                names = []
-            names = list(dict.fromkeys(names + required_metrics))  # preserves order; set() randomizes column order
+            names = self._select_log_metric_names(train_results, valid_results)
 
             for name in names:
                 if f"train_{name}" in train_results:

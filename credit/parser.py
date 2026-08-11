@@ -901,7 +901,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             )
 
         if "save_metric_vars" not in conf["trainer"]:
-            conf["trainer"]["save_metric_vars"] = []  # averaged metrics only
+            conf["trainer"]["save_metric_vars"] = True  # per-variable metrics plus combined aggregates
 
         if "use_scheduler" in conf["trainer"]:
             # ------------------------------------------------------------------------------ #

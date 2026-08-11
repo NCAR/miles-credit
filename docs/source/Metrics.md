@@ -96,7 +96,10 @@ the metric's key:
 
 A `combined` metric returns the union of its children's outputs. The trainer
 all-reduces every value across ranks and writes it to TensorBoard and
-`training_log.csv` as `train_<key>` / `valid_<key>`.
+`training_log.csv` as `train_<key>` / `valid_<key>` — by default both the
+per-variable scores and the combined aggregates. Set `trainer.save_metric_vars`
+to a list of variable names to restrict the per-variable columns, or to `False`
+to write only the combined aggregates.
 
 The progress bar and CSV columns follow whatever you configure: `BaseTrainer`
 derives its display metrics from `metrics.args.metrics` (or from `metrics.type` for
