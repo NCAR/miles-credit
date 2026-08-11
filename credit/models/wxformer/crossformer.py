@@ -164,6 +164,21 @@ class UpBlockPS(nn.Module):
 # cross embed layer
 
 
+class CrossEmbedConvBranch(nn.Sequential):
+    """nn.Sequential(ZeroPad2d, Conv2d) for one CrossEmbedLayer kernel branch.
+
+    A distinctly-named nn.Sequential subclass -- behaves identically to a
+    plain nn.Sequential (same forward, same auto-indexed "0"/"1" children,
+    so state_dict keys are unaffected) -- purely so domain-parallel
+    conversion (credit/domain_parallel/convert.py) can recognize this exact
+    pattern via isinstance and replace it as a unit instead of matching only
+    the inner Conv2d. See DomainParallelCrossEmbedBranch for why that
+    distinction matters: the inner Conv2d alone doesn't carry enough
+    information to redo this branch's padding correctly under domain
+    parallelism.
+    """
+
+
 class CrossEmbedLayer(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_sizes, stride=2):
         super().__init__()
@@ -189,7 +204,7 @@ class CrossEmbedLayer(nn.Module):
             pad_left = pad_total // 2
             pad_right = pad_total - pad_left
             self.convs.append(
-                nn.Sequential(
+                CrossEmbedConvBranch(
                     nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
                     nn.Conv2d(dim_in, dim_scale, kernel, stride=stride, padding=0),
                 )
