@@ -448,14 +448,18 @@ def _date_range(preset: dict) -> tuple[str, str, str, str, str]:
 def _padding_totals(height: int, width: int) -> tuple[int, int]:
     if (height, width) == (181, 360):
         return 75, 24
+    # Shared with CrossEmbedLayer so this size prediction cannot drift from the
+    # model's actual padding. Imported lazily: crossformer pulls in torch, which
+    # would otherwise slow down every `credit begin` startup.
+    from credit.models.wxformer.crossformer import crossembed_out_size
+
     strides = [2, 2, 2, 2]
     kernels = [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
     windows = [8, 4, 2, 1]
 
     def valid(size: int) -> bool:
-        for index, (stride, stage_kernels, window) in enumerate(zip(strides, kernels, windows)):
-            kernel = min(stage_kernels)
-            size = (size + 2 * ((kernel - stride) // 2) - kernel) // stride + 1
+        for stride, stage_kernels, window in zip(strides, kernels, windows):
+            size = crossembed_out_size(size, min(stage_kernels), stride)
             if size < 1 or size % window or size % 4:
                 return False
         return True
@@ -777,8 +781,12 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "queue": defaults["queue"],
         }
         if system == "casper":
-            gpu_type = _prompt("Casper GPU type (any, v100, a100_80gb, h100)", "any").lower()
-            if gpu_type not in ("", "any", "none") and gpu_type in _CASPER_GPU_NODES:
+            choices = ["any"] + sorted(t for t in _CASPER_GPU_NODES if t)
+            hint = ", ".join(choices)
+            gpu_type = _prompt(f"Casper GPU type ({hint})", "any").lower()
+            while gpu_type not in ("", "any", "none") and gpu_type not in _CASPER_GPU_NODES:
+                gpu_type = _prompt(f"Unrecognized GPU type {gpu_type!r}. Choose one of: {hint}", "any").lower()
+            if gpu_type not in ("", "any", "none"):
                 result["gpu_type"] = gpu_type
         return result
 

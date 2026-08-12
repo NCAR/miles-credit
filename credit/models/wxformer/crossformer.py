@@ -165,6 +165,22 @@ class UpBlockPS(nn.Module):
 # cross embed layer
 
 
+def crossembed_pad_total(kernel: int, stride: int) -> int:
+    """Total zero-padding a CrossEmbedLayer conv branch applies per spatial dim."""
+    return kernel - stride
+
+
+def crossembed_out_size(size: int, kernel: int, stride: int) -> int:
+    """Spatial output size of one CrossEmbedLayer conv branch.
+
+    Standard conv arithmetic with the layer's asymmetric zero-padding; with
+    pad_total = kernel - stride this is kernel-independent (floor(size/stride)),
+    which is why the cat() across kernel sizes works. Shared with the
+    `credit begin` wizard's grid-spec search so the two cannot drift apart.
+    """
+    return (size + crossembed_pad_total(kernel, stride) - kernel) // stride + 1
+
+
 class CrossEmbedConvBranch(nn.Sequential):
     """nn.Sequential(ZeroPad2d, Conv2d) for one CrossEmbedLayer kernel branch.
 
@@ -201,7 +217,7 @@ class CrossEmbedLayer(nn.Module):
             # instead so every (kernel, stride) combination gets the exact "same"
             # shape; this is a no-op vs. the old formula whenever (kernel - stride)
             # is even (the previously-working case, e.g. every default stride=2 config).
-            pad_total = kernel - stride
+            pad_total = crossembed_pad_total(kernel, stride)
             pad_left = pad_total // 2
             pad_right = pad_total - pad_left
             self.convs.append(
