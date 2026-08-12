@@ -37,6 +37,9 @@ myst_heading_anchors = 3
 
 html_theme = "sphinx_book_theme"
 html_static_path = ["_static"]
+html_favicon = "_static/favicon/favicon.ico"
+html_title = "CREDIT Documentation"
+html_short_title = "CREDIT Docs"
 autoapi_dirs = ["../../credit", "../../applications"]
 autoapi_root = "api"
 # Drop "imported-members" from the defaults so package __init__ re-exports are
