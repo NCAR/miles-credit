@@ -33,6 +33,7 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
    :caption: Getting Started
 
    Get Started <quickstart.md>
+   CLI <cli.md>
 
 
 .. toctree::
@@ -41,12 +42,11 @@ If you encounter issues or have suggestions, please open an issue on our GitHub 
 
    Overview <gen2_overview.md>
    Datasets <Datasets.md>
-   Models <Models_gen2.md>
    Preblocks <Preblocks.md>
    Postblocks <postblocks_gen2.md>
+   Models <Models_gen2.md>
    Loss Functions <Losses.md>
    Verification Metrics <Metrics.md>
-   CLI <cli.md>
    Custom Objects <Custom.md>
 
 

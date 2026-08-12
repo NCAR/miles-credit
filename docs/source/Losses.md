@@ -280,7 +280,10 @@ weights you control directly.
 forward pass, and `TrainerERA5Gen2` logs them automatically — all-reduced across
 ranks — as `train_loss_var/<var_key>` and `valid_loss_var/<var_key>`. They appear
 in TensorBoard and in `training_log.csv`, which makes it straightforward to see
-which variable is driving a plateau.
+which variable is driving a plateau. The per-variable columns are controlled by
+`trainer.save_metric_vars`: `True` (the default) writes every per-variable
+column, a list of variable names writes only matching columns, and `False` (or
+`[]`) writes the combined aggregates only.
 
 ## Using a plain registry loss
 

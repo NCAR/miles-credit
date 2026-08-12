@@ -59,9 +59,11 @@ samples from all data sources are selected.
 * `end_datetime`: Ending date of the training sample period in pandas-readable date string format.
 * `timestep`: Time spacing between the input and target in pandas time delta format (e.g., '6h' or '1d').
 * `history_len`: How many integer time steps each input sample is expected to contain. 
-* `forecast_len`: How many integer time steps each prediction sample is expected to contain.
-Note that gen2 is 1-indexed: `forecast_len: 1` means a single-step prediction (in contrast to
-gen1, where `forecast_len: 0` meant a single step).
+* `forecast_len`: How many sequential autoregressive rollout steps are performed per training
+sample. Each individual prediction and target always covers a single time step; with
+`forecast_len > 1` the model's output is fed back as input `forecast_len` times, with the loss
+applied at each step. Note that gen2 is 1-indexed: `forecast_len: 1` means a single-step
+prediction (in contrast to gen1, where `forecast_len: 0` meant a single step).
 * `temporal_mode`: A per-source option (set inside a `data.source.<name>` block) controlling how a
 source whose native timestep or time range differs from the master clock is aligned. With
 `"persist"`, a source with a slower timestep is persisted (held) forward until it aligns with the
@@ -184,7 +186,7 @@ data:
 *API reference: {py:class}`credit.datasets.gen_2.tisr.TISRDataset`* · `dataset_type: tisr`
 
 This dataset calculates total integrated top of atmosphere solar irradiance entirely in Pytorch based on lat-lon and 
-time information. It follows the design patterns and calculations of the [Graphcast solar radiation module](https://github.com/google-deepmind/weathernext/blob/main/graphcast/solar_radiation.py).
+time information. It follows the design patterns and calculations of the [Graphcast solar radiation module](https://github.com/google-deepmind/weathernext/blob/08cf73625c9d12bd9aaa038868bcb2fe488f2a22/graphcast/solar_radiation.py).
 
 ### GOESDataset
 *API reference: {py:class}`credit.datasets.gen_2.goes.GOESDataset`* · `dataset_type: goes`
@@ -221,3 +223,12 @@ The GEFS Dataset reads the raw GEFS (Global Ensemble Forecast System) initializa
 files from the public `gfs-ensemble-forecast-system` Google Cloud bucket. Each selected
 ensemble member contains atmospheric and surface fields on the six cube-sphere tiles,
 making it useful for initializing ensemble rollouts.
+## Writing Your Own Dataset
+
+To plug in a dataset CREDIT does not ship — a new data source, file layout, or
+sampling strategy — subclass
+{py:class}`credit.datasets.gen_2.base_dataset.BaseDataset` in your own package
+and register it through the config's `custom_objects:` block; no CREDIT source
+changes are needed. The [Custom Objects](Custom.md) guide walks through the
+full recipe (writing the class, making it importable, declaring it under
+`custom_objects:`, and referencing its key as a `dataset_type`).

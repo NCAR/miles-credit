@@ -220,39 +220,83 @@ and writes one NetCDF file per forecast:
 credit rollout -c my_experiment.yml
 ```
 
-To run on multiple GPUs pass `--mode ddp`:
-
-```bash
-credit rollout -c my_experiment.yml --mode ddp
-```
-
-The `predict` block in your config controls which dates are run and where output goes:
+The `inference:` block in your config controls which init times are run and where
+output goes (see `config/gen_2/examples/example-end-to-end.yml` for a fully
+annotated version):
 
 ```yaml
-predict:
-    mode: ddp           # none | ddp
-    batch_size: 4       # initial conditions per GPU per batch
-    ensemble_size: 1    # > 1 enables ensemble inference (requires ensemble model)
-    forecasts:
-        type: "custom"
-        start_year: 2020
-        start_month: 1
-        start_day: 1
-        start_hours: [0, 12]   # UTC hours to initialise each day
-        duration: 1             # forecast length in days
-        days: 1                 # number of days to run from start date
-    metadata: '/path/to/credit/metadata/era5.yaml'
-    save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run'
-    use_laplace_filter: False
+inference:
+  run_mode: batch                   # batch (many init times) | single (one init time)
+  mode: ddp                         # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run/rollout'
+
+  # Rollout has no truth data, so the training postblock chain's
+  # y_target_processed twin cannot run. Give inference its own chain:
+  # same blocks minus the target twin, with scaler settings matching training.
+  postblocks:
+    per_step:
+      reconstruct:
+        type: reconstruct
+      scaler:
+        type: bridgescaler_transform
+        args:
+          scaler_path: '/path/to/bridgescaler_pre.json'
+          variables: []
+          spatial_variables: ['ERA5/prognostic/2d/SP']
+          method: inverse_transform
+
+  batch_forecast:                   # used when run_mode: batch
+    forecast_length: "10d"          # total forecast duration per init time
+    first_init_date: "2020-01-01"   # first init time (within the data date range)
+    last_init_date: "2020-01-10"    # last init time
+    init_interval: "12h"            # spacing between init times
+
+  single_forecast:                  # used when run_mode: single
+    forecast_length: "10d"
+    start_datetime: "2020-06-01T00:00Z"
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_interval: null           # write every step (null) or only multiples, e.g. "24h"
+    group_by: day                   # null (one file per step) | day | month | year | full
+    variables: null                 # null = save everything; or a list of y_processed keys,
+                                    # each optionally with a `levels:` subset for 3D variables
+    metadata: "era5.yaml"           # CF attribute metadata YAML (null = no attributes)
+    encoding:                       # NetCDF encoding; per-variable overrides allowed
+      dtype: float32
+      zlib: true
+      complevel: 4
+    max_pending: null               # cap on in-flight async writes (null = auto)
 ```
 
-Output files land in `save_forecast/`. Filename format is
-`<YYYY><MM><DD><HH>Z_<lead_hours>h.nc`.
+Key behaviors:
+
+- **`run_mode`** selects `batch` (a schedule of init times from `batch_forecast`)
+  or `single` (one init time from `single_forecast.start_datetime`). The CLI flags
+  `--run-mode`, `--init-time`, and `--save-dir` override the corresponding config
+  entries; `--init-time` implies `run_mode: single`.
+- **`inference.data` / `inference.preblocks` / `inference.postblocks`** (each
+  optional) wholesale-replace the matching top-level block for rollout only —
+  training is unaffected. A present block must be complete on its own (it is a
+  replacement, not a merge). `start_datetime`/`end_datetime` may be omitted from
+  `inference.data`; the init-time schedule supplies the dates.
+- **`output.output_interval`** subsamples in time: only steps whose forecast hour
+  is a multiple of the interval are written.
+- **`output.group_by`** controls file granularity. Output lands in
+  `save_forecast/<YYYYMMDD_HHMMZ>/` (one subdirectory per init time), containing
+  e.g. one file per day (`2020-06-01.nc`), per month, per year, or per run
+  (`full.nc`); `null` writes one file per step.
+- **`output.variables`** filters what is saved. Each entry names a `y_processed`
+  key (`source/type/dim/varname`); 3D entries may add `levels:` to subset model
+  levels.
 
 ### Realtime forecast from a single init time
 
 `credit realtime` runs one forecast from a user-specified initialisation time,
-writing output as it steps (useful for operational or near-realtime use):
+writing output as it steps (useful for operational or near-realtime use).
+Note: unlike `credit rollout`, the realtime entrypoint is configured through the
+`predict:` block (`predict.mode`, `predict.save_forecast`,
+`predict.realtime.*`), not `inference:`.
 
 ```bash
 credit realtime -c my_experiment.yml \

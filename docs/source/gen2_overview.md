@@ -20,6 +20,33 @@ of artifacts, oversmoothing, and improper coupling. We have made it much easier 
 constraints at any point in the data and modeling pipeline. Not even the sky is the limit on what you could do with
 this framework!
 
+## Gen 1 vs Gen 2: which one am I using?
+
+CREDIT currently ships two generations of the data/training pipeline side by
+side. **Gen 2 is the current system and the right choice for all new work**;
+Gen 1 is kept for reference and to reproduce published experiments (e.g. the
+`config/gen_1/arXiv_2024/` configs). The pages in this documentation are
+organized accordingly: everything under *Generation 2 Components* and the
+quickstart describe Gen 2, while the *Generation 1* section at the bottom of
+the sidebar covers the legacy pipeline.
+
+The fastest way to tell which generation a config uses is the shape of its
+`data:` block — Gen 2 nests sources under `data.source.<name>`, Gen 1 does not —
+or its `trainer.type`:
+
+|                       | Gen 1 (legacy)                       | Gen 2 (current)                                  |
+|-----------------------|--------------------------------------|--------------------------------------------------|
+| `trainer.type`        | `era5`                               | `gen2` / `era5-gen2`                             |
+| Data schema           | flat `data:` block                   | nested `data.source.<name>` with typed channels (`prognostic` / `diagnostic` / `dynamic_forcing` / `static`) |
+| `forecast_len`        | 0-indexed (`0` = single step)        | 1-indexed (`1` = single step)                    |
+| Normalization         | pre-computed mean/std files          | `bridgescaler_transform` preblock fitted by `credit preprocess` |
+| Pre/post-processing   | fixed transforms called internally   | composable `preblocks:` / `postblocks:` pipeline stages |
+| Example configs       | `config/gen_1/`                      | `config/gen_2/examples/`                         |
+
+An existing Gen 1 config can be migrated with `credit convert -c old.yml`,
+which bumps `forecast_len` by 1, retargets `trainer.type`, and prompts for the
+new settings.
+
 ## [Datasets](Datasets.md)
 CREDIT Gen 2 has simplified the process for adding new Datasets and created
 new Datasets for both local and cloud-based Datasets. We have also created

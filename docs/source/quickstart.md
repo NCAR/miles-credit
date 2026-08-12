@@ -2,6 +2,11 @@
 
 With these instructions, you can get from zero to running a training session in under 10 minutes.
 
+This guide (and everything under *Generation 2 Components*) describes CREDIT
+**Gen 2**, the current pipeline. If you have inherited an older config or are
+unsure which generation you are looking at, see
+[Gen 1 vs Gen 2](gen2_overview.md#gen-1-vs-gen-2-which-one-am-i-using).
+
 ---
 
 ## 1. Install CREDIT 
@@ -91,12 +96,16 @@ credit check -c my_experiment.yml --strict   # exit non-zero on warnings too
 credit check -c my_experiment.yml --json     # machine-readable output
 ```
 
-Note that gen2 `forecast_len` is 1-indexed: `forecast_len: 1` means a
-single-step prediction, unlike gen1's 0-indexed convention where `0` meant a
-single step.
+Note that gen2 `forecast_len` is 1-indexed and counts sequential rollout steps
+per training sample (each prediction/target is always a single step):
+`forecast_len: 1` means a single-step prediction, unlike gen1's 0-indexed
+convention where `0` meant a single step.
 
-> **More detail**: the fully annotated gen2 reference config
-> [`config/gen_2/examples/example-v2026.2.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-v2026.2.yml)
+> **More detail**: for a complete runnable example, see
+> [`config/gen_2/examples/example-end-to-end.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-end-to-end.yml),
+> which exercises the full `credit preprocess` → `credit train` →
+> `credit rollout` sequence out of the box. The fully annotated gen2 reference config is
+> [`config/gen_2/examples/example-v2026.2.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-v2026.2.yml).
 > | [Datasets guide](Datasets.md) | [Models](Models_gen2.md) | [Training guide](Training.md)
 
 ## 3. Fit the scalers with `credit preprocess`
@@ -108,8 +117,8 @@ credit preprocess -c my_experiment.yml
 ```
 
 `credit preprocess` streams through the training data and fits the
-bridgescaler normalization scalers used by the `bridgescaler_transform`
-preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
+[bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
+by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
 config. Training will fail without this file, so run it once before your first
 training job (and re-run it if you change the variable list or date range).
 
@@ -203,12 +212,22 @@ directory (e.g. `/glade/derecho/scratch/$USER/CREDIT_runs/my_run` on NCAR HPC):
 tail -5 <save_loc>/training_log.csv
 ```
 
-Columns: `epoch`, `train_loss`, `val_loss`, `lr`, `epoch_time_s`.
+Columns include `epoch`, `train_loss`, `valid_loss`, the combined verification
+metrics, and `lr`. By default (`trainer.save_metric_vars: True`) per-variable
+columns (`train_loss_var/<var>`, `valid_loss_var/<var>`, per-variable metrics)
+are also written, which makes it easy to see which variable is driving the
+loss; set `save_metric_vars: False` or a list of variable names to trim the
+CSV.
 
 **What healthy training looks like:**
-- After epoch 1: `train_loss` ≈ 1–3
 - Loss should decrease steadily each epoch
-- `val_loss` should track `train_loss` (not diverge)
+- `valid_loss` should track `train_loss` (not diverge)
+
+The absolute loss magnitude depends on your loss configuration: gen2 losses
+operate in physical units, so the value scales with the variables' units and
+the `var_weighting` choice (e.g. `inverse_variance` weighting brings the
+initial loss to order 1). Trends and train/validation agreement matter more
+than the absolute number.
 
 ### TensorBoard
 

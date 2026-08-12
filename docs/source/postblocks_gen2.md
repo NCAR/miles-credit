@@ -70,8 +70,10 @@ Splits the model's flat output tensor into a nested variable dict. By default it
 splits `batch_dict["y_pred"]` into `batch_dict["y_processed"]`, reading channel
 slices from the `_channel_map` metadata that `ConcatToTensor` built (prognostic
 + diagnostic variables) and unflattening each slice from
-`(B, n_levels * n_time, H, W)` back to `(B, n_levels, n_time, H, W)`. This is
-almost always the first postblock in the chain. Set `detach: false` when
+`(B, n_levels * n_time, H, W)` back to `(B, n_levels, n_time, H, W)`. This
+block is effectively **required as the first postblock in every gen2 chain** —
+it is the counterpart of the mandatory `concat` preblock, and every downstream
+postblock (and `BaseLoss`) operates on the `y_processed` dict it produces. Set `detach: false` when
 downstream fixers or `BaseLoss` must backpropagate through the reconstructed
 dict; the default `true` severs the autograd graph.
 
@@ -508,3 +510,9 @@ postblocks:
           - "ERA5/prognostic/3d/specific_humidity"
         key: "y_target_processed"
 ```
+
+## Writing Your Own Postblock
+
+Custom postblocks subclass `credit.postblock.base.BasePostblock` and can be
+plugged in from your own package via the config's `custom_objects:` block —
+see the [Custom Objects](Custom.md) guide for the full recipe.

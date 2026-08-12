@@ -151,6 +151,19 @@ by running `credit preprocess`. `variables` accepts full variable keys,
 partial paths (e.g. `"era5/prognostic"` expands to all variables under that
 prefix), or an empty list (expands to all variables).
 
+When `credit preprocess` fits a *new* scaler (no file at `scaler_path` yet),
+the scaler is constructed from `scaler_type` (`standard` or `quantile`) and
+`scaler_params`, which is passed straight to the bridgescaler constructor.
+
+```{warning}
+A common pitfall: bridgescaler's default is `channels_last=True`, but CREDIT
+tensors are channels-first `(batch, channels, lat, lon)`. Always set
+`scaler_params: {channels_last: False}` on any `bridgescaler_transform`
+preblock that will fit a new scaler — otherwise the scaler silently computes
+statistics over the wrong axis. (Once fitted, the setting is saved in the
+scaler JSON, so transform-only use of an existing scaler is unaffected.)
+```
+
 ```yaml
 # Scale specific variables in both input and target
 type: "bridgescaler_transform"
@@ -160,6 +173,8 @@ args:
     - "era5/prognostic/3d/T"
     - "era5/prognostic/3d/U"
   method: "transform"
+  scaler_params:
+    channels_last: False
 
 # Scale all variables
 type: "bridgescaler_transform"
@@ -219,7 +234,12 @@ args:
 
 End-of-chain preblock that collapses a nested batch dict of tensors into a
 single input tensor (and optionally a target tensor), concatenating along the
-channel dimension. Input tensors are sorted by a canonical channel key derived
+channel dimension. **This preblock is always required**: every gen2 preblock
+chain must end with `concat`, because the model forward pass expects the flat
+`(batch, channels, lat, lon)` tensor it produces. Its counterpart on the
+output side is the `reconstruct` postblock (see
+[Postblocks](postblocks_gen2.md)), which splits the model output back into the
+nested variable dict. Input tensors are sorted by a canonical channel key derived
 from the `{source}/{field_type}/{dim}/{varname}` structure so the channel
 order is deterministic regardless of insertion order. In addition to the
 tensors, channel maps are attached to metadata mapping each variable to its
@@ -333,3 +353,9 @@ preblocks:
       args:
         to_device: true
 ```
+
+## Writing Your Own Preblock
+
+Custom preblocks subclass `credit.preblock.base.BasePreblock` and can be
+plugged in from your own package via the config's `custom_objects:` block —
+see the [Custom Objects](Custom.md) guide for the full recipe.
