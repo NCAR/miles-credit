@@ -298,8 +298,11 @@ def supports_native_tp(model: nn.Module) -> bool:
         class MyBlock(nn.Module):
             _tp_plan = {"to_q": "colwise", "to_out": "rowwise"}
 
-    Currently only wxformer_column's transformer blocks declare plans (and
-    CubedWXFormer by inheritance).
+    Currently only wxformer_column's transformer blocks declare plans.
+    CubedWXFormer does NOT get this by inheritance — despite the naming
+    symmetry, it is not a subclass of wxformer_column; its per-face encoder
+    reuses crossformer.py's conv-based Transformer/Attention, which declare
+    no ``_tp_plan``. So this always returns False for CubedWXFormer today.
     """
     return any(getattr(m, "_tp_plan", None) for m in model.modules())
 

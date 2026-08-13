@@ -37,9 +37,11 @@ hand-rolled sharding slices fused projections across q/k/v boundaries and
 lacks the backward all-reduce. The old `tp_*` configs (model type `wxformer`)
 are kept as negative references but are not in the matrix.
 
-**Native TP (issue #415)** is supported for `wxformer_column` (and
-CubedWXFormer by inheritance) via torch `parallelize_module`. Its
-acceptance gate is its own run:
+**Native TP (issue #415)** is supported for `wxformer_column` via torch
+`parallelize_module`. `CubedWXFormer` does NOT get this despite the naming
+symmetry — it is not a subclass of `wxformer_column`; its per-face encoder
+reuses `crossformer.py`'s conv-based Transformer/Attention, which declares
+no `_tp_plan`. Its acceptance gate is its own run:
 
 ```bash
 qsub tests/manual/gen2_parallelism/run_tp_parity.pbs
