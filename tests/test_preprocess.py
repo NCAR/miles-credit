@@ -213,9 +213,9 @@ def test_batches_have_expected_structure(processed_batches):
         inp = batch["input"][SOURCE]
         for var in (VAR_T, VAR_Q, VAR_SP):
             assert var in inp
-        # (B, n_levels, T, lat, lon); 64x32 store -> lat=64, lon=32.
-        assert inp[VAR_T].shape == (2, len(LEVELS), 1, 64, 32)
-        assert inp[VAR_SP].shape == (2, 1, 1, 64, 32)
+        # (B, n_levels, T, lat, lon); WB2 "64x32" is 64 lon x 32 lat -> lat=32, lon=64.
+        assert inp[VAR_T].shape == (2, len(LEVELS), 1, 32, 64)
+        assert inp[VAR_SP].shape == (2, 1, 1, 32, 64)
         assert not torch.isnan(inp[VAR_T]).any()
 
 
@@ -461,3 +461,82 @@ def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     assert ((mean > 200) & (mean < 320)).all(), f"implausible temperature means: {mean}"
     # 3 batches * batch_size 2 * 64 * 32 grid points per level.
     assert int(np.asarray(t_scaler.n_).reshape(-1)[0]) == 3 * 2 * 64 * 32
+
+
+def test_preprocess_main_two_scalers_writes_both_files(tmp_path, monkeypatch):
+    """Two BridgeScalerTransform blocks (standard for temperature, quantile for
+    specific humidity) must each be fit and saved to their own scaler_path."""
+    import yaml
+    from bridgescaler import load_scaler_dict
+    from credit.applications import preprocess
+
+    std_file = tmp_path / "scaler_standard.json"
+    quant_file = tmp_path / "scaler_quantile.json"
+    conf = _make_conf(str(tmp_path / "save"), str(std_file))
+    # Replace the single placeholder scaler with two typed, disjoint-variable scalers.
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {
+            "variables": [VAR_T, VAR_SP],
+            "scaler_path": str(std_file),
+            "scaler_type": "standard",
+            "scaler_params": {"channels_last": False},
+        },
+    }
+    conf["preblocks"]["per_step"]["scaler_quantile"] = {
+        "type": "bridgescaler_transform",
+        "args": {
+            "variables": [VAR_Q],
+            "scaler_path": str(quant_file),
+            "scaler_type": "quantile",
+            "scaler_params": {"channels_last": False},
+        },
+    }
+    conf["trainer"]["batches_per_epoch"] = 3
+
+    config_path = tmp_path / "preprocess.yml"
+    config_path.write_text(yaml.safe_dump(conf))
+
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
+    try:
+        preprocess.main()
+    except Exception as err:  # network / GCS issues
+        pytest.skip(f"WeatherBench2 GCS store unavailable: {err}")
+
+    # Both scaler files must exist, each holding only its own variables.
+    assert std_file.exists(), "standard scaler file must be written"
+    assert quant_file.exists(), "quantile scaler file must be written"
+
+    std_dict = load_scaler_dict(str(std_file))["input"][SOURCE]
+    quant_dict = load_scaler_dict(str(quant_file))["input"][SOURCE]
+
+    assert set(std_dict) == {VAR_T, VAR_SP}, "standard scaler should hold only its selected variables"
+    assert set(quant_dict) == {VAR_Q}, "quantile scaler should hold only its selected variable"
+
+    # The standard scaler carries mean/var; the quantile scaler carries a fitted quantile table.
+    assert np.isfinite(np.asarray(std_dict[VAR_T].mean_x_)).all()
+    assert type(quant_dict[VAR_Q]).__name__.startswith("DQuantile")
+
+
+def test_preprocess_main_duplicate_scaler_path_raises(tmp_path, monkeypatch):
+    """Two scaler blocks that share a scaler_path are rejected before fitting."""
+    import yaml
+    from credit.applications import preprocess
+
+    shared = str(tmp_path / "shared.json")
+    conf = _make_conf(str(tmp_path / "save"), shared)
+    conf["preblocks"]["per_step"]["scaler_quantile"] = {
+        "type": "bridgescaler_transform",
+        "args": {
+            "variables": [VAR_Q],
+            "scaler_path": shared,  # same path as the first scaler -> must raise
+            "scaler_type": "quantile",
+            "scaler_params": {"channels_last": False},
+        },
+    }
+    config_path = tmp_path / "preprocess.yml"
+    config_path.write_text(yaml.safe_dump(conf))
+
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
+    with pytest.raises(ValueError, match="distinct scaler_path"):
+        preprocess.main()

@@ -1,5 +1,6 @@
 import torch
 import logging
+import re
 import torch.nn.functional as F
 
 from torch import nn, einsum
@@ -164,6 +165,37 @@ class UpBlockPS(nn.Module):
 # cross embed layer
 
 
+def crossembed_pad_total(kernel: int, stride: int) -> int:
+    """Total zero-padding a CrossEmbedLayer conv branch applies per spatial dim."""
+    return kernel - stride
+
+
+def crossembed_out_size(size: int, kernel: int, stride: int) -> int:
+    """Spatial output size of one CrossEmbedLayer conv branch.
+
+    Standard conv arithmetic with the layer's asymmetric zero-padding; with
+    pad_total = kernel - stride this is kernel-independent (floor(size/stride)),
+    which is why the cat() across kernel sizes works. Shared with the
+    `credit begin` wizard's grid-spec search so the two cannot drift apart.
+    """
+    return (size + crossembed_pad_total(kernel, stride) - kernel) // stride + 1
+
+
+class CrossEmbedConvBranch(nn.Sequential):
+    """nn.Sequential(ZeroPad2d, Conv2d) for one CrossEmbedLayer kernel branch.
+
+    A distinctly-named nn.Sequential subclass -- behaves identically to a
+    plain nn.Sequential (same forward, same auto-indexed "0"/"1" children,
+    so state_dict keys are unaffected) -- purely so domain-parallel
+    conversion (credit/domain_parallel/convert.py) can recognize this exact
+    pattern via isinstance and replace it as a unit instead of matching only
+    the inner Conv2d. See DomainParallelCrossEmbedBranch for why that
+    distinction matters: the inner Conv2d alone doesn't carry enough
+    information to redo this branch's padding correctly under domain
+    parallelism.
+    """
+
+
 class CrossEmbedLayer(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_sizes, stride=2):
         super().__init__()
@@ -185,19 +217,140 @@ class CrossEmbedLayer(nn.Module):
             # instead so every (kernel, stride) combination gets the exact "same"
             # shape; this is a no-op vs. the old formula whenever (kernel - stride)
             # is even (the previously-working case, e.g. every default stride=2 config).
-            pad_total = kernel - stride
+            pad_total = crossembed_pad_total(kernel, stride)
             pad_left = pad_total // 2
             pad_right = pad_total - pad_left
             self.convs.append(
-                nn.Sequential(
+                CrossEmbedConvBranch(
                     nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
                     nn.Conv2d(dim_in, dim_scale, kernel, stride=stride, padding=0),
                 )
             )
 
+        # Migrate pre-ZeroPad2d checkpoints as load_state_dict descends into this
+        # layer, so old weights load on every path that goes through it.
+        self.register_load_state_dict_pre_hook(_crossembed_load_state_dict_pre_hook)
+
     def forward(self, x):
         fmaps = tuple(map(lambda conv: conv(x), self.convs))
         return torch.cat(fmaps, dim=1)
+
+
+# --- legacy checkpoint compatibility ------------------------------------------------- #
+
+# Before the asymmetric-padding fix, CrossEmbedLayer.convs held bare Conv2d modules
+# and stored their parameters at ``convs.<i>.<suffix>``. Wrapping each conv in
+# nn.Sequential(ZeroPad2d, Conv2d) moved them to ``convs.<i>.1.<suffix>``. The
+# negative lookahead makes the rewrite idempotent: an already-migrated key has a
+# digit as its next component and is left alone. ``<suffix>`` is matched loosely so
+# the spectral-norm parametrization (weight_orig / weight_u / weight_v) migrates too.
+_LEGACY_CONVS_KEY = re.compile(r"^convs\.(\d+)\.(?!\d+\.)(.+)$")
+
+
+def _remap_crossembed_prefix(state_dict: dict, prefix: str) -> int:
+    """Rewrite one CrossEmbedLayer's legacy conv keys in place.
+
+    Args:
+        state_dict: state dict to mutate.
+        prefix: dotted prefix of the CrossEmbedLayer within it (``""`` at the root).
+
+    Returns:
+        int: number of keys renamed.
+    """
+    renamed = 0
+    for key in [k for k in state_dict if k.startswith(prefix)]:
+        match = _LEGACY_CONVS_KEY.match(key[len(prefix) :])
+        if match is None:
+            continue
+        new_key = f"{prefix}convs.{match.group(1)}.1.{match.group(2)}"
+        # Never clobber a key the checkpoint already carries in the new format.
+        if new_key not in state_dict:
+            state_dict[new_key] = state_dict.pop(key)
+            renamed += 1
+    return renamed
+
+
+def _crossembed_load_state_dict_pre_hook(module, state_dict, prefix, *args):
+    """load_state_dict pre-hook: migrate this layer's legacy conv keys."""
+    renamed = _remap_crossembed_prefix(state_dict, prefix)
+    if renamed:
+        logger.warning(
+            "Legacy CrossEmbedLayer checkpoint at '%s': remapped %d conv key(s) to the "
+            "ZeroPad2d-wrapped layout (convs.<i>.X -> convs.<i>.1.X).",
+            prefix.rstrip(".") or "<root>",
+            renamed,
+        )
+
+
+def _decoder_is_incompatible(model: nn.Module, state_dict: dict, prefix: str = "") -> bool:
+    """True if the checkpoint holds the removed ConvTranspose2d decoder but the model doesn't.
+
+    ``up_block4`` was an ``nn.ConvTranspose2d`` (parameters at ``up_block4.weight``)
+    when ``upsample_with_ps=False``; it is now always the PixelShuffle
+    ``nn.Sequential`` (``up_block4.0.weight``). Detected structurally rather than by
+    key alone because crossformer_diffusion still uses a real ConvTranspose2d there,
+    for which ``up_block4.weight`` is the correct, current key.
+    """
+    up_block4 = getattr(model, "up_block4", None)
+    if up_block4 is None or hasattr(up_block4, "weight"):
+        return False
+    return f"{prefix}up_block4.weight" in state_dict
+
+
+_DECODER_ERROR = (
+    "This checkpoint was trained with upsample_with_ps=False, whose ConvTranspose2d "
+    "decoder has been removed (it is checkerboard-artifact-prone at init). Its "
+    "up_block1-4 weights have no counterpart in the PixelShuffle decoder, so they "
+    "cannot be migrated -- loading it would silently leave the entire decoder at "
+    "random initialization. Retrain, or check out a commit before the decoder change "
+    "to run this checkpoint."
+)
+
+
+def _crossformer_decoder_guard_pre_hook(module, state_dict, prefix, *args):
+    """load_state_dict pre-hook: fail loudly on an unmigratable ConvTranspose2d decoder."""
+    if _decoder_is_incompatible(module, state_dict, prefix):
+        raise RuntimeError(_DECODER_ERROR)
+
+
+def migrate_legacy_state_dict(model: nn.Module, state_dict: dict) -> dict:
+    """Migrate a legacy checkpoint in place for ``model``, or raise if it can't be.
+
+    The same migrations the load_state_dict pre-hooks perform, applied up front.
+    Needed for the FSDP2 path: ``set_model_state_dict`` reconciles the checkpoint
+    against the model's current parameter names *before* calling load_state_dict, so
+    the hooks fire too late to help there.
+
+    Walks the model to find real ``CrossEmbedLayer`` instances rather than pattern-
+    matching key names, so sibling architectures that define their own unwrapped
+    ``convs`` (camulator, crossformer_downscaling) are untouched.
+
+    Args:
+        model: the instantiated model the checkpoint is destined for. Pass the
+            unwrapped module (``getattr(model, "module", model)``) so the names line
+            up with the checkpoint's.
+        state_dict: checkpoint state dict; mutated in place.
+
+    Returns:
+        dict: the same ``state_dict``, for convenience.
+
+    Raises:
+        RuntimeError: if the checkpoint holds the removed ConvTranspose2d decoder.
+    """
+    if _decoder_is_incompatible(model, state_dict):
+        raise RuntimeError(_DECODER_ERROR)
+
+    renamed = 0
+    for name, module in model.named_modules():
+        if isinstance(module, CrossEmbedLayer):
+            renamed += _remap_crossembed_prefix(state_dict, f"{name}." if name else "")
+    if renamed:
+        logger.warning(
+            "Legacy checkpoint: remapped %d CrossEmbedLayer conv key(s) to the "
+            "ZeroPad2d-wrapped layout (convs.<i>.X -> convs.<i>.1.X).",
+            renamed,
+        )
+    return state_dict
 
 
 # dynamic positional bias
@@ -675,6 +828,10 @@ class CrossFormer(BaseModel):
             nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
             nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
         )
+
+        # A pre-removal upsample_with_ps=False checkpoint cannot be migrated; say so
+        # at load time instead of silently random-initializing the whole decoder.
+        self.register_load_state_dict_pre_hook(_crossformer_decoder_guard_pre_hook)
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")

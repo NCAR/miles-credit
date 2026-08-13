@@ -13,6 +13,8 @@ from credit.datasets.gen_2.channel_utils import (
     ChannelGroup,
     ChannelSchema,
     build_channel_layout,
+    resolve_level_ids,
+    resolve_num_levels,
     update_x,
 )
 
@@ -292,3 +294,49 @@ def test_channel_group_is_immutable():
     group = ChannelGroup("S", "prognostic", slice(0, 1), slice(0, 1))
     with pytest.raises(Exception):
         group.x_slice = slice(0, 2)
+
+
+# ---------------------------------------------------------------------------
+# resolve_num_levels / resolve_level_ids  (issue #432: levels: null == all)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "src_levels, expected",
+    [
+        ([500, 850, 1000], 3),  # explicit list wins
+        (None, 16),  # levels: null -> model.levels
+        ({}, 16),  # levels omitted -> model.levels (src has no "levels" key)
+        ([], 16),  # empty list treated as "all" -> model.levels
+    ],
+)
+def test_resolve_num_levels(src_levels, expected):
+    conf = {"model": {"levels": 16}}
+    src = {} if src_levels == {} else {"levels": src_levels}
+    assert resolve_num_levels(src, conf) == expected
+
+
+def test_resolve_num_levels_no_model_levels_is_zero():
+    assert resolve_num_levels({"levels": None}, {"model": {}}) == 0
+    assert resolve_num_levels({}, {}) == 0
+
+
+def test_resolve_level_ids():
+    conf = {"model": {"levels": 4}}
+    assert resolve_level_ids({"levels": [500, 850]}, conf) == [500, 850]
+    assert resolve_level_ids({"levels": None}, conf) == [0, 1, 2, 3]
+    assert resolve_level_ids({}, conf) == [0, 1, 2, 3]
+    assert resolve_level_ids(None, conf) == [0, 1, 2, 3]
+
+
+def test_null_levels_layout_matches_explicit_levels():
+    """A source with levels: null must produce the same layout as one that lists
+    all model.levels explicitly (the count comes from model.levels either way)."""
+    prognostic = {"vars_3D": ["T", "U"], "vars_2D": ["SP"]}
+    conf_null = _conf({"S": _source(levels=None, prognostic=prognostic)}, model_levels=3)
+    conf_explicit = _conf({"S": _source(levels=[1, 2, 3], prognostic=prognostic)}, model_levels=3)
+    groups_null, _ = build_channel_layout(conf_null)
+    groups_explicit, _ = build_channel_layout(conf_explicit)
+    assert {k: v.x_slice for k, v in groups_null.items()} == {k: v.x_slice for k, v in groups_explicit.items()}
+    # 2 3D vars * 3 levels + 1 2D var = 7 input channels
+    assert groups_null["S/prognostic"].x_slice == slice(0, 7)

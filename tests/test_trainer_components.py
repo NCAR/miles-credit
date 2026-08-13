@@ -48,6 +48,33 @@ def _tmp_save_loc(tmp_path, monkeypatch):
     monkeypatch.setattr(sys.modules[__name__], "_DEFAULT_SAVE_LOC", str(save_loc))
 
 
+@pytest.fixture(autouse=True)
+def _pin_trainer_device(monkeypatch):
+    """Keep constructed trainers on the cuda-or-cpu device this module targets.
+
+    ``select_device()`` prefers MPS on Apple Silicon, but the toy models and
+    fake batches here live on CPU (see the module docstring). Left unpinned the
+    trainer would move batches to MPS while the model params stay on CPU, so
+    every train/validate step raises a device mismatch. Skipping MPS restores
+    the original CPU/CUDA behaviour without touching production code. The real
+    ``credit.distributed.select_device`` is untouched (see the device test).
+    """
+    if not _TRAINER_GEN2_AVAILABLE:
+        return
+    import credit.trainers.base_trainer as base_trainer
+
+    def _cuda_or_cpu(local_rank=0, device=None):
+        if device is not None:
+            return torch.device(device)
+        if torch.cuda.is_available():
+            idx = local_rank % torch.cuda.device_count()
+            torch.cuda.set_device(idx)
+            return torch.device(f"cuda:{idx}")
+        return torch.device("cpu")
+
+    monkeypatch.setattr(base_trainer, "select_device", _cuda_or_cpu)
+
+
 def _tiny_model():
     return nn.Linear(4, 2)
 
@@ -189,13 +216,17 @@ class TestBaseTrainerInit:
         assert trainer.distributed is False
         assert trainer.rank == 0
 
-    def test_device_is_cpu_when_no_cuda(self, tmp_path):
-        conf = _minimal_conf()
-        conf["save_loc"] = str(tmp_path)
-        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
-        # In a CPU-only test environment device should be cpu
+    def test_select_device_without_cuda(self):
+        """Without CUDA, select_device falls back to MPS (Apple Silicon) or CPU.
+
+        Tests the real credit.distributed.select_device, not the trainer's
+        device — the module autouse fixture pins the trainer to cuda-or-cpu, so
+        trainer.device would not reflect the real fallback here.
+        """
+        from credit.distributed import select_device
+
         if not torch.cuda.is_available():
-            assert trainer.device.type == "cpu"
+            assert select_device(0).type in ("cpu", "mps")
 
     def test_default_display_metrics(self, tmp_path):
         conf = _minimal_conf()
@@ -1376,6 +1407,72 @@ class TestBaseTrainerAdditionalInit:
         conf["save_loc"] = str(tmp_path)
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
         assert trainer.grad_max_norm == 1.0
+
+
+class TestSelectLogMetricNames:
+    """Column selection for training_log.csv (BaseTrainer._select_log_metric_names)."""
+
+    _train_results = {
+        "train_loss": [0.5],
+        "train_rmse": [1.0],
+        "train_rmse/ERA5/prognostic/3d/temperature": [1.8],
+        "train_rmse/ERA5/prognostic/2d/SP": [140.0],
+        "train_loss_var/ERA5/prognostic/3d/temperature": [0.2],
+        "train_forecast_len": [1],
+        "train_history_len": [1],
+    }
+    _valid_results = {
+        "valid_loss": [0.6],
+        "valid_rmse": [1.1],
+        "valid_rmse/ERA5/prognostic/3d/temperature": [1.9],
+        "valid_rmse/ERA5/prognostic/2d/SP": [150.0],
+        "valid_acc/ERA5/prognostic/3d/temperature": [0.9],  # validation-only key
+        "valid_forecast_len": [1],
+        "valid_history_len": [1],
+    }
+
+    def _trainer(self, tmp_path, **overrides):
+        conf = _minimal_conf(**overrides)
+        conf["save_loc"] = str(tmp_path)
+        return _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+    def test_default_saves_per_variable_and_combined(self, tmp_path):
+        """Default (unset) writes per-variable columns alongside the aggregates."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" in names
+        assert "loss_var/ERA5/prognostic/3d/temperature" in names
+        # validation-only keys are not dropped
+        assert "acc/ERA5/prognostic/3d/temperature" in names
+
+    def test_list_filters_per_variable_keeps_combined(self, tmp_path):
+        """A variable list restricts per-variable columns but keeps the aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=["temperature"])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" not in names
+        assert "loss" in names and "rmse" in names
+
+    def test_false_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: False writes only the combined aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=False)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert not any("/" in name for name in names)
+
+    def test_empty_list_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: [] behaves like False (aggregates only)."""
+        trainer = self._trainer(tmp_path, save_metric_vars=[])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert not any("/" in name for name in names)
+
+    def test_no_duplicate_columns(self, tmp_path):
+        """Aggregate names already in the results are not duplicated."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert len(names) == len(set(names))
 
 
 # ---------------------------------------------------------------------------

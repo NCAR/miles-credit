@@ -22,6 +22,7 @@ from ._ask import (
     _ask,
     _collect_run_context,
 )
+from ._begin import _begin
 from ._check import _Finding, _Report, _check, _run_checks
 from ._common import (
     _AGENT_BASH_BLOCKLIST,
@@ -97,6 +98,7 @@ __all__ = [
     "_build_rollout_slurm_script",
     "_build_slurm_script",
     "_check",
+    "_begin",
     "_collect_run_context",
     "_compute_chain",
     "_convert",

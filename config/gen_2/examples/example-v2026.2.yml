@@ -4,11 +4,11 @@
 # Quick-start: edit the USER SETTINGS sections below, then:
 #
 #   # Preview the PBS script (no submission)
-#   credit submit --cluster casper -c config/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
+#   credit submit --cluster casper -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
 #
 #   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
-#   credit submit --cluster casper  -c config/example-v2026.2.yml --gpus 4 --chain 14
-#   credit submit --cluster derecho -c config/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
+#   credit submit --cluster casper  -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #
@@ -87,8 +87,8 @@ validation_data:
           vars_2D: [ 'z_norm', 'land_sea_mask' ]
           path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
 
-  start_datetime: "2018-01-01"
-  end_datetime: "2019-12-31"
+  start_datetime: "2019-01-01"
+  end_datetime: "2020-12-31"
   timestep: "6h"
 
   history_len: 1
@@ -177,6 +177,8 @@ preblocks:
                     'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
                     'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
         method: transform
+        scaler_params:
+          channels_last: False   # CREDIT tensors are channels-first; only used when fitting a new scaler
     concat:
       type: concat
 

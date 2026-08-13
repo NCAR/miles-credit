@@ -267,8 +267,8 @@ class SKEBS(nn.Module):
 
     Args:
         post_conf: dictionary with config options for PostBlock.
-                if post_conf is not specified in config,
-                defaults are set in the parser
+            if post_conf is not specified in config,
+            defaults are set in the parser
 
     """
 
@@ -553,7 +553,8 @@ class SKEBS(nn.Module):
     def initialize_pattern(self, y_pred):
         """
         initialize the random red noise pattern.
-        in Berner et al
+        in Berner et al::
+
             m is zonal wavenumber -> mmax
             n is total wavenumber -> lmax
         """

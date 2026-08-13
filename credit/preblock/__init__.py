@@ -253,12 +253,37 @@ def _move_batch_to_device(batch, device):
     return batch
 
 
-def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None):
+def apply_preblocks_before_scaler(preblocks: nn.ModuleDict, batch: dict, device=None, stop_key=None):
+    """Build the (unscaled) batch a BridgeScalerTransform is fit on during ``credit preprocess``.
+
+    Applies the non-scaler preblocks (log, regrid, rename, ...) that precede the
+    target scaler and returns the transformed batch. Scaler blocks are always
+    skipped: during preprocessing their scalers are still being fit and cannot
+    transform, and because scalers operate on disjoint variable sets an earlier
+    scaler never touches a later scaler's variables — skipping it leaves each
+    scaler's fit batch with the correct raw values.
+
+    Preblocks never mutate the caller's dict (they shallow-copy via
+    ``_copy_batch`` and never write tensors in place), so this may be called
+    repeatedly on the same raw ``batch`` — once per scaler — without the calls
+    interfering.
+
+    Args:
+        stop_key: name of the scaler block to stop before; preblocks up to (but
+            not including) this key are applied. When ``None``, stop at the first
+            ``BridgeScalerTransform`` encountered (single-scaler legacy behavior).
+    """
     from credit.preblock.scaler import BridgeScalerTransform  # needed for isinstance check
 
-    for preblock in preblocks.values():
-        if isinstance(preblock, BridgeScalerTransform):
-            break
+    for name, preblock in preblocks.items():
+        if stop_key is None:
+            if isinstance(preblock, BridgeScalerTransform):
+                break
+        else:
+            if name == stop_key:
+                break
+            if isinstance(preblock, BridgeScalerTransform):
+                continue  # skip other scalers, keep applying the non-scaler transforms between them
         result = preblock(batch)
         if isinstance(result, tuple):
             if len(result) == 3:

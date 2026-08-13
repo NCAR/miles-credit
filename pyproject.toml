@@ -51,13 +51,15 @@ dependencies = [
 docs = ["sphinx",
     "sphinx-autoapi",
     "myst_parser",
-    "sphinx-book-theme"]
+    "sphinx-book-theme",
+    "sphinx-design"]
 
 develop = ["pre-commit",
     "sphinx",
     "sphinx-autoapi",
     "myst_parser",
     "sphinx-book-theme",
+    "sphinx-design",
     "jupyter",
     "ruff",
     "pytest"]

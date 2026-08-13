@@ -639,7 +639,8 @@ def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
 
     Verifies that the variable names in the config are present in the zarr store
     and that the returned tensors have the expected shapes and plausible values.
-    The 64x32 (lon×lat) grid has 64 longitudes and 32 latitudes.
+    The 64x32 (lon×lat) grid has 64 longitudes and 32 latitudes; CREDIT tensors
+    follow the (lat, lon) convention, so the last two dims are (32, 64).
     """
     wb2_ds = WeatherBench2ERA5Dataset(minimal_wb2_era5_config, return_target=True)
     sample = wb2_ds[("2020-01-01 00:00", 0)]
@@ -650,7 +651,7 @@ def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
     assert "target" in sample
 
     n_levels = len(minimal_wb2_era5_config["source"]["WeatherBench2_ERA5"]["levels"])  # 2
-    lat, lon = 64, 32
+    lat, lon = 32, 64
 
     # 3D variable: (n_levels, 1, lat, lon)
     temp_in = sample["input"]["WeatherBench2_ERA5/prognostic/3d/temperature"]

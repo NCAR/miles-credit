@@ -494,7 +494,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             batch_size=batch_size,
             shuffle=False,
             sampler=sampler,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             persistent_workers=True if num_workers > 0 else False,
             num_workers=num_workers,
             collate_fn=custom_collate_fn,
@@ -514,7 +514,7 @@ def load_dataloader(conf, dataset, rank=0, world_size=1, is_train=True):
             batch_size=1,
             shuffle=False,
             sampler=sampler,
-            pin_memory=True,
+            pin_memory=torch.cuda.is_available(),
             persistent_workers=False,
             num_workers=1,  # set to one so prefetch is working
             prefetch_factor=prefetch_factor,

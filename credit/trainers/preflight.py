@@ -25,6 +25,8 @@ import logging
 import threading
 import time
 
+from credit.datasets.gen_2.channel_utils import resolve_num_levels
+
 logger = logging.getLogger(__name__)
 
 
@@ -59,7 +61,7 @@ def estimate_dataloader_memory_gib(conf: dict) -> float:
         prog = v.get("prognostic") or {}
         diag = v.get("diagnostic") or {}
 
-        n_levels = len(src.get("levels", []))
+        n_levels = resolve_num_levels(src, conf)
         n_vars_3d = len(prog.get("vars_3D", []))
         n_vars_2d = len(prog.get("vars_2D", []))
         n_diag_2d = len(diag.get("vars_2D", []))

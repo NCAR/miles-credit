@@ -22,7 +22,7 @@ import torch
 # credit
 from credit.models import load_model
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info
+from credit.distributed import get_rank_info, select_device
 from credit.datasets import setup_data_loading
 from credit.datasets.gen_1.realtime_predict import RealtimePredictDataset
 from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
@@ -123,13 +123,7 @@ def predict(rank, world_size, conf, p):
     data_config = setup_data_loading(conf)
 
     # infer device id from rank
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = select_device(rank)
 
     # config settings
     seed_everything(conf["seed"])

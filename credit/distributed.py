@@ -28,6 +28,64 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Modes that run under a launcher (torchrun/mpirun) with more than one process.
+# Anything else is single-process. Keep this in sync with the values
+# ``credit.trainers.utils.effective_mode`` can return — omitting "fsdp2" here
+# silently collapses every rank to LOCAL_RANK=0, which puts all of a node's
+# ranks on cuda:0 and disables dataset sharding.
+DISTRIBUTED_MODES = (
+    "fsdp",
+    "fsdp2",
+    "ddp",
+    "domain_parallel",
+    "fsdp+domain_parallel",
+)
+
+
+def select_device(
+    local_rank: int = 0,
+    device: str | torch.device | None = None,
+    set_benchmark: bool = False,
+) -> torch.device:
+    """Pick the torch device with precedence cuda → mps → cpu.
+
+    Centralizes device selection so every application entry point agrees on
+    MPS support for Apple Silicon Macs (previously only the rollout apps had
+    an MPS branch; training and preprocessing fell back to CPU).
+
+    Args:
+        local_rank: Local rank for multi-GPU device assignment. Ignored when
+            ``device`` is provided or when CUDA is unavailable.
+        device: Optional explicit device override (e.g. from a CLI ``--device``
+            arg). When provided it takes precedence over auto-detection.
+        set_benchmark: When True, enable ``cudnn.benchmark`` if a CUDA device
+            is selected. Off by default because trainers call this *after*
+            ``seed_everything`` has set ``cudnn.benchmark = False`` for
+            determinism — flipping it back on would silently re-enable
+            nondeterministic autotuning.
+
+    Returns:
+        torch.device — and as a side effect calls ``torch.cuda.set_device``
+        when a CUDA device (auto-detected or explicit with an index) is
+        selected.
+    """
+    if device is not None:
+        dev = torch.device(device)
+        if dev.type == "cuda" and dev.index is not None:
+            torch.cuda.set_device(dev)
+            if set_benchmark:
+                torch.backends.cudnn.benchmark = True
+        return dev
+    if torch.cuda.is_available():
+        dev = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        torch.cuda.set_device(local_rank % torch.cuda.device_count())
+        if set_benchmark:
+            torch.backends.cudnn.benchmark = True
+        return dev
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
 
 def setup(rank, world_size, mode, backend="nccl", device_id=None):
     """Initializes the distributed process group.
@@ -136,12 +194,13 @@ def get_rank_info(trainer_mode):
     """Gets rank and size information for distributed training.
 
     Args:
-        trainer_mode (str): The mode of training (e.g., 'fsdp', 'ddp').
+        trainer_mode (str): The mode of training (e.g., 'fsdp', 'ddp'). Anything
+            outside ``DISTRIBUTED_MODES`` is treated as single-process.
 
     Returns:
         tuple: A tuple containing LOCAL_RANK (int), WORLD_RANK (int), and WORLD_SIZE (int).
     """
-    if trainer_mode in ["fsdp", "ddp", "domain_parallel", "fsdp+domain_parallel"]:
+    if trainer_mode in DISTRIBUTED_MODES:
         try:
             if "LOCAL_RANK" in os.environ:
                 # Environment variables set by torch.distributed.launch or torchrun
