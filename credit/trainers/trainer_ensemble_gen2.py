@@ -10,11 +10,12 @@ import tqdm
 import optuna
 
 from credit.losses.crps import ring_crps_loss
+from credit.metrics import LatWeightedMetrics
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
-from credit.trainers.utils import accum_log, apply_gradient_checkpointing, cycle
+from credit.trainers.utils import accum_log, apply_gradient_checkpointing, cycle, inject_flat_var_keys
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,21 @@ class TrainerEnsembleGen2(BaseTrainer):
         super().__init__(model, rank, conf)
         logger.info("Loading ERA5 Gen 2 ensemble trainer (ring-reduce CRPS, preblock-assembled batches)")
 
-        self.preblocks = build_preblocks(conf.get("preblocks", {}))
+        # This trainer operates on flat concatenated tensors (not the named
+        # full_data_dict the gen2 metrics framework scores), so it needs the
+        # gen1-style flat LatWeightedMetrics -- the generic `metrics` argument
+        # train_gen2.py injects is a BaseCombinedMetric expecting
+        # metric(full_data_dict), which is incompatible with metric(y_pred, y).
+        # inject_flat_var_keys derives the flat conf["data"]["variables"]/etc.
+        # keys LatWeightedMetrics expects from the nested gen2 source schema.
+        inject_flat_var_keys(conf)
+        self.legacy_metrics = LatWeightedMetrics(conf, training_mode=True)
+
+        # This trainer applies the same preblock group at every rollout step
+        # (t=1 IC included), so it only ever needs the "per_step" section --
+        # build_preblocks now takes the full config + phase (two-section
+        # ic_only/per_step format), not a bare preblocks sub-dict.
+        self.preblocks = build_preblocks(conf, phase="per_step")
 
         post_conf = conf.get("model", {}).get("post_conf", {})
         self.flag_mass_conserve = False
@@ -174,7 +189,9 @@ class TrainerEnsembleGen2(BaseTrainer):
 
             for t in range(1, self.forecast_len + 1):
                 batch = next(dl)
-                x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                preblock_out = apply_preblocks(self.preblocks, batch)
+                x_raw = preblock_out["x"]
+                y_raw = preblock_out.get("y")
                 if x_raw.dim() == 5:
                     x_raw = x_raw.flatten(1, 2)
                     y_raw = y_raw.flatten(1, 2)
@@ -258,7 +275,7 @@ class TrainerEnsembleGen2(BaseTrainer):
                 self.ema.update(self.model)
 
             if y_pred is not None and y is not None:
-                metrics_dict = metrics(y_pred, y)
+                metrics_dict = self.legacy_metrics(y_pred, y)
                 for name, value in metrics_dict.items():
                     value = torch.Tensor([value]).to(self.device, non_blocking=True)
                     if self.distributed:
@@ -333,7 +350,9 @@ class TrainerEnsembleGen2(BaseTrainer):
 
                 for t in range(1, self.valid_forecast_len + 1):
                     batch = next(dl)
-                    x_raw, y_raw, _ = apply_preblocks(self.preblocks, batch)
+                    preblock_out = apply_preblocks(self.preblocks, batch)
+                    x_raw = preblock_out["x"]
+                    y_raw = preblock_out.get("y")
                     if x_raw.dim() == 5:
                         x_raw = x_raw.flatten(1, 2)
                         y_raw = y_raw.flatten(1, 2)
@@ -383,7 +402,7 @@ class TrainerEnsembleGen2(BaseTrainer):
                             y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
                         loss = criterion(y.to(y_pred.dtype), y_pred).mean()
-                        metrics_dict = metrics(y_pred.float(), y.float())
+                        metrics_dict = self.legacy_metrics(y_pred.float(), y.float())
                         for name, value in metrics_dict.items():
                             value = torch.Tensor([value]).to(self.device, non_blocking=True)
                             if self.distributed:
