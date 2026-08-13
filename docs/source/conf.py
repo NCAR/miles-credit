@@ -16,7 +16,7 @@ version = ".".join(release.split(".")[:3])
 # -- General configuration ---------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#general-configuration
 
-extensions = ["sphinx.ext.napoleon", "autoapi.extension", "myst_parser"]
+extensions = ["sphinx.ext.napoleon", "autoapi.extension", "myst_parser", "sphinx_design"]
 templates_path = ["_templates"]
 exclude_patterns = []
 

@@ -1,6 +1,6 @@
 # CREDIT Gen 2 Overview
 <div style="text-align: center;">
-<img src="_static/credit_gen_2_small.png" width="90%" alt="CREDIT Gen 2 overview diagram" />
+<img src="_static/credit_gen_2.png" width="90%" alt="CREDIT Gen 2 overview diagram" />
 </div>
 
 CREDIT Gen 2 addresses the need for an open, modular, composable framework to build ML Earth system prediction

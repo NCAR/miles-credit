@@ -10,6 +10,11 @@ unsure which generation you are looking at, see
 ---
 
 ## 1. Install CREDIT 
+
+::::{tab-set}
+
+
+:::{tab-item} Casper
 ### NCAR Casper
 The [NCAR Casper](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/) is a heterogeneous cluster
 for data analysis, visualization, and AI/ML. For ML activities, it contains nodes with multiple generations of GPUs
@@ -31,7 +36,9 @@ uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/c
 # AMD GPUs
 uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/rocm6.4
 ```
+:::
 
+:::{tab-item} Derecho
 ### NCAR Derecho
 The NCAR Derecho system contains GPU nodes with 40 GB NVIDIA A100s linked with Cray Slingshot interconnect. If 
 you plan to conduct multi-node training or inference, you will need to use our special install script
@@ -44,8 +51,10 @@ git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
 ./create_derecho_env.sh # Will install in the credit-derecho conda environment
 ```
+:::
 
-### Other systems
+:::{tab-item} Linux/Mac
+### Linux/Mac Systems
 If you are running CREDIT on a Mac or a system with up-to-date GPU libraries
 and no other weirdness, you can follow the following path to installing CREDIT.
 ```bash
@@ -64,7 +73,11 @@ cd miles-credit
 uv pip install -e ".[develop]"
 ```
 
-Quick verify the install worked:
+:::
+
+::::
+
+Verify the install worked:
 
 ```bash
 credit --help
