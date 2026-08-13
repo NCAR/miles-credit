@@ -821,6 +821,46 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
             fix="Set loss.args.latitude_weights to a dataset with a 'latitude' coordinate.",
         )
 
+    # Univariate loss constraints: CRPS-family losses score an ensemble and are
+    # rejected by BaseLoss at construction — except ring-crps, whose ensemble
+    # lives across data-parallel ranks (its local score is elementwise).
+    from credit.losses import is_crps_loss
+
+    training_loss = _get(conf, "loss", "args", "training_loss", default="mse")
+    if is_crps_loss(training_loss) and training_loss != "ring-crps":
+        rep.error(
+            "loss.args.training_loss",
+            f"'{training_loss}' is an ensemble CRPS loss and cannot be used as a BaseLoss "
+            "univariate per-variable loss (it needs an ensemble dimension in the tensor).",
+            fix="Use an elementwise loss (mse, mae, huber, ...) or ring-crps (ensemble across dp ranks).",
+        )
+    elif training_loss == "ring-crps":
+        if int(_get(conf, "trainer", "ensemble_size", default=1) or 1) <= 1:
+            rep.error(
+                "trainer.ensemble_size",
+                "training_loss ring-crps uses one ensemble member per data-parallel rank and "
+                "requires trainer.ensemble_size > 1 (it must equal the data-parallel world size "
+                "at launch).",
+                fix="Set trainer.ensemble_size to the number of data-parallel ranks.",
+            )
+        if not _get(conf, "loss", "args", "validation_loss"):
+            rep.warn(
+                "loss.args.validation_loss",
+                "training_loss ring-crps with no validation_loss: validation keeps dp dataset "
+                "sharding, so ranks hold different samples and the cross-rank spread term is "
+                "meaningless.",
+                fix="Set loss.args.validation_loss to a deterministic loss, e.g. mae.",
+            )
+    for var_key, spec in (_get(conf, "loss", "args", "base_loss_overrides", default={}) or {}).items():
+        if is_crps_loss((spec or {}).get("loss")):
+            rep.error(
+                f"loss.args.base_loss_overrides.{var_key}",
+                f"'{spec.get('loss')}' is a CRPS loss; CRPS losses are only supported as the "
+                "training_loss itself (the trainer's ensemble setup keys off "
+                "loss.args.training_loss and would not see the override).",
+                fix="Use an elementwise loss in the override, or make ring-crps the training_loss.",
+            )
+
 
 def _check_trainer(conf: dict, rep: _Report) -> None:
     from credit.parallel.mesh import parse_parallelism_conf

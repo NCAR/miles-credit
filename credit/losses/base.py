@@ -150,13 +150,20 @@ def _cos_lat_weights(path: str) -> torch.Tensor:
 
 
 def _instantiate_univariate_loss(name: str, params: dict) -> nn.Module:
-    """Instantiate a registry loss as an elementwise univariate loss."""
-    if is_crps_loss(name):
+    """Instantiate a registry loss as an elementwise univariate loss.
+
+    CRPS-family losses are rejected, with one exception: classes that declare
+    ``supports_elementwise = True`` (e.g. ``ring-crps``, whose ensemble
+    dimension lives across data-parallel ranks rather than in the tensor, so
+    its local score is elementwise like any other univariate loss).
+    """
+    cls = _load_loss_entry(name)
+    if is_crps_loss(name) and not getattr(cls, "supports_elementwise", False):
         raise ValueError(
             f"BaseLoss training_loss '{name}' is an ensemble CRPS loss and cannot be used "
-            "as a univariate per-variable loss. Choose an elementwise loss (mse, mae, huber, ...)."
+            "as a univariate per-variable loss. Choose an elementwise loss (mse, mae, huber, ...) "
+            "or ring-crps (ensemble across data-parallel ranks)."
         )
-    cls = _load_loss_entry(name)
     params = dict(params)
     if "reduction" in inspect.signature(cls.__init__).parameters:
         params["reduction"] = "none"
@@ -236,7 +243,24 @@ class BaseLoss(nn.Module):
             base_name = validation_loss
             base_params = dict(validation_loss_parameters or {})
         self.base_loss = _instantiate_univariate_loss(base_name, base_params)
+        if validation and is_crps_loss(base_name):
+            logger.warning(
+                "BaseLoss: validation is using '%s'. Validation keeps data-parallel dataset "
+                "sharding, so ranks hold different samples and the cross-rank spread term is "
+                "meaningless. Set loss.args.validation_loss to a deterministic loss (e.g. mae).",
+                base_name,
+            )
 
+        # The trainer keys its ensemble setup (shared batches per dp rank,
+        # per-rank member seeds) off loss.args.training_loss alone, so a CRPS
+        # loss hidden in an override would run with wrong batching.
+        for var_key, spec in (base_loss_overrides or {}).items():
+            if is_crps_loss(spec["loss"]):
+                raise ValueError(
+                    f"BaseLoss: base_loss_overrides['{var_key}'] uses '{spec['loss']}', but CRPS "
+                    "losses are only supported as the training_loss itself (the trainer's ensemble "
+                    "setup keys off loss.args.training_loss and would not see the override)."
+                )
         self.overrides = {
             var_key: _instantiate_univariate_loss(spec["loss"], spec.get("parameters", {}))
             for var_key, spec in (base_loss_overrides or {}).items()

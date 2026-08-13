@@ -122,11 +122,42 @@ variable. These registry entries qualify:
 
 `mse`, `mae`, `msle`, `huber`, `logcosh`, `xtanh`, `xsigmoid`
 
-The CRPS-family losses (`KCRPS`, `almost-fair-crps`, `ring-crps`) are rejected at
-construction with an explanatory error — they score an ensemble, not a single
-field. `spectral`, `power`, and `covmse` reduce to a scalar (or a non-matching
-shape) internally and will fail the elementwise shape check at the first forward
-pass.
+The CRPS-family losses that need an ensemble dimension in the tensor (`KCRPS`,
+`almost-fair-crps`) are rejected at construction with an explanatory error —
+they score an ensemble, not a single field. `spectral`, `power`, and `covmse`
+reduce to a scalar (or a non-matching shape) internally and will fail the
+elementwise shape check at the first forward pass.
+
+**`ring-crps` is the exception**: its ensemble lives across data-parallel ranks
+(one member per rank, exchanged by ring communication), so its local score is
+elementwise like any other univariate loss and it works as the BaseLoss
+`training_loss`:
+
+```yaml
+loss:
+  type: base
+  args:
+    training_loss: "ring-crps"
+    validation_loss: "mae"     # recommended — see note below
+    var_weighting: "inverse_variance"
+    scaler_path: "/path/scaler.json"
+```
+
+Requirements and caveats (`credit check` verifies the config-side ones):
+
+- `trainer.ensemble_size` must be > 1 and equal the data-parallel world size at
+  launch — the same contract as flat ring-crps training. The trainer detects
+  ring-crps inside the BaseLoss section and feeds every dp rank the same batch;
+  member diversity comes from per-rank RNG seeds acting on stochastic model
+  components.
+- Set `validation_loss` to a deterministic loss (e.g. `mae`): validation keeps
+  dp dataset sharding, so ranks hold different samples and a cross-rank spread
+  term would be meaningless.
+- CRPS losses are not allowed in `base_loss_overrides` — only as the
+  `training_loss` itself.
+- Each scored variable performs its own K−1 ring exchanges per step, so the
+  communication is chattier than the flat single-tensor form (many small
+  buffers instead of one large one).
 
 ### Which variables are scored
 
