@@ -1,7 +1,7 @@
 """
 global_attn.py
 --------------
-Two global / cross-face attention modules for CubeSphereWxFormer.
+Two global / cross-face attention modules for CubedWXFormer.
 
 BottleneckGlobalAttention
 ~~~~~~~~~~~~~~~~~~~~~~~~~

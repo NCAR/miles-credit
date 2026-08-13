@@ -1,9 +1,9 @@
-"""CPU-only unit tests for native tensor parallelism on wxformer_next (issue #415).
+"""CPU-only unit tests for native tensor parallelism on wxformer_column (issue #415).
 
 Covers:
   - Conv -> Linear checkpoint remap (remap_conv_state_dict), incl. spectral norm
   - Numerical equivalence: conv-projection transformer (crossformer) vs the
-    Linear-projection transformer (wxformer_next) with remapped weights
+    Linear-projection transformer (wxformer_column) with remapped weights
   - Full-model old-format checkpoint loading
   - apply_native_tensor_parallel: opt-in detection, plan construction,
     divisibility / non-Linear validation errors, and the reduced form:
@@ -23,10 +23,10 @@ from credit.models.wxformer.crossformer import (
     Transformer as ConvTransformer,
     apply_spectral_norm,
 )
-from credit.models.wxformer.wxformer_next import (
+from credit.models.wxformer.wxformer_column import (
     Attention,
     FeedForward,
-    NextGenWXFormer,
+    WXFormerColumn,
     Transformer as LinearTransformer,
     remap_conv_state_dict,
 )
@@ -147,7 +147,7 @@ class TestRemapConvStateDict:
     def test_non_projection_convs_untouched(self):
         """3x3 convs (decoder, CrossEmbed) must stay 4D."""
         torch.manual_seed(0)
-        model = NextGenWXFormer(**_tiny_model_conf())
+        model = WXFormerColumn(**_tiny_model_conf())
         sd = remap_conv_state_dict(model.state_dict())
         assert sd["up_block1.conv.weight"].dim() == 4
         assert sd["layers.0.0.convs.0.weight"].dim() == 4
@@ -193,11 +193,11 @@ class TestConvLinearEquivalence:
 class TestFullModelRemapRoundTrip:
     def test_old_format_checkpoint_loads_strict(self):
         torch.manual_seed(0)
-        model = NextGenWXFormer(**_tiny_model_conf())
+        model = WXFormerColumn(**_tiny_model_conf())
         old_sd = _to_conv_format(model.state_dict())
         # old format really is different
         assert any(".to_qkv." in k for k in old_sd)
-        fresh = NextGenWXFormer(**_tiny_model_conf())
+        fresh = WXFormerColumn(**_tiny_model_conf())
         fresh.load_state_dict(remap_conv_state_dict(old_sd), strict=True)
 
         model.eval()
@@ -210,7 +210,7 @@ class TestFullModelRemapRoundTrip:
 
     def test_forward_shape_5d(self):
         torch.manual_seed(0)
-        model = NextGenWXFormer(**_tiny_model_conf(use_spectral_norm=True))
+        model = WXFormerColumn(**_tiny_model_conf(use_spectral_norm=True))
         x = torch.randn(1, 7, 1, 32, 64)
         y = model(x)
         assert tuple(y.shape) == (1, 6, 1, 32, 64)
@@ -243,8 +243,8 @@ def captured_plans(monkeypatch):
 
 
 class TestSupportsNativeTp:
-    def test_true_for_wxformer_next(self):
-        model = NextGenWXFormer(**_tiny_model_conf())
+    def test_true_for_wxformer_column(self):
+        model = WXFormerColumn(**_tiny_model_conf())
         assert supports_native_tp(model) is True
 
     def test_false_for_conv_transformer(self):
@@ -278,7 +278,7 @@ class TestApplyNativeTensorParallel:
         assert isinstance(plan["layers.4"], RowwiseParallel)
 
     def test_full_model_parallelizes_all_blocks(self, captured_plans):
-        model = NextGenWXFormer(**_tiny_model_conf())
+        model = WXFormerColumn(**_tiny_model_conf())
         out = apply_native_tensor_parallel(model, _fake_tp_mesh(2))
 
         # 4 stages x depth 1 x (2 attention + 2 FFN) blocks each
@@ -331,7 +331,7 @@ class TestApplyNativeTensorParallel:
         # The real default config: use_spectral_norm=True wraps every Linear
         # inside the encoder Transformer stages, i.e. ALL _tp_plan layers, so
         # reduced TP is a documented no-op until spectral norm is disabled.
-        model = NextGenWXFormer(**_tiny_model_conf(use_spectral_norm=True))
+        model = WXFormerColumn(**_tiny_model_conf(use_spectral_norm=True))
         with caplog.at_level(logging.WARNING, logger="credit.parallel.tensor_parallel"):
             out = apply_native_tensor_parallel(model, _fake_tp_mesh(2))
         assert not captured_plans
@@ -397,7 +397,7 @@ def _gloo_tp_worker(rank, world, port, result_q, partial_sn=False):
         from torch.distributed.device_mesh import init_device_mesh
 
         from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
-        from credit.models.wxformer.wxformer_next import Transformer
+        from credit.models.wxformer.wxformer_column import Transformer
         from credit.parallel.tensor_parallel import _is_tp_sharded_param, apply_native_tensor_parallel
 
         kw = dict(local_window_size=4, global_window_size=2, depth=2, dim_head=4)
@@ -509,7 +509,7 @@ def _gloo_clip_worker(rank, world, port, result_q):
         from torch.distributed.tensor import DTensor
 
         from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
-        from credit.models.wxformer.wxformer_next import Transformer
+        from credit.models.wxformer.wxformer_column import Transformer
         from credit.parallel.collectives import clip_grad_norm_ as credit_clip
         from credit.parallel.tensor_parallel import apply_native_tensor_parallel
 
@@ -726,7 +726,7 @@ class TestGen2SeedOrdering:
         from credit.seed import seed_everything
 
         seed_everything(base_seed)
-        model = NextGenWXFormer(**_tiny_model_conf())
+        model = WXFormerColumn(**_tiny_model_conf())
         seed_everything(base_seed + data_rank)
         return model
 
@@ -743,9 +743,9 @@ class TestGen2SeedOrdering:
         from credit.seed import seed_everything
 
         seed_everything(42 + 0)
-        sd0 = NextGenWXFormer(**_tiny_model_conf()).state_dict()
+        sd0 = WXFormerColumn(**_tiny_model_conf()).state_dict()
         seed_everything(42 + 1)
-        sd1 = NextGenWXFormer(**_tiny_model_conf()).state_dict()
+        sd1 = WXFormerColumn(**_tiny_model_conf()).state_dict()
         assert any(not torch.equal(sd0[k], sd1[k]) for k in sd0)
 
     def test_post_build_reseed_gives_per_rank_runtime_diversity(self):

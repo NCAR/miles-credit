@@ -7,7 +7,7 @@ Covers three things:
   2. That enabling ``rope`` reorders Attention.forward (to_qkv before
      windowing) without changing the result when rope is disabled -- the
      default path must stay bit-identical to the pre-refactor implementation.
-  3. That CubeSphereWxFormer builds and runs with use_cube_rope=True.
+  3. That CubedWXFormer builds and runs with use_cube_rope=True.
 """
 
 import math

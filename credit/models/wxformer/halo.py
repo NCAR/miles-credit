@@ -124,7 +124,7 @@ class HaloExchange(nn.Module):
         self.crop_left = int(halo_size if crop_left is None else crop_left)
 
         # Legacy nearest-neighbor map: kept only so existing ghost-map validation
-        # (tests/test_cube_sphere_wxformer.py) can still check every ghost cell
+        # (tests/test_cubed_wxformer.py) can still check every ghost cell
         # resolves to a real owned SE cell. forward() does not use this map.
         source_flat = self._build_source_flat_index(se_index_path)
         self.register_buffer("source_flat_index", torch.from_numpy(source_flat.astype(np.int64)))

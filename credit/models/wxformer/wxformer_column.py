@@ -1,5 +1,5 @@
 """
-NextGen WXFormer: CrossFormer U-Net + spectral GNN bottleneck + column attention + level embeddings.
+WXFormerColumn: CrossFormer U-Net + spectral GNN bottleneck + column attention + level embeddings.
 
 Design additions over WXFormer:
   - Learned pressure-level embeddings at input (Pangu/Aurora style)
@@ -292,7 +292,7 @@ class Transformer(nn.Module):
 
 
 def remap_conv_state_dict(state_dict: dict) -> dict:
-    """Convert a pre-Linear-refactor NextGenWXFormer state dict to the new format.
+    """Convert a pre-Linear-refactor WXFormerColumn state dict to the new format.
 
     Old checkpoints store the transformer projections as 1x1 Conv2d weights:
       - ``*.to_qkv.weight``        (3*inner, dim, 1, 1)  fused q/k/v
@@ -490,7 +490,7 @@ class SpectralGNNBottleneck(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class NextGenWXFormer(BaseModel):
+class WXFormerColumn(BaseModel):
     """CrossFormer U-Net with spectral GNN bottleneck, column attention,
     and pressure-level embeddings.
 
@@ -755,7 +755,7 @@ if __name__ == "__main__":
     C_in = channels * levels + surface_channels + input_only_channels
     C_out = channels * levels + surface_channels + output_only_channels
 
-    model = NextGenWXFormer(
+    model = WXFormerColumn(
         image_height=H,
         image_width=W,
         frames=T,

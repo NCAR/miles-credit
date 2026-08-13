@@ -4,7 +4,7 @@ Two implementations live here:
 
 1. Native DTensor TP (``apply_native_tensor_parallel``) — torch's
    ``parallelize_module`` with Colwise/RowwiseParallel. Blocks opt in by
-   declaring a ``_tp_plan`` dict (see wxformer_next). This is the supported
+   declaring a ``_tp_plan`` dict (see wxformer_column). This is the supported
    path (issue #415): params keep FQNs and logical shapes, checkpointing
    comes free through the DCP full-state APIs, and ``fully_shard`` composes
    on top over a 2D (dp, tp) mesh.
@@ -298,8 +298,8 @@ def supports_native_tp(model: nn.Module) -> bool:
         class MyBlock(nn.Module):
             _tp_plan = {"to_q": "colwise", "to_out": "rowwise"}
 
-    Currently only wxformer_next's transformer blocks declare plans (and
-    CubeSphereWxFormer by inheritance).
+    Currently only wxformer_column's transformer blocks declare plans (and
+    CubedWXFormer by inheritance).
     """
     return any(getattr(m, "_tp_plan", None) for m in model.modules())
 
@@ -320,7 +320,7 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         raises on invalid configurations, e.g. heads % tp_size != 0.
 
     Requirements enforced here with clear errors:
-      - every planned layer is an nn.Linear (the refactored wxformer_next
+      - every planned layer is an nn.Linear (the refactored wxformer_column
         projections; 1x1 convs are NOT supported — that was the legacy path)
       - colwise out_features / rowwise in_features divisible by the TP degree
 
@@ -406,7 +406,7 @@ def apply_native_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         raise ValueError(
             "apply_native_tensor_parallel: no blocks with _tp_plan found. Check "
             "supports_native_tp(model) before calling, or use a model that opts in "
-            "(wxformer_next family)."
+            "(wxformer_column family)."
         )
     if skipped and count:
         logger.warning(
@@ -486,8 +486,8 @@ def apply_tensor_parallel(model: nn.Module, tp_mesh) -> nn.Module:
         "all-reduce at the column-parallel input (Megatron's 'f' operator) is "
         "missing, so tensor > 1 silently trains wrong outputs and gradients. "
         "Native DTensor TP (issue #415) is available for models that declare "
-        "_tp_plan blocks — currently the wxformer_next family (model type "
-        "nextgen_wxformer). Use one of those, or set "
+        "_tp_plan blocks — currently the wxformer_column family (model type "
+        "wxformer_column). Use one of those, or set "
         "trainer.parallelism.tensor: 1."
     )
     tp_group = _tp_group_from_mesh(tp_mesh)

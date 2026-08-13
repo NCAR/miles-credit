@@ -69,20 +69,15 @@ _MODEL_REGISTRY = {
         "Loading downscaling U-net",
     ),
     # ── WXFormer next generation ─────────────────────────────────────────────
-    "nextgen_wxformer": (
-        "credit.models.wxformer.wxformer_next",
-        "NextGenWXFormer",
-        "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+    "wxformer_column": (
+        "credit.models.wxformer.wxformer_column",
+        "WXFormerColumn",
+        "Loading WXFormerColumn (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
     ),
-    "cube_sphere_wxformer": (
-        "credit.models.wxformer.cube_sphere_wxformer",
-        "CubeSphereWxFormer",
-        "Loading CubeSphereWxFormer (CrossFormer encoder-decoder on a cubed-sphere SE grid) ...",
-    ),
-    "cube_sphere_wxformer_next": (
-        "credit.models.wxformer.cube_sphere_wxformer",
-        "CubeSphereWxFormerNext",
-        "Loading CubeSphereWxFormerNext (CubeSphereWxFormer + level embed + column attn + SpectralGNN) ...",
+    "cubed_wxformer": (
+        "credit.models.wxformer.cubed_wxformer",
+        "CubedWXFormer",
+        "Loading CubedWXFormer (CrossFormer encoder-decoder on a cubed-sphere SE grid) ...",
     ),
 }
 

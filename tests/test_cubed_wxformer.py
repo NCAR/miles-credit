@@ -13,9 +13,9 @@ import numpy as np
 import pytest
 import torch
 
-from credit.models.wxformer.cube_sphere_wxformer import (
+from credit.models.wxformer.cubed_wxformer import (
     NFACE,
-    CubeSphereWxFormer,
+    CubedWXFormer,
 )
 from credit.models.wxformer.halo import HaloExchange
 
@@ -47,7 +47,7 @@ def _make_model(se_index_path, **overrides):
         adjacency_path="/does/not/exist.npz",  # disable halo/edge attention
     )
     kwargs.update(overrides)
-    return CubeSphereWxFormer(**kwargs)
+    return CubedWXFormer(**kwargs)
 
 
 @pytest.mark.parametrize("edge", [30, 50])
@@ -76,6 +76,46 @@ def test_forward_shape_roundtrips(tmp_path, edge):
     c_in = 2 * 3 + 4 + 5
     c_out = 2 * 3 + 4 + 1
 
+    x = torch.randn(1, c_in, 1, ncol)
+    y = model(x)
+    assert tuple(y.shape) == (1, c_out, 1, ncol)
+
+
+def test_use_column_attn_false_has_no_column_modules(tmp_path):
+    """Default (use_column_attn=False) builds no column-attention submodules."""
+    si, _ = _write_full_cube_index(tmp_path, 50)
+    model = _make_model(si)
+
+    assert model.use_column_attn is False
+    assert model.level_embedding is None
+    assert model.col_attn is None
+    assert model.spectral_bottleneck is None
+    assert model.dec_col_attn is None
+
+
+@pytest.mark.parametrize("decoder_col_attn", [False, True])
+def test_use_column_attn_true_forward_shape_roundtrips(tmp_path, decoder_col_attn):
+    """use_column_attn=True builds the column-attention submodules and still
+    round-trips to the SE grid with the output channel count."""
+    edge = 50
+    si, ncol = _write_full_cube_index(tmp_path, edge)
+    model = _make_model(
+        si,
+        use_column_attn=True,
+        col_attn_heads=2,
+        col_attn_stride=1,
+        decoder_col_attn=decoder_col_attn,
+        num_spectral_nodes=8,
+    )
+
+    assert model.use_column_attn is True
+    assert model.level_embedding is not None
+    assert model.col_attn is not None
+    assert model.spectral_bottleneck is not None
+    assert (model.dec_col_attn is not None) == decoder_col_attn
+
+    c_in = 2 * 3 + 4 + 5
+    c_out = 2 * 3 + 4 + 1
     x = torch.randn(1, c_in, 1, ncol)
     y = model(x)
     assert tuple(y.shape) == (1, c_out, 1, ncol)

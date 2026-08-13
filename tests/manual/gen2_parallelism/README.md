@@ -37,15 +37,15 @@ hand-rolled sharding slices fused projections across q/k/v boundaries and
 lacks the backward all-reduce. The old `tp_*` configs (model type `wxformer`)
 are kept as negative references but are not in the matrix.
 
-**Native TP (issue #415)** is supported for `nextgen_wxformer` (and
-CubeSphereWxFormer by inheritance) via torch `parallelize_module`. Its
+**Native TP (issue #415)** is supported for `wxformer_column` (and
+CubedWXFormer by inheritance) via torch `parallelize_module`. Its
 acceptance gate is its own run:
 
 ```bash
 qsub tests/manual/gen2_parallelism/run_tp_parity.pbs
 ```
 
-This trains `nextgen_wxformer` twice on 4 GPUs with the same dp layout and
+This trains `wxformer_column` twice on 4 GPUs with the same dp layout and
 seed — tp=1 (nproc=2, dp=2) vs tp=2 (nproc=4, dp=2 x tp=2) — and gates on
 identical loss trajectories (`check_parity.py`, exact first, then rtol=1e-4
 to allow float32 reassociation in the rowwise all_reduce). The parity configs
@@ -53,7 +53,7 @@ set `use_spectral_norm: false` so every `_tp_plan` block actually shards:
 spectral norm's power-iteration hook is incompatible with DTensor-sharded
 weights, so TP skips any wrapped colwise/rowwise group (the block stays
 replicated full-width, with a warning). With the default
-`use_spectral_norm: true` ALL of `nextgen_wxformer`'s transformer blocks are
+`use_spectral_norm: true` ALL of `wxformer_column`'s transformer blocks are
 wrapped, so TP shards nothing and warns loudly that it had no effect.
 
 Every config trains **multistep** (`forecast_len: 2`), which exercises the

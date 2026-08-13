@@ -36,7 +36,7 @@ trainer:
   ema_decay: 0.9999
   use_tensorboard: true
 model:
-  type: cube_sphere_wxformer_next
+  type: cubed_wxformer
   se_index_path: /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_index_ne120.npy
   adjacency_path: /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_face_adjacency_ne120.npz
   frames: 1
@@ -55,6 +55,7 @@ model:
   halo_size: 6
   edge_attn_heads: 4
   edge_attn_width: 2
+  use_column_attn: true
   col_attn_heads: 3
   col_attn_stride: 4
   decoder_col_attn: false

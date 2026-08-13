@@ -1,4 +1,4 @@
-# WXFormer Next
+# WXFormer Family
 
 The next-generation WXFormer family. These models keep the CrossFormer backbone
 from WXFormer v1 (see [README.md](README.md)) and add explicit vertical coupling,
@@ -12,9 +12,8 @@ documented in `README.md`. This file covers only the newer architectures.
 
 | File | Class | Config key | Grid | Notes |
 |---|---|---|---|---|
-| `wxformer_next.py` | `NextGenWXFormer` | `nextgen_wxformer` | lat/lon | CrossFormer U-Net + level embed + column attn + spectral GNN |
-| `cube_sphere_wxformer.py` | `CubeSphereWxFormer` | `cube_sphere_wxformer` | cubed-sphere SE | per-face CrossFormer + cross-face attention |
-| `cube_sphere_wxformer.py` | `CubeSphereWxFormerNext` | `cube_sphere_wxformer_next` | cubed-sphere SE | CubeSphereWxFormer + the NextGen additions |
+| `wxformer_column.py` | `WXFormerColumn` | `wxformer_column` | lat/lon | CrossFormer U-Net + level embed + column attn + spectral GNN |
+| `cubed_wxformer.py` | `CubedWXFormer` | `cubed_wxformer` | cubed-sphere SE | per-face CrossFormer + cross-face attention, plus the same column-attention additions as `WXFormerColumn` (level embed + column attn + spectral GNN) as an opt-in `use_column_attn` flag |
 
 ## What is new over WXFormer v1
 
@@ -40,7 +39,7 @@ Three additions, applied on top of the CrossFormer encoder-decoder:
 Spectral normalization is applied throughout. As with v1, do not remove it: it
 is needed for DDP stability.
 
-## NextGenWXFormer (lat/lon)
+## WXFormerColumn (lat/lon)
 
 A drop-in successor to `wxformer` on the regular lat/lon grid. The encoder is the
 same four-stage CrossFormer pyramid; the additions above wrap the input and the
@@ -49,7 +48,7 @@ the model starts near persistence at initialization.
 
 ```yaml
 model:
-  type: nextgen_wxformer
+  type: wxformer_column
   image_height: 640
   image_width: 1280
   frames: 2
@@ -63,7 +62,7 @@ model:
   global_window_size: [5, 5, 2, 1]
   local_window_size: 10
   cross_embed_strides: [4, 2, 2, 2]
-  # NextGen additions
+  # column-attention additions
   col_attn_heads: 4
   col_attn_stride: 8        # pool before column attention to bound memory at 640x1280
   decoder_col_attn: false
@@ -71,7 +70,7 @@ model:
   use_spectral_norm: true
 ```
 
-## CubeSphereWxFormer (cubed-sphere SE grid)
+## CubedWXFormer (cubed-sphere SE grid)
 
 WXFormer rebuilt to run on the cubed sphere instead of lat/lon. The motivation
 is uniform resolution: a 0.25° lat/lon grid massively oversamples the poles,
@@ -201,7 +200,7 @@ errors otherwise accumulate.
 
 ```yaml
 model:
-  type: cube_sphere_wxformer
+  type: cubed_wxformer
   se_index_path: ".../se_index_ne120.npy"
   adjacency_path: ".../se_face_adjacency_ne120.npz"   # omit to disable halo/edge attn
   frames: 1
@@ -218,19 +217,25 @@ model:
   halo_size: 6
   edge_attn_heads: 4
   edge_attn_width: 2
-  use_spectral_norm: true
 ```
 
-## CubeSphereWxFormerNext
+### Column-attention additions (`use_column_attn`)
 
-`CubeSphereWxFormerNext` is `CubeSphereWxFormer` with the three NextGen additions
-(level embeddings, column attention, spectral GNN bottleneck) applied per face.
-The spectral bottleneck is sized automatically to the deepest stage resolution
-(24×24 per face at ne120 with the default strides).
+`CubedWXFormer` can optionally layer the same column-attention additions used by
+`WXFormerColumn` (level embeddings, column attention, spectral GNN bottleneck) on
+top of the cubed-sphere backbone, applied per face. Pass `use_column_attn: true`
+plus the `col_attn_*`/`num_spectral_nodes`/`use_spectral_norm` kwargs to the same
+`cubed_wxformer` constructor — this used to be a separate class
+(`CubeSphereWxFormerNext`), and is now a flag on `CubedWXFormer` instead, so the
+forward pass and every other parameter is shared with the plain backbone. The
+spectral bottleneck is sized automatically to the deepest stage resolution
+(24×24 per face at ne120 with the default strides). When `use_column_attn=False`
+(the default) none of these modules are constructed and `forward` runs exactly
+the backbone-only computation shown above.
 
 ```yaml
 model:
-  type: cube_sphere_wxformer_next
+  type: cubed_wxformer
   se_index_path: ".../se_index_ne120.npy"
   adjacency_path: ".../se_face_adjacency_ne120.npz"
   frames: 1
@@ -247,6 +252,8 @@ model:
   halo_size: 6
   edge_attn_heads: 4
   edge_attn_width: 2
+  # column-attention additions
+  use_column_attn: true
   col_attn_heads: 3        # must divide channels
   col_attn_stride: 4
   decoder_col_attn: false
@@ -308,7 +315,7 @@ which keeps it grid-agnostic and avoids any FFT or spherical-harmonic transform.
 
 ## Validation status
 
-`nextgen_wxformer` and the cubed-sphere models train and smoke-test on ERA5.
+`wxformer_column` and the cubed-sphere models train and smoke-test on ERA5.
 They are research models and have not yet replaced the v1 production WXFormer.
 The cubed-sphere path additionally depends on the credit-mesaclip static files
 listed above.
@@ -317,7 +324,7 @@ Recent V100 validation of the full cubed-sphere Gen2 stack used:
 
 ```text
 preblocks: era5_normalizer -> tripole_to_se -> concat
-model:     cube_sphere_wxformer_next
+model:     cubed_wxformer, use_column_attn: true
 postblock: reconstruct
 trainer:   era5-gen2, batch_size=1, use_ema=false
 ```
