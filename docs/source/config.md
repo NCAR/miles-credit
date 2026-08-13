@@ -410,14 +410,14 @@ CREDIT logs training performance in `training_log.csv`.
 save_metric_vars: True
 ```
 
-- **`True`** → Saves metrics **for all predicted variables**.  
-- **List of variables** → Saves only the specified ones:  
+- **`True`** *(default when omitted)* → Saves per-variable metrics **for all predicted variables**, alongside the combined aggregates.  
+- **List of variables** → Saves per-variable metrics only for the specified ones (combined aggregates are always saved):  
 
   ```yaml
   save_metric_vars: ["Z500", "Q500", "Q", "T"]
   ```
 
-- **`[]` or `None`** → Saves only **bulk metrics** (averaged over all variables).  
+- **`False` or `[]`** → Saves only **bulk metrics** (averaged over all variables).  
 
 💡 *Reducing the number of tracked variables speeds up training logs.*  
 

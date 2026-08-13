@@ -20,8 +20,8 @@ from argparse import ArgumentParser
 import torch
 import yaml
 
-from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, setup
-from credit.losses import is_crps_loss
+from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
+from credit.losses import effective_loss_name, is_crps_loss
 from credit.models import load_model
 from credit.seed import seed_everything
 from credit.trainers import load_trainer
@@ -91,7 +91,10 @@ def main_cli():
     )
     # Loss sections are either legacy flat keys (training_loss: ...) or the
     # new-style {type, args} structure (mirrors preblocks/postblocks).
-    loss_name = conf["loss"].get("training_loss") or conf["loss"].get("type")
+    # effective_loss_name resolves the univariate training_loss inside a
+    # BaseLoss section, so ring-crps under `type: base` gets the same
+    # shared-batch ensemble setup as flat ring-crps use.
+    loss_name = effective_loss_name(conf["loss"])
     ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
     if is_crps_loss(loss_name) and ensemble_size <= 1:
         raise ValueError(
@@ -141,12 +144,7 @@ def main_cli():
 
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(local_rank % torch.cuda.device_count())
-        torch.backends.cudnn.benchmark = True
-    else:
-        device = torch.device("cpu")
+    device = select_device(local_rank)
 
     if world_size > 1:
         setup(rank, world_size, "ddp", backend, device_id=device if torch.cuda.is_available() else None)

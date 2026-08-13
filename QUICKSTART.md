@@ -10,42 +10,56 @@ Full documentation: https://miles-credit.readthedocs.io/en/latest/quickstart.htm
 
 **NCAR Casper:**
 ```bash
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
 module load conda
-conda activate /glade/work/schreck/conda-envs/credit-main-casper
-pip install -e . --no-deps
+conda create -n credit-casper -y python=3.13 uv
+conda activate credit-casper
+uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/cu126
 ```
+
+CUDA 13 (PyTorch's default) does not work on Casper — the `cu126` index above does.
 
 **NCAR Derecho:**
 ```bash
+module load conda
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-module load ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cuda/12.3.2 conda/latest
-conda activate /glade/work/schreck/conda-envs/credit-main-derecho
-pip install -e . --no-deps
+./create_derecho_env.sh   # installs into the credit-derecho conda environment
 ```
 
-The shared envs have all heavy dependencies (PyTorch, xarray, etc.) pre-installed.
-`pip install -e . --no-deps` wires your clone into the env and takes only a few seconds.
+The Derecho script builds PyTorch so distributed operations route over the
+Slingshot interconnect — required for multi-node training.
 
-**Other systems:**
+**Other systems (Mac / laptop / generic Linux):**
 ```bash
-conda create -n credit python=3.11 && conda activate credit
-pip install miles-credit
+conda create -n credit -y python=3.13 uv
+conda activate credit
+uv pip install miles-credit
 ```
 
 ---
 
 ## 2. Generate a config
 
+The interactive wizard works anywhere (laptop or HPC) and asks about your
+dataset, grid, and model settings:
+
+```bash
+credit begin
+```
+
+NCAR users can instead copy a ready-made template whose data paths already
+point at the shared ERA5 archive on glade — no edits required to get started:
+
 ```bash
 credit init --grid 1deg -o my_run.yml      # 1-degree ERA5, fast to train
 credit init --grid 0.25deg -o my_run.yml   # 0.25-degree ERA5, full resolution
 ```
 
-> **NCAR users:** data paths already point to `/glade/campaign/cisl/aiml/ksha/CREDIT_data/`.
-> No edits required to get started.
+Either way, validate before running anything:
+
+```bash
+credit check -c my_run.yml
+```
 
 Fields you may want to change before your first run:
 
@@ -57,7 +71,30 @@ Fields you may want to change before your first run:
 
 ---
 
-## 3. Submit a training job
+## 3. Fit the scalers
+
+Wizard-generated configs need a one-time preprocessing pass that fits the
+normalization scalers and saves them to the config's `scaler_path`:
+
+```bash
+credit preprocess -c my_run.yml
+```
+
+> **NCAR users:** the `credit init` templates point at pre-fitted scalers on
+> glade, so you can skip this step. Re-run it whenever you change the variable
+> list or date range of a config with your own `scaler_path`.
+
+---
+
+## 4. Start training
+
+**Locally (laptop / workstation / single GPU):**
+
+```bash
+credit train -c my_run.yml
+```
+
+**On NCAR HPC, submit a batch job:**
 
 ```bash
 # Casper — chain auto-computed from config (epochs / num_epoch)
@@ -87,7 +124,7 @@ credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 1 --reload
 
 ---
 
-## 4. Monitor progress
+## 5. Monitor progress
 
 ```bash
 # Quick loss check
@@ -101,7 +138,7 @@ tensorboard --logdir /path/to/save_loc/tensorboard
 
 ---
 
-## 5. Visualise a prediction
+## 6. Visualise a prediction
 
 ```bash
 # 3-panel global map: truth | prediction | difference
@@ -112,7 +149,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required.
 
 ---
 
-## 6. Get help — `credit ask`
+## 7. Get help — `credit ask`
 
 `credit ask` is a unified AI assistant — agent mode (reads your files, runs commands,
 iterates to a confident answer) when Anthropic is available, simple chat otherwise.
@@ -141,6 +178,6 @@ Full docs: https://miles-credit.readthedocs.io/en/latest/agent.html
 |---------|-----|
 | Training hangs on startup | Set `thread_workers: 1` and `prefetch_factor: 1` |
 | `RendezvousConnectionError` on Derecho | Use `--nodes 1` (single-node uses `--standalone`) |
-| Loss > 100 or growing | Check `mean_path` / `std_path` in config |
+| Loss > 100 or growing | Check `scaler_path` in the `bridgescaler_transform` preblock (or `mean_path` / `std_path` if using the gen1-style `era5_normalizer`) |
 | PBS chain cancelled | Use `--reload` to restart from last checkpoint |
 | Out of GPU memory | Reduce `train_batch_size` (try `1` for 0.25°) |

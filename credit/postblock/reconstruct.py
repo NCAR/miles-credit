@@ -10,9 +10,11 @@ Reads ``batch_dict["metadata"]["target"]["_channel_map"]`` built by
 Input
 -----
 batch_dict : dict
-    Must contain:
+    Must contain::
+
       "y_pred"   — flat model output tensor, shape (B, C, H, W) or (B, C, T, H, W)
       "metadata" — metadata dict with ``["target"]["_channel_map"]``
+
     All other keys pass through unchanged.
 
 Output

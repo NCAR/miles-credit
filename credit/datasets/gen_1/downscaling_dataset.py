@@ -69,7 +69,7 @@ class DownscalingDataset(torch.utils.data.Dataset):
 
         datasets (nested dict): dicts of parameters for initializing
             DataMaps and their corresponding DataTransforms via
-            **kwargs.  These dicts are replaced with actual objects
+            ``**kwargs``.  These dicts are replaced with actual objects
             during initialization.
 
         image_width (int): width of dataset in gridcells

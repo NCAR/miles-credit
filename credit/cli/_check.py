@@ -479,6 +479,38 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                     except Exception as exc:  # noqa: BLE001 — surfacing any construction failure is the point
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
+    _check_scaler_paths_unique(conf, rep)
+
+
+def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
+    """Ensure no two bridgescaler_transform preblocks share a scaler_path.
+
+    `credit preprocess` fits and saves each scaler block to its own scaler_path;
+    two blocks pointing at the same file would overwrite each other, and training
+    would then load the same (single-scaler-type) file for both groups.
+    """
+    seen: dict[str, str] = {}
+    for section in ("ic_only", "per_step"):
+        for name, block in ((conf.get("preblocks") or {}).get(section) or {}).items():
+            if not isinstance(block, dict) or block.get("type") != "bridgescaler_transform":
+                continue
+            path = (block.get("args") or {}).get("scaler_path")
+            if not isinstance(path, str) or not path:
+                continue
+            # Normalize aggressively so `~/x.json`, `$HOME/x.json`, and relative
+            # spellings of the same file all collide.
+            resolved = os.path.realpath(os.path.expanduser(os.path.expandvars(path)))
+            where = f"preblocks.{section}.{name}"
+            if resolved in seen:
+                rep.error(
+                    where,
+                    f"scaler_path '{path}' is also used by '{seen[resolved]}'. Each bridgescaler_transform "
+                    "block must use a distinct scaler_path, or preprocess overwrites one with the other.",
+                    fix="Give each scaler preblock its own scaler_path.",
+                )
+            else:
+                seen[resolved] = where
+
 
 def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
     from credit.models import _MODEL_REGISTRY, _load_model_entry
@@ -788,6 +820,46 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
             "use_latitude_weights is true but no latitude_weights file is given.",
             fix="Set loss.args.latitude_weights to a dataset with a 'latitude' coordinate.",
         )
+
+    # Univariate loss constraints: CRPS-family losses score an ensemble and are
+    # rejected by BaseLoss at construction — except ring-crps, whose ensemble
+    # lives across data-parallel ranks (its local score is elementwise).
+    from credit.losses import is_crps_loss
+
+    training_loss = _get(conf, "loss", "args", "training_loss", default="mse")
+    if is_crps_loss(training_loss) and training_loss != "ring-crps":
+        rep.error(
+            "loss.args.training_loss",
+            f"'{training_loss}' is an ensemble CRPS loss and cannot be used as a BaseLoss "
+            "univariate per-variable loss (it needs an ensemble dimension in the tensor).",
+            fix="Use an elementwise loss (mse, mae, huber, ...) or ring-crps (ensemble across dp ranks).",
+        )
+    elif training_loss == "ring-crps":
+        if int(_get(conf, "trainer", "ensemble_size", default=1) or 1) <= 1:
+            rep.error(
+                "trainer.ensemble_size",
+                "training_loss ring-crps uses one ensemble member per data-parallel rank and "
+                "requires trainer.ensemble_size > 1 (it must equal the data-parallel world size "
+                "at launch).",
+                fix="Set trainer.ensemble_size to the number of data-parallel ranks.",
+            )
+        if not _get(conf, "loss", "args", "validation_loss"):
+            rep.warn(
+                "loss.args.validation_loss",
+                "training_loss ring-crps with no validation_loss: validation keeps dp dataset "
+                "sharding, so ranks hold different samples and the cross-rank spread term is "
+                "meaningless.",
+                fix="Set loss.args.validation_loss to a deterministic loss, e.g. mae.",
+            )
+    for var_key, spec in (_get(conf, "loss", "args", "base_loss_overrides", default={}) or {}).items():
+        if is_crps_loss((spec or {}).get("loss")):
+            rep.error(
+                f"loss.args.base_loss_overrides.{var_key}",
+                f"'{spec.get('loss')}' is a CRPS loss; CRPS losses are only supported as the "
+                "training_loss itself (the trainer's ensemble setup keys off "
+                "loss.args.training_loss and would not see the override).",
+                fix="Use an elementwise loss in the override, or make ring-crps the training_loss.",
+            )
 
 
 def _check_trainer(conf: dict, rep: _Report) -> None:

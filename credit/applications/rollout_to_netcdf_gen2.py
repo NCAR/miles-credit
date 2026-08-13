@@ -1,6 +1,6 @@
 """
 rollout_to_netcdf_gen2.py
------------------------
+-------------------------
 Rollout entry point for the v2 data schema (conf["data"]["source"]).
 
 Key differences from rollout_to_netcdf.py (v1):
@@ -23,7 +23,6 @@ import yaml
 import logging
 import warnings
 import traceback
-from pathlib import Path
 from argparse import ArgumentParser
 import multiprocessing as mp
 from datetime import datetime, timedelta
@@ -33,16 +32,20 @@ import torch
 import xarray as xr
 
 from credit.datasets.gen_2.local import LocalDataset
-from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
+from credit.datasets.gen_2.channel_utils import (
+    build_channel_layout,
+    resolve_level_ids,
+    resolve_num_levels,
+    update_x,
+)
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info, setup, distributed_model_wrapper
+from credit.distributed import get_rank_info, select_device, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.forecast import load_forecasts
-from credit.pbs import launch_script, launch_script_mpi
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -69,7 +72,8 @@ def _inject_flat_schema(conf):
     # diagnostic_variables is the list of names shown in xarray output
     conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
     # level_ids: actual pressure/model-level values for xarray coordinate
-    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
+    # (positional indices when levels is null/omitted -> "all levels")
+    conf["data"]["level_ids"] = resolve_level_ids(src, conf)
     # scaler_type needed by save_netcdf_increment
     if "scaler_type" not in conf["data"]:
         conf["data"]["scaler_type"] = "std_new"
@@ -81,7 +85,7 @@ def _inject_tracer_inds(conf):
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
     src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
     vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
@@ -108,9 +112,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     """
     data_conf = conf["data"]
     src = data_conf["source"]["ERA5"]
-    levels = src["levels"]
+    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
     level_coord = src["level_coord"]
-    n_levels = len(levels)
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -124,8 +128,11 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
             n = n_levels if is_3d else 1
             return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
         if is_3d:
-            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
-            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+            # Explicit level subset -> select it; else take every level in file order.
+            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
+            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
+            m = torch.tensor(m_da.values, dtype=dtype)
+            s = torch.tensor(s_da.values, dtype=dtype)
         else:
             m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
             s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
@@ -196,14 +203,7 @@ def predict(rank, world_size, conf, p):
     if conf["predict"]["mode"] in ["fsdp", "ddp"]:
         setup(rank, world_size, conf["predict"]["mode"])
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
-
+    device = select_device(rank)
     seed_everything(conf["seed"])
 
     # ---- Data schema helpers ----
@@ -211,7 +211,7 @@ def predict(rank, world_size, conf, p):
     src = conf["data"]["source"]["ERA5"]
     v = src["variables"]
     diag = v.get("diagnostic") or {}
-    n_levels = len(src["levels"])
+    n_levels = resolve_num_levels(src, conf)
     varnum_diag = len(diag.get("vars_2D", [])) + len(diag.get("vars_3D", [])) * n_levels
 
     lead_time_periods = conf["data"].get("lead_time_periods") or int(
@@ -354,7 +354,6 @@ def _load_model(conf, device):
 def main():
     parser = ArgumentParser(description="Rollout AI-NWP forecasts (v2 data schema)")
     parser.add_argument("-c", dest="model_config", type=str, required=True, help="Path to v2 model configuration YAML.")
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit to PBS if 1.")
     parser.add_argument("-m", "--mode", type=str, default="none", help="Override predict mode: none | ddp | fsdp")
     parser.add_argument("-cpus", "--num_cpus", type=int, default=4, help="Number of CPU workers for async save pool.")
     parser.add_argument(
@@ -430,14 +429,6 @@ def main():
 
     if args.ensemble_size is not None:
         conf.setdefault("predict", {})["ensemble_size"] = args.ensemble_size
-
-    if args.launch:
-        script_path = Path(__file__).absolute()
-        if conf.get("pbs", {}).get("queue") == "casper":
-            launch_script(args.model_config, script_path)
-        else:
-            launch_script_mpi(args.model_config, script_path)
-        sys.exit()
 
     # load_forecasts returns [init_str, end_str] pairs; extract init times and
     # normalise to the T%HZ format expected by _save_worker / save_netcdf_increment.

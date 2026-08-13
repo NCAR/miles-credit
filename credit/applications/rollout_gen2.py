@@ -28,7 +28,6 @@ import os
 import sys
 import warnings
 from argparse import ArgumentParser
-from pathlib import Path
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -38,9 +37,8 @@ from torch.utils.data import DataLoader
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.datasets.gen_2.channel_utils import ChannelSchema
 from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
-from credit.distributed import get_rank_info, setup
+from credit.distributed import get_rank_info, select_device, setup
 from credit.output_gen2 import ForecastWriter
-from credit.pbs import launch_script, launch_script_mpi
 from credit.postblock import build_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks
 from credit.seed import seed_everything
@@ -83,7 +81,6 @@ Examples:
         """,
     )
     parser.add_argument("-c", "--config", dest="model_config", required=True, help="Path to Gen2 YAML config.")
-    parser.add_argument("-l", dest="launch", type=int, default=0, help="Submit to PBS if 1.")
     parser.add_argument(
         "--run-mode",
         type=str,
@@ -151,15 +148,6 @@ Examples:
     # anything below reads conf["data"]/preblocks/postblocks.
     schema_conf = apply_inference_overrides(conf)
 
-    # ── PBS launch ───────────────────────────────────────────────────────────
-    if args.launch:
-        script_path = Path(__file__).absolute()
-        if conf.get("pbs", {}).get("queue") == "casper":
-            launch_script(args.model_config, str(script_path))
-        else:
-            launch_script_mpi(args.model_config, str(script_path))
-        sys.exit()
-
     # ── Init times ───────────────────────────────────────────────────────────
     timestep = conf["data"]["timestep"]
     # CF calendar for the init schedule. Config-declared here; if the config is
@@ -203,13 +191,7 @@ Examples:
     for h in root.handlers:
         h.setLevel(level)
 
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(local_rank % torch.cuda.device_count())
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = select_device(local_rank)
 
     if mode in ("ddp", "fsdp"):
         setup(world_rank, world_size, mode, device_id=device if torch.cuda.is_available() else None)

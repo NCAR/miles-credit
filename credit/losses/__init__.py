@@ -37,6 +37,28 @@ def is_crps_loss(loss_type):
     return loss_type in CRPS_LOSSES
 
 
+def effective_loss_name(loss_conf):
+    """Resolve the registry loss name a config actually trains with.
+
+    For a new-style BaseLoss section (``type: base``) the univariate
+    ``args.training_loss`` is what drives ensemble semantics (e.g. ring-crps
+    needs shared batches and one member per dp rank), so it — not the literal
+    ``"base"`` — is returned. Any other section resolves to the flat
+    ``training_loss`` key or the new-style ``type``.
+
+    Args:
+        loss_conf: the config's ``loss:`` section (``conf["loss"]``).
+
+    Returns:
+        Registry loss name string, or None if the section is empty.
+    """
+    loss_conf = loss_conf or {}
+    if loss_conf.get("type") == "base":
+        # "mse" mirrors the BaseLoss constructor default for training_loss.
+        return (loss_conf.get("args") or {}).get("training_loss", "mse")
+    return loss_conf.get("training_loss") or loss_conf.get("type")
+
+
 # Direct-import table: maps Python class names → class for lazy module attribute access.
 # Enables ``from credit.losses import LogCoshLoss`` without eager imports; kept for backward compatibility.
 _CLASS_SOURCES = {

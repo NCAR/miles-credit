@@ -5,6 +5,7 @@ import sys
 import textwrap
 
 from ._ask import _ask
+from ._begin import _begin
 from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
@@ -47,6 +48,10 @@ def _build_parser() -> argparse.ArgumentParser:
         "-o", "--output", default="config.yml", metavar="FILE", help="Output file path (default: config.yml)"
     )
     p.add_argument("--force", action="store_true", help="Overwrite existing output file")
+
+    # ---- begin ----
+    p = sub.add_parser("begin", help="Interactively create a starter CREDIT config")
+    p.add_argument("-c", "--config", default=None, metavar="CONFIG", help="Config path (default: dated file in cwd)")
 
     # ---- check ----
     p = sub.add_parser(
@@ -421,6 +426,7 @@ def main() -> None:
 
     dispatch = {
         "init": _init,
+        "begin": _begin,
         "check": _check,
         "preprocess": _preprocess,
         "train": _train,

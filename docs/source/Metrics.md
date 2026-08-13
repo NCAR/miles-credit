@@ -86,17 +86,20 @@ the metric's key:
 
 ```python
 {
-  "rmse/ERA5/prognostic/3d/temperature": 1.83,
-  "rmse/ERA5/prognostic/2d/SP": 142.6,
-  "rmse": 0.97,            # weighted aggregate across variables
-  "r2score/ERA5/...": 0.94,
-  "r2score": 0.91,
+    "rmse/ERA5/prognostic/3d/temperature": 1.83,
+    "rmse/ERA5/prognostic/2d/SP": 142.6,
+    "rmse": 0.97,  # weighted aggregate across variables
+    "r2score/ERA5/...": 0.94,
+    "r2score": 0.91,
 }
 ```
 
 A `combined` metric returns the union of its children's outputs. The trainer
 all-reduces every value across ranks and writes it to TensorBoard and
-`training_log.csv` as `train_<key>` / `valid_<key>`.
+`training_log.csv` as `train_<key>` / `valid_<key>` — by default both the
+per-variable scores and the combined aggregates. Set `trainer.save_metric_vars`
+to a list of variable names to restrict the per-variable columns, or to `False`
+to write only the combined aggregates.
 
 The progress bar and CSV columns follow whatever you configure: `BaseTrainer`
 derives its display metrics from `metrics.args.metrics` (or from `metrics.type` for
@@ -286,9 +289,7 @@ class HuberMetric(BaseVariableMetric):
         self.delta = float(delta)
 
     def compute_variable(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        return torch.nn.functional.huber_loss(
-            pred, target, reduction="none", delta=self.delta
-        )
+        return torch.nn.functional.huber_loss(pred, target, reduction="none", delta=self.delta)
 ```
 
 Set `scale_power` to match your metric's order in σ, or `inverse_variance`

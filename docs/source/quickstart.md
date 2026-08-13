@@ -1,55 +1,81 @@
-# Quickstart
+# Get Started
 
-Get from zero to a running training job in under 10 minutes.
-This page covers the full loop — install, configure, submit, monitor, visualise, get help.
-Every command is copy-pasteable.
+With these instructions, you can get from zero to running a training session in under 10 minutes.
+
+This guide (and everything under *Generation 2 Components*) describes CREDIT
+**Gen 2**, the current pipeline. If you have inherited an older config or are
+unsure which generation you are looking at, see
+[Gen 1 vs Gen 2](gen2_overview.md#gen-1-vs-gen-2-which-one-am-i-using).
 
 ---
 
-## 1. Set up your environment
+## 1. Install CREDIT 
 
-:::{note}
-**NCAR users on Casper** — pre-built environment, no conda create needed:
+::::{tab-set}
 
+
+:::{tab-item} Casper
+### NCAR Casper
+The [NCAR Casper](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/) is a heterogeneous cluster
+for data analysis, visualization, and AI/ML. For ML activities, it contains nodes with multiple generations of GPUs
+ranging from NVIDIA V100s, A100s, and H100s as well as AMD MI300As. All NVIDIA GPUs on Casper work with CUDA 12.6. 
+Only A100s and H100s work with newer versions of CUDA. CUDA 13 (the default CUDA for PyTorch) does not work on Casper.
+
+If you want to use the AMD GPUs, you will need to build a separate environment with a PyTorch built on ROCm 6.4.
+
+Casper is well-suited for single node CREDIT training and inference and can support CREDIT training for 1 degree
+global models and short experimental runs or interactive applications. 
+
+To install CREDIT on Casper:
 ```bash
-conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-casper
-
-git clone https://github.com/NCAR/miles-credit.git
-cd miles-credit
-# Installs credit into the .local directory in your home directory.
-pip install --user -e .
+module load conda
+conda create -n credit-casper -y python=3.13 uv 
+conda activate credit-casper
+# NVIDIA GPUs 
+uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/cu126
+# AMD GPUs
+uv pip install miles-credit --extra-index-url https://download.pytorch.org/whl/rocm6.4
 ```
 :::
 
-:::{note}
-**NCAR users on Derecho:**
+:::{tab-item} Derecho
+### NCAR Derecho
+The NCAR Derecho system contains GPU nodes with 40 GB NVIDIA A100s linked with Cray Slingshot interconnect. If 
+you plan to conduct multi-node training or inference, you will need to use our special install script
+for Derecho to ensure that PyTorch is configured to route distributed operations over the fastest network.
 
+To install CREDIT on Derecho:
 ```bash
-conda activate /glade/campaign/cisl/aiml/credit/conda_envs/credit-derecho
-
+module load conda
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install --user -e .
+./create_derecho_env.sh # Will install in the credit-derecho conda environment
 ```
 :::
 
-:::{note}
-**Other systems:**
-
+:::{tab-item} Linux/Mac
+### Linux/Mac Systems
+If you are running CREDIT on a Mac or a system with up-to-date GPU libraries
+and no other weirdness, you can follow the following path to installing CREDIT.
 ```bash
-conda create -n credit python=3.12
+conda create -n credit -y python=3.13 uv
 conda activate credit
-pip install miles-credit
+uv pip install miles-credit
 ```
 
 Or install the main development branch:
 
 ```bash
+conda create -n credit -y python=3.13 uv
+conda activate credit
 git clone https://github.com/NCAR/miles-credit.git
 cd miles-credit
-pip install -e .
+uv pip install -e ".[develop]"
 ```
+
 :::
+
+::::
 
 Verify the install worked:
 
@@ -57,43 +83,71 @@ Verify the install worked:
 credit --help
 ```
 
-> **More detail**: [Installation](installation.md) | [Getting Started](getting-started.md)
-
----
-
 ## 2. Generate a config
 
-CREDIT ships with ready-to-use configs for ERA5. Pick your resolution:
+After installing CREDIT, use `credit begin` to create a config file and
+an experiment directory. The wizard will ask you questions about datasets 
+and some model settings. Modify the config file later with more advanced options.
+
+For a laptop-runnable starting point, see
+`config/gen_2/examples/weatherbench2_era5_wxformer_tiny.yml`, which streams a
+small WeatherBench2 ERA5 subset from the cloud — no local data required.
+
+### Validating a config with `credit check`
+
+`credit check` resolves everything a config names without running anything: every
+registry key (`model.type`, `trainer.type`, `loss.type`, `dataset_type`, each
+pre/postblock `type`), every block's `args` against the real constructor
+signature, the channel layout against the model geometry, the BaseLoss
+target-twin postblock chain, and the existence of every file the config points
+at. Each finding comes with the fix where the fix is unambiguous.
 
 ```bash
-# 1-degree ERA5 — good starting point, fast to train
-credit init --grid 1deg -o my_run.yml
-
-# 0.25-degree ERA5 — full resolution, needs more memory and time
-credit init --grid 0.25deg -o my_run.yml
+credit check -c my_experiment.yml            # static checks, no data touched
+credit check -c my_experiment.yml --deep     # also construct model/blocks/loss
+credit check -c my_experiment.yml --strict   # exit non-zero on warnings too
+credit check -c my_experiment.yml --json     # machine-readable output
 ```
 
-::::{note}
-**NCAR users**: data paths in these configs already point to
-`/glade/campaign/cisl/aiml/ksha/CREDIT_data/` — readable by all NCAR staff.
-`save_loc` defaults to `/glade/derecho/scratch/$USER/CREDIT_runs/...`
-**No edits required to get started.**
-::::
+Note that gen2 `forecast_len` is 1-indexed and counts sequential rollout steps
+per training sample (each prediction/target is always a single step):
+`forecast_len: 1` means a single-step prediction, unlike gen1's 0-indexed
+convention where `0` meant a single step.
 
-Open `my_run.yml` and find the `# USER SETTINGS` block. The only things you
-may want to change before your first run:
+> **More detail**: for a complete runnable example, see
+> [`config/gen_2/examples/example-end-to-end.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-end-to-end.yml),
+> which exercises the full `credit preprocess` → `credit train` →
+> `credit rollout` sequence out of the box. The fully annotated gen2 reference config is
+> [`config/gen_2/examples/example-v2026.2.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-v2026.2.yml).
+> | [Datasets guide](Datasets.md) | [Models](Models_gen2.md) | [Training guide](Training.md)
 
-| Field | Default | Notes |
-|-------|---------|-------|
-| `trainer.num_epoch` | `5` | Epochs per PBS job. Increase if walltime allows. |
-| `trainer.train_batch_size` | `8` | Per-GPU. Reduce if you hit OOM. |
-| `save_loc` | scratch dir | Where checkpoints and logs are written. |
+## 3. Fit the scalers with `credit preprocess`
 
-> **More detail**: [Config reference](config.md) | [Training guide](Training.md)
+Before training, run the preprocessing step once per config:
 
----
+```bash
+credit preprocess -c my_experiment.yml
+```
 
-## 3. Submit a training job
+`credit preprocess` streams through the training data and fits the
+[bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
+by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
+config. Training will fail without this file, so run it once before your first
+training job (and re-run it if you change the variable list or date range).
+
+## 4. Start a training job
+
+### Train locally (laptop / workstation / single GPU)
+
+If you are not on an HPC cluster, run training directly:
+
+```bash
+credit train -c my_experiment.yml
+```
+
+This works on a Mac, a CPU-only machine, or a single-GPU workstation. The rest
+of this step covers batch submission on NCAR HPC (Casper/Derecho) with
+`credit submit`.
 
 ### Submit
 
@@ -159,38 +213,46 @@ reload flags automatically — no manual YAML editing required.
 
 > **More detail**: [Training guide](Training.md) | `credit submit --help`
 
----
-
-## 4. Monitor progress
+## 5. Monitor progress
 
 ### Training log
 
-The trainer writes a CSV after every epoch:
+The trainer writes a CSV after every epoch to your config's `save_loc`
+directory (e.g. `/glade/derecho/scratch/$USER/CREDIT_runs/my_run` on NCAR HPC):
 
 ```bash
 # Quick check: last 5 epochs
-tail -5 /glade/derecho/scratch/$USER/CREDIT_runs/my_run/training_log.csv
+tail -5 <save_loc>/training_log.csv
 ```
 
-Columns: `epoch`, `train_loss`, `val_loss`, `lr`, `epoch_time_s`.
+Columns include `epoch`, `train_loss`, `valid_loss`, the combined verification
+metrics, and `lr`. By default (`trainer.save_metric_vars: True`) per-variable
+columns (`train_loss_var/<var>`, `valid_loss_var/<var>`, per-variable metrics)
+are also written, which makes it easy to see which variable is driving the
+loss; set `save_metric_vars: False` or a list of variable names to trim the
+CSV.
 
 **What healthy training looks like:**
-- After epoch 1: `train_loss` ≈ 1–3
 - Loss should decrease steadily each epoch
-- `val_loss` should track `train_loss` (not diverge)
+- `valid_loss` should track `train_loss` (not diverge)
+
+The absolute loss magnitude depends on your loss configuration: gen2 losses
+operate in physical units, so the value scales with the variables' units and
+the `var_weighting` choice (e.g. `inverse_variance` weighting brings the
+initial loss to order 1). Trends and train/validation agreement matter more
+than the absolute number.
 
 ### TensorBoard
 
 ```bash
-tensorboard --logdir /glade/derecho/scratch/$USER/CREDIT_runs/my_run/tensorboard
+tensorboard --logdir <save_loc>/tensorboard
 ```
 
 Then open `http://localhost:6006` in your browser.
 On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](tensorboard.md).
 
----
 
-## 5. Visualise a prediction
+## 6. Visualize a prediction
 
 Once at least one checkpoint exists, run a forward pass and produce a
 3-panel global map (truth | prediction | difference) for any field:
@@ -214,14 +276,12 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 |---|---|
 | Recognisable weather patterns after ~10 epochs | Training is going well |
 | Uniform grey prediction | Too few epochs, or LR/normalisation problem |
-| Loss > 100 or growing | Check `mean_path` / `std_path` in config |
+| Loss > 100 or growing | Check `scaler_path` in the `bridgescaler_transform` preblock (or `mean_path` / `std_path` if using the gen1-style `era5_normalizer`) |
 | Small smooth difference map | Model is converging correctly |
 
 > **More detail**: `credit plot --help`
 
----
-
-## 6. Get help from the AI assistant
+## 7. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat
@@ -258,8 +318,6 @@ credit ask "what PBS jobs are running and how much walltime do they have left?"
 
 See the full [AI Assistant documentation](agent.md) for all examples, options, and cost details.
 
----
-
 ## Common problems
 
 | Symptom | Fix |
@@ -270,18 +328,3 @@ See the full [AI Assistant documentation](agent.md) for all examples, options, a
 | PBS chain cancelled after job failure | Expected — PBS `afterok` cancels remaining jobs. Use `--reload --chain N` to restart. |
 | Checkpoint not found on first run | Normal — set `load_weights: False` in config (the default). |
 | Out of GPU memory | Reduce `train_batch_size`. For 0.25° start with `train_batch_size: 1`. |
-
----
-
-## What's next
-
-| Goal | Where to go |
-|------|------------|
-| Understand every config field | [Config reference](config.md) |
-| Multi-node training details | [Training guide](Training.md) |
-| Run a forecast from a trained model | [Inference guide](Inference.md) |
-| Serve forecasts over HTTP | [Forecast API Server](serve.md) |
-| Set up TensorBoard on HPC | [TensorBoard](tensorboard.md) |
-| Evaluate your model against baselines | [Evaluation](Evaluation.md) |
-| Use a custom dataset | [Dataset structure](DataSets.md) |
-| Add a new model architecture | [Model architectures](Model_Architectures.md) |

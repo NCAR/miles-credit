@@ -9,9 +9,9 @@ import torch
 import torch.distributed as dist
 import tqdm
 
-from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema, resolve_num_levels
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
-from credit.losses import BaseLoss, is_crps_loss
+from credit.losses import BaseLoss, effective_loss_name, is_crps_loss
 from credit.metrics import BaseCombinedMetric, BaseVariableMetric
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
 from credit.parallel.domain import (
@@ -119,7 +119,7 @@ class TrainerERA5Gen2(BaseTrainer):
         source = next(iter(data_conf["source"].values()))
         vars_conf = source["variables"]
         diag = vars_conf.get("diagnostic") or {}
-        num_levels = len(source.get("levels", []))
+        num_levels = resolve_num_levels(source, conf)
         self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
 
         self.retain_graph = data_conf.get("retain_graph", False)
@@ -153,7 +153,9 @@ class TrainerERA5Gen2(BaseTrainer):
         # If True, log a warning on NaN loss instead of raising TrialPruned.
         self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
 
-        loss_name = conf.get("loss", {}).get("training_loss") or conf.get("loss", {}).get("type")
+        # Resolves the univariate training_loss inside a BaseLoss section, so
+        # ring-crps under `type: base` gets the same ensemble setup as flat use.
+        loss_name = effective_loss_name(conf.get("loss", {}))
         if is_crps_loss(loss_name) and self.ensemble_size <= 1:
             raise ValueError(
                 f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "

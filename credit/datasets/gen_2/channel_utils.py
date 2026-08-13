@@ -99,6 +99,45 @@ _MODEL_PREDICTED = frozenset({"prognostic"})
 # "static" (and anything else) falls through as fixed
 
 
+def resolve_num_levels(src_conf: dict, conf: dict) -> int:
+    """Resolve a source's vertical level count.
+
+    A source's explicit ``levels`` list wins when non-empty; otherwise the
+    count falls back to ``model.levels``. That fallback covers the
+    ``levels: null`` and omitted-``levels`` cases, where the dataset loads
+    every vertical level available in the data (see ``LocalDataset``). An empty
+    list is treated the same as absent, matching ``build_channel_layout`` /
+    ``ChannelSchema.from_config``.  Returns 0 when neither is resolvable.
+
+    Args:
+        src_conf: A single ``data.source.<name>`` config block.
+        conf: The full config dict (for the ``model.levels`` fallback).
+    """
+    src_levels = (src_conf or {}).get("levels")
+    if src_levels:
+        return len(src_levels)
+    return int((conf.get("model") or {}).get("levels") or 0)
+
+
+def resolve_level_ids(src_conf: dict, conf: dict) -> list:
+    """Resolve the coordinate ids for a source's vertical levels.
+
+    Returns the explicit ``levels`` list when set; otherwise integer indices
+    ``0 .. model.levels - 1`` (the ``levels: null`` / omitted case). The
+    physical level values are unknown from the config alone in that case, so
+    positional indices stand in for the output coordinate. Mirrors
+    :func:`resolve_num_levels` for the "all levels" fallback.
+
+    Args:
+        src_conf: A single ``data.source.<name>`` config block.
+        conf: The full config dict (for the ``model.levels`` fallback).
+    """
+    src_levels = (src_conf or {}).get("levels")
+    if src_levels:
+        return list(src_levels)
+    return list(range(resolve_num_levels(src_conf, conf)))
+
+
 @dataclass(frozen=True)
 class ChannelGroup:
     """One ``(source, field_type)`` run of channels in the model input tensor.
@@ -152,7 +191,6 @@ def build_channel_layout(conf):
         channels in place and cannot shift a history window.
     """
     data_conf = conf["data"]
-    model_levels = (conf.get("model") or {}).get("levels")
 
     groups: dict[str, ChannelGroup] = {}
     x_cursor = 0  # position in the model input tensor x
@@ -162,8 +200,7 @@ def build_channel_layout(conf):
     for source_name, src_conf in data_conf["source"].items():
         src_conf = src_conf or {}
         variables = src_conf.get("variables") or {}
-        src_levels = src_conf.get("levels")
-        n_levels = len(src_levels) if src_levels else model_levels
+        n_levels = resolve_num_levels(src_conf, conf)
 
         history_len = src_conf.get("history_len", data_conf.get("history_len", 1))
         if history_len != 1:
@@ -315,15 +352,13 @@ class ChannelSchema:
             ValueError: if 3D variables exist but no level count is resolvable.
         """
         data_conf = conf["data"]
-        model_levels = (conf.get("model") or {}).get("levels")
 
         input_layout: list[dict] = []
         target_layout: list[dict] = []
 
         for source_name, src_conf in data_conf["source"].items():
             variables = src_conf.get("variables") or {}
-            src_levels = src_conf.get("levels")
-            n_levels = len(src_levels) if src_levels else model_levels
+            n_levels = resolve_num_levels(src_conf, conf)
 
             # Input tensors carry a time dim of length history_len (the dataset
             # loads a history_len-step window for prognostic / dynamic_forcing /

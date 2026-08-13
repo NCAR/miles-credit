@@ -4,11 +4,11 @@
 # Quick-start: edit the USER SETTINGS sections below, then:
 #
 #   # Preview the PBS script (no submission)
-#   credit submit --cluster casper -c config/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
+#   credit submit --cluster casper -c config/gen_2/smoke/integration_test_hrrr.yml --gpus 4 --chain 14 --dry-run
 #
 #   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
-#   credit submit --cluster casper  -c config/example-v2026.2.yml --gpus 4 --chain 14
-#   credit submit --cluster derecho -c config/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
+#   credit submit --cluster casper  -c config/gen_2/smoke/integration_test_hrrr.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/gen_2/smoke/integration_test_hrrr.yml --gpus 4 --nodes 1 --chain 14
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #

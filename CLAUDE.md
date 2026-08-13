@@ -40,11 +40,19 @@ Notes on testing:
   of the standard `pytest` run.
 - CI runs `pytest` on Python 3.11/3.12/3.13 with CPU-only torch (`ubuntu-latest`), so don't assume
   a GPU is present when writing tests.
+- Several dataset tests stream real data from AWS/GCS (HRRR, WeatherBench2/ARCO ERA5, GOES, MRMS);
+  on a slow or offline connection they run long or fail (e.g. 0-byte GRIB downloads). `SKIP_REMOTE=1`
+  skips the HRRR remote tests (`tests/test_hrrr.py`, `tests/test_hrrr_download.py`). A full local run
+  is ~8 min on a good connection.
 
 ## The `credit` CLI
 
-Single entrypoint (`credit/cli/`, registered as `credit = credit.cli:main`): `init`, `check`, `preprocess`,
-`train`, `rollout`, `rollout-ensemble` (deprecated), `realtime`, `submit`, `plot`, `metrics`, `convert`, `ask`.
+Single entrypoint (`credit/cli/`, registered as `credit = credit.cli:main`): `init`, `begin`, `check`,
+`preprocess`, `train`, `rollout`, `rollout-ensemble` (deprecated), `realtime`, `submit`, `plot`, `metrics`,
+`convert`, `ask`.
+
+`credit begin` (`credit/cli/_begin.py`) is the interactive config wizard: prompts for dataset/model/PBS
+choices, emits a validated starter config, and self-checks it via `python -m credit.cli check`.
 
 `credit check -c config.yml [--deep] [--strict] [--json]` (`credit/cli/_check.py`) statically validates a gen2
 config: resolves every registry key, binds each block's `args` against its real constructor signature,
@@ -70,7 +78,7 @@ a file belongs to before editing it:
 
 |              | gen1 (legacy)                          | gen2 (current)                                    |
 |--------------|------------------------------------------|----------------------------------------------------|
-| Trainer      | `credit/trainers/trainerERA5gen1.py` (`trainer.type: era5`) | `credit/trainers/trainer_gen2.py` (`trainer.type: era5-gen2`) |
+| Trainer      | `credit/trainers/trainerERA5gen1.py` (`trainer.type: era5-gen1`/`era5`) | `credit/trainers/trainer_gen2.py` (`trainer.type: gen2`/`era5-gen2`) |
 | Dataset      | `credit/datasets/gen_1/` — flat schema  | `credit/datasets/gen_2/` — nested `data.source.<name>` schema, typed channels (`prognostic`/`dynamic_forcing`/`static`/`diagnostic`) via `gen_2/schema.py` |
 | `forecast_len` semantics | `0` = single step | `1` = single step (gen2 is 1-indexed) |
 | Pre/post-processing | conservation fixers called directly (`credit/postblock/gen1.py`) | explicit `build_preblocks`/`apply_preblocks` and `build_postblocks`/`apply_postblocks` pipeline stages |
@@ -82,17 +90,35 @@ settings). Prefer gen2 for new work; gen1 is kept for reference/reproducibility 
 
 ### Registry pattern (extensibility)
 
-Five subsystems — models, trainers, datasets, preblocks, postblocks, losses — are selected purely by a
-string key in the config (`model.type`, `trainer.type`, `data.source.<name>.dataset_type`, etc.), resolved
-through per-package `_REGISTRY` dicts with lazy imports:
+Seven subsystems — models, trainers, datasets, preblocks, postblocks, losses, metrics — are selected purely
+by a string key in the config (`model.type`, `trainer.type`, `data.source.<name>.dataset_type`, etc.),
+resolved through per-package `_REGISTRY` dicts with lazy imports:
 - `credit/models/__init__.py` → `load_model(conf)`, keys like `crossformer`, `wxformer`, `unet`, `fuxi`, `swin`, `graph`
-- `credit/trainers/__init__.py` → keys like `era5-gen1`/`era5`, `era5-gen2`/`gen2`, `era5-diffusion`, `era5-ensemble`, `ic-opt`
-- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/` follow the same `register_*` decorator pattern
+- `credit/trainers/__init__.py` → keys like `era5-gen1`/`era5`, `gen2`/`era5-gen2`, `era5-diffusion`, `era5-ensemble`, `ic-opt`
+- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/` follow the
+  same `register_*` decorator pattern
 
 `credit/registry.py` (`load_custom_objects`) is the meta-layer: a config's `custom_objects:` block lets users
 plug in their *own* classes (must subclass the relevant `Base*` class) by dotted import path, without
 touching CREDIT source — see the docstring in that file for the full YAML shape. When adding a new built-in
-model/trainer/dataset/pre/postblock/loss, register it the same way rather than special-casing it elsewhere.
+model/trainer/dataset/pre/postblock/loss/metric, register it the same way rather than special-casing it
+elsewhere.
+
+### Gen 2 loss & metrics frameworks
+
+- `credit/losses/base.py` (`loss: {type: base, args: {...}}`) — `BaseLoss` scores per-variable in
+  **physical units** on the postblock output: `y_processed` vs the target twin `y_target_processed`
+  (same postblock chain applied to `y`; the prediction `reconstruct` needs `detach: false`).
+  Per-variable weighting via `var_weighting` (`inverse_variance` default, from the fitted bridgescaler).
+  Univariate losses must be elementwise; ensemble CRPS losses are rejected **except `ring-crps`**, whose
+  ensemble lives across data-parallel ranks (see `credit/losses/crps.py`).
+- `credit.losses.effective_loss_name(loss_conf)` resolves the univariate `training_loss` inside a BaseLoss
+  section — the trainer/app use it to key ensemble setup (e.g. ring-crps shared batches), so use it rather
+  than reading `loss.type` directly when detecting the loss family.
+- `credit/metrics/` — gen2 metrics (`BaseVariableMetric`/`BaseCombinedMetric` in `base.py`, ACC/anomaly in
+  `anomaly.py`) are called as `metric(full_data_dict)`; gen1 metrics live in `credit/metrics/gen_1/`.
+  Per-variable metric/loss columns in `training_log.csv` are governed by `trainer.save_metric_vars`
+  (default `True`).
 
 ### Pipeline stages around the model forward pass
 
@@ -101,7 +127,13 @@ model/trainer/dataset/pre/postblock/loss, register it the same way rather than s
 `preblocks.per_step` and `postblocks.per_step` / `postblocks.post_rollout` in the YAML. Preblocks assemble
 and normalize model inputs (`norm.py`, `scaler.py`, `log.py`, `regrid.py`, `concat.py`); postblocks
 denormalize and enforce physical constraints (`conservation.py`, `mslp.py`, `pressure_interp.py`,
-`wind_filter.py`).
+`wind_filter.py`). Every gen2 preblock chain must end with `concat`; every gen2 postblock chain starts
+with `reconstruct` (its inverse).
+
+Gotcha when writing configs: a `bridgescaler_transform` preblock that will **fit a new scaler**
+(via `credit preprocess`) must set `scaler_params: {channels_last: False}` — bridgescaler defaults to
+`channels_last=True`, but CREDIT tensors are channels-first, so omitting it silently fits statistics
+over the wrong axis. Transform-only use of an already-fitted scaler is unaffected.
 
 ### Applications vs CLI vs top-level `applications/`
 
@@ -114,15 +146,28 @@ denormalize and enforce physical constraints (`conservation.py`, `mslp.py`, `pre
 
 ### Config files
 
-`config/` is split by generation: `config/gen_2/examples/` (current — start with
-`config/gen_2/examples/example-v2026.2.yml`, the fully annotated reference) and `config/gen_1/` (legacy,
-kept for reference/reproducibility, including `arXiv_2024/` configs). Top-level YAML keys: `save_loc`,
-`seed`, `data`, `data_valid` (or `validation_data`), `preblocks`, `postblocks`, `trainer`, `model`, `loss`,
-`predict`/`inference`, `pbs`. See `config/README.md` and `docs/source/config.md` for the full reference.
+`config/` is split by generation: `config/gen_2/examples/` (current) and `config/gen_1/` (legacy, kept for
+reference/reproducibility, including `arXiv_2024/` configs). Two gen2 references:
+`example-end-to-end.yml` runs the full `credit preprocess` → `train` → `rollout` sequence out of the box;
+`example-v2026.2.yml` is the fully annotated starter (the top-level `config/example-v2026.2.yml` is a
+symlink to it). Top-level YAML keys: `save_loc`, `seed`, `data`, `validation_data` (or legacy `data_valid`),
+`preblocks`, `postblocks`, `trainer`, `model`, `loss`, `inference` (gen2 rollout; `predict` is the gen1 /
+`credit realtime` block), `pbs`. See `config/README.md` and `docs/source/config.md` for the full reference.
 
 ## Docs
 
-Full docs source is in `docs/source/*.md` (Sphinx + MyST, published to readthedocs). Key pages:
-`Model_Architectures.md`, `Training.md`, `config.md`, `DataSets.md`, `postblock.md`, `Inference.md`,
-`EnsemblesInference.md`. When changing config schema, model registry entries, or CLI behavior, update the
-matching doc page.
+Full docs source is in `docs/source/*.md` (Sphinx + MyST + autoapi, published to readthedocs; toctree in
+`docs/source/index.rst`). The sidebar is organized as:
+
+- **Getting Started**: `quickstart.md`, `cli.md`
+- **Generation 2 Components** (config order): `gen2_overview.md` (includes the Gen1-vs-Gen2 explainer),
+  `Datasets.md`, `Preblocks.md`, `postblocks_gen2.md`, `Models_gen2.md`, `Losses.md`, `Metrics.md`,
+  `Custom.md` (custom objects)
+- **Training and Inference**: `Training.md`, `tensorboard.md`, `Inference.md` (gen1 sections + the gen2
+  `inference:` rollout schema), `Evaluation.md`, `Ensembles.md`, `EnsemblesInference.md`
+- **Generation 1** (legacy): `installation.md`, `config.md`, `prepare_new_dataset.md`,
+  `Model_Architectures.md`, `postblock.md`, `Losses_gen1.md`, `Training_gen1.md`
+
+When changing config schema, registry entries, or CLI behavior, update the matching doc page. Docstrings
+feed the autoapi reference — RST rules apply (e.g. a blank line before bullet lists), and violations
+surface as sphinx-build errors on the generated `docs/source/api/` pages.

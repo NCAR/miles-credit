@@ -3,7 +3,7 @@ tisr.py
 -------------------------------------------------------
 TISRDataset: PyTorch Dataset for Total Incident Solar Radiation (TISR) at the top of the atmosphere (TOA).
 
-Sample structure returned by __getitem__:
+Sample structure returned by __getitem__::
 
     {
         "input":    {<user_provided_name>: {"<user_provided_name>/dynamic_forcing/2d/tisr": tensor}},
@@ -11,13 +11,16 @@ Sample structure returned by __getitem__:
         "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
 
-TISR only has a single variable and is 2D. Tensor shape (no batch dimension):
+TISR only has a single variable and is 2D. Tensor shape (no batch dimension)::
+
     (1, 1, lat, lon)   — singleton level dim, consistent with CREDIT Gen2 2D convention
 
-After DataLoader collation the batch dimension is prepended:
+After DataLoader collation the batch dimension is prepended::
+
     (batch, 1, 1, lat, lon)
 
 Note that Total Incident Solar Radiation (TISR) and Total Solar Irradiance (TSI) are different physical quantities.
+
 - TSI is the total solar power per unit area measured on a plane perpendicular (at a 90 degree angle) to the sun's rays.
   It is measured at TOA and at the mean Sun-Earth distance (1 AU), and it fluctuates slightly with the Sun's 11-year solar cycle.
 - TISR is the actual amount of solar energy that hits a specific surface with any orientation. It can be measured at TOA or surface
@@ -878,7 +881,7 @@ class TISRDataset(BaseDataset):
 
     See module docstring for full description of output format and file naming.
 
-    Example YAML configuration (grid read from file):
+    Example YAML configuration (grid read from file)::
 
         data:
             source:
@@ -895,9 +898,9 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
 
-    Example YAML configuration (grid built in-memory from specs):
+    Example YAML configuration (grid built in-memory from specs)::
 
         data:
             source:
@@ -915,7 +918,7 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:

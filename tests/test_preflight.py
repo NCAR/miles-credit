@@ -137,14 +137,16 @@ class TestEstimateDataloaderMemoryGb:
 
     def test_raises_internally_returns_zero(self):
         """A config that triggers an internal exception returns 0.0 (lines 81-82)."""
-        # levels is not iterable — len() will raise, hitting the except branch
+        # A truthy-but-non-iterable levels makes resolve_num_levels' len() raise,
+        # hitting the except branch. (levels: None is now handled gracefully — it
+        # falls back to model.levels — so it no longer exercises this path.)
         bad_conf = {
             "trainer": {"thread_workers": 4, "prefetch_factor": 4, "train_batch_size": 1},
             "model": {"image_height": 721, "image_width": 1440},
             "data": {
                 "source": {
                     "ERA5": {
-                        "levels": None,  # len(None) raises TypeError
+                        "levels": 16,  # int is truthy but len(16) raises TypeError
                         "variables": {
                             "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
                             "diagnostic": {"vars_2D": []},
@@ -155,6 +157,26 @@ class TestEstimateDataloaderMemoryGb:
         }
         result = estimate_dataloader_memory_gib(bad_conf)
         assert result == 0.0
+
+    def test_null_levels_falls_back_to_model_levels(self):
+        """levels: null (or omitted) is estimated using model.levels, not 0 (issue #432)."""
+        conf = {
+            "trainer": {"thread_workers": 4, "prefetch_factor": 4, "train_batch_size": 1},
+            "model": {"image_height": 32, "image_width": 32, "levels": 8},
+            "data": {
+                "source": {
+                    "ERA5": {
+                        "levels": None,  # "all levels" -> resolved from model.levels
+                        "variables": {
+                            "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},
+                            "diagnostic": {"vars_2D": []},
+                        },
+                    }
+                }
+            },
+        }
+        # 1 3D var * 8 levels + 1 2D var = 9 channels -> nonzero estimate
+        assert estimate_dataloader_memory_gib(conf) > 0.0
 
 
 # ---------------------------------------------------------------------------

@@ -529,12 +529,15 @@ def load_dataloader(
     )
 
     _persistent_workers = (num_workers > 0) if persistent_workers is None else persistent_workers
+    # pin_memory only accelerates host->CUDA copies; on MPS it is unsupported
+    # (PyTorch emits a UserWarning) and on CPU it is a no-op, so gate it on CUDA.
+    _pin_memory = torch.cuda.is_available()
     return DataLoader(
         dataset,
         batch_sampler=sampler,
         num_workers=num_workers,
         prefetch_factor=prefetch_factor,
-        pin_memory=True,
+        pin_memory=_pin_memory,
         persistent_workers=_persistent_workers,
         multiprocessing_context="spawn" if num_workers > 0 else None,
     )
@@ -554,6 +557,27 @@ def effective_mode(conf):
         data = trainer["parallelism"].get("data", "none")
         return data if data in ("fsdp2", "ddp") else "none"
     return trainer.get("mode", "none")
+
+
+def _migrate_legacy_checkpoint(model, checkpoint):
+    """Bring a just-loaded checkpoint up to the current parameter layout, in place.
+
+    The model's own load_state_dict pre-hooks handle this for the plain/DDP paths,
+    but FSDP2's ``set_model_state_dict`` reconciles the checkpoint against current
+    parameter names before load_state_dict runs, so the hooks fire too late there.
+    Applying the migration to the raw dict makes every path behave the same.
+
+    A no-op for architectures with nothing to migrate.
+    """
+    state_dict = checkpoint.get("model_state_dict") if isinstance(checkpoint, dict) else None
+    if state_dict is None:
+        return
+    # Local import: credit.models pulls in the full model registry, and importing it
+    # at module scope makes credit.trainers.utils circular with it.
+    from credit.models.wxformer.crossformer import migrate_legacy_state_dict
+
+    # Checkpoints are written from the unwrapped module, so match names against it.
+    migrate_legacy_state_dict(getattr(model, "module", model), state_dict)
 
 
 def load_model_states_and_optimizer(conf, model, device):
@@ -637,6 +661,7 @@ def load_model_states_and_optimizer(conf, model, device):
             # only adds an OOM-sized memory spike for the models that needed
             # sharding in the first place.
             checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
+            _migrate_legacy_checkpoint(model, checkpoint)
             if mode == "fsdp2":
                 from credit.parallel.fsdp2 import fsdp2_load_state_dict
 
@@ -657,6 +682,7 @@ def load_model_states_and_optimizer(conf, model, device):
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
         checkpoint = torch.load(ckpt, map_location="cpu" if mode == "fsdp2" else device)
+        _migrate_legacy_checkpoint(model, checkpoint)
 
         if mode == "fsdp":
             optimizer = _make_optimizer(model)

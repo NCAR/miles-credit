@@ -22,8 +22,8 @@ data:
     ERA5:
       dataset_type: "local"
       level_coord: "level"
-      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
-      variables:
+      levels: &era5_levels [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      variables: &era5_variables
         # Prognostic: model both predicts and receives as input next step
         prognostic:
           vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
@@ -56,31 +56,15 @@ data:
 
 
 # ---- USER SETTINGS: validation data ---- #
+# Reuses the ERA5 source definition (levels + variables) from data.source above
+# via YAML anchors. Only the date range differs.
 validation_data:
   source:
     ERA5:
       dataset_type: "local"
       level_coord: "level"
-      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
-      variables:
-        prognostic:
-          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
-          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
-
-        diagnostic:
-          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
-                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
-                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
-
-        dynamic_forcing:
-          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
-
-        static:
-          vars_2D: [ 'z_norm', 'land_sea_mask' ]
-          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+      levels: *era5_levels
+      variables: *era5_variables
 
   start_datetime: "2019-01-01"
   end_datetime: "2020-12-31"

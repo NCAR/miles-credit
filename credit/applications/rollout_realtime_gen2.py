@@ -1,6 +1,6 @@
 """
 rollout_realtime_gen2.py
-----------------------
+------------------------
 Operational/realtime forecast rollout for CREDIT v2 models.
 
 Designed to be run with a single command — no pre-editing of config files:
@@ -38,11 +38,11 @@ import xarray as xr
 from tqdm import tqdm
 
 from credit.datasets.gen_2.local import LocalDataset
-from credit.datasets.gen_2.channel_utils import build_channel_layout, update_x
+from credit.datasets.gen_2.channel_utils import build_channel_layout, resolve_level_ids, resolve_num_levels, update_x
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.models import load_model
 from credit.seed import seed_everything
-from credit.distributed import get_rank_info, setup, distributed_model_wrapper
+from credit.distributed import get_rank_info, select_device, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output import load_metadata, make_xarray, save_netcdf_increment
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
@@ -71,7 +71,7 @@ def _inject_flat_schema(conf):
     conf["data"]["variables"] = prog.get("vars_3D", [])
     conf["data"]["surface_variables"] = prog.get("vars_2D", [])
     conf["data"]["diagnostic_variables"] = diag.get("vars_2D", []) if diag else []
-    conf["data"]["level_ids"] = src.get("levels", list(range(conf["model"]["levels"])))
+    conf["data"]["level_ids"] = resolve_level_ids(src, conf)
     if "scaler_type" not in conf["data"]:
         conf["data"]["scaler_type"] = "std_new"
 
@@ -82,7 +82,7 @@ def _inject_tracer_inds(conf):
     if not tracer_conf.get("activate", False) or "tracer_inds" in tracer_conf:
         return
     src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
     vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
@@ -103,9 +103,9 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
     """Return (mean, std) of shape (1, C_out, 1, 1, 1) for inverse-normalizing y_pred."""
     data_conf = conf["data"]
     src = data_conf["source"]["ERA5"]
-    levels = src["levels"]
+    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
     level_coord = src["level_coord"]
-    n_levels = len(levels)
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -119,8 +119,11 @@ def _build_output_denorm(conf, device, dtype=torch.float32):
             n = n_levels if is_3d else 1
             return torch.zeros(n, dtype=dtype), torch.ones(n, dtype=dtype)
         if is_3d:
-            m = torch.tensor(mean_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
-            s = torch.tensor(std_ds[varname].sel({level_coord: levels}).values, dtype=dtype)
+            # Explicit level subset -> select it; else take every level in file order.
+            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
+            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
+            m = torch.tensor(m_da.values, dtype=dtype)
+            s = torch.tensor(s_da.values, dtype=dtype)
         else:
             m = torch.tensor([float(mean_ds[varname].values)], dtype=dtype)
             s = torch.tensor([float(std_ds[varname].values)], dtype=dtype)
@@ -253,12 +256,7 @@ def run_forecast(conf, init_time: pd.Timestamp, n_steps: int, save_dir: str, poo
         pool:        multiprocessing.Pool for async saves.
         rank/world_size: For DDP; single-GPU callers use (0, 1).
     """
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    else:
-        device = torch.device("cpu")
-
+    device = select_device(rank)
     dt = pd.Timedelta(conf["data"]["timestep"])
     fhr_per_step = int(dt.total_seconds() / 3600)
 

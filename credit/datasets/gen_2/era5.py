@@ -25,7 +25,8 @@ Sample structure returned by __getitem__::
         },
     }
 
-Output key format (flat, slash-delimited):
+Output key format (flat, slash-delimited)::
+
     "{source_name}/{field_type}/{dim}/{varname}"
 
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
@@ -40,7 +41,7 @@ import cftime
 import logging
 from typing import Any
 
-from gcsfs import GCSFileSystem
+import obstore.store as obs
 import pandas as pd
 import torch
 import xarray as xr
@@ -151,18 +152,14 @@ class ARCOERA5Dataset(BaseDataset):
         self._fs = None
 
     def _init_fs(self):
-        """Initialize the GCSFileSystem and zarr stores for pressure-level and model-level ERA5 data."""
-        fs_config: dict[str, Any] = {
-            "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
-            "access": "read_only",
-            "block_size": 8**20,
-            "asynchronous": True,
-            "skip_instance_cache": True,
-        }
-        self._fs = GCSFileSystem(**fs_config)
-        self.pres_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.pressure_lev_era5_path)
-        self.mod_level_store = zarr.storage.FsspecStore(fs=self._fs, path=self.model_lev_era5_path)
+        """Initialize the obstore GCS stores and zarr stores for pressure-level and model-level ERA5 data."""
+        # skip_signature -> anonymous access to the public ARCO ERA5 bucket; without it
+        # obstore tries to fetch a token from the GCP metadata server (fails off-GCP, e.g. CI).
+        pres_obs = obs.from_url(self.pressure_lev_era5_path, config={"skip_signature": True})
+        mod_obs = obs.from_url(self.model_lev_era5_path, config={"skip_signature": True})
+        self._fs = True  # marker: stores initialized
+        self.pres_level_store = zarr.storage.ObjectStore(pres_obs, read_only=True)
+        self.mod_level_store = zarr.storage.ObjectStore(mod_obs, read_only=True)
 
     def _cache_grid(self, ds: xr.Dataset) -> None:
         """Cache this source's native grid, once — call only when not yet cached.
@@ -342,19 +339,19 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     benchmark at multiple resolutions. All data is read lazily from public
     Google Cloud Storage zarr stores (anonymous access, no credentials required).
 
-    Available resolutions:
+    Available resolutions::
 
-    +--------------+-------------------+------------+------------------+
-    | ``resolution`` | Grid              | Approx deg | Timestep         |
-    +==============+===================+============+==================+
-    | ``"1440x721"`` | 1440 × 721 global | 0.25°      | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"240x121"``  | 240 × 121 global  | 1.5°       | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"64x32"``    | 64 × 32 global    | ~5.6°      | 6-hourly, 13 lev |
-    +--------------+-------------------+------------+------------------+
-    | ``"full"``     | 1440 × 721 global | 0.25°      | hourly, 37 lev   |
-    +--------------+-------------------+------------+------------------+
+        +----------------+-------------------+------------+------------------+
+        | ``resolution`` | Grid              | Approx deg | Timestep         |
+        +================+===================+============+==================+
+        | ``"1440x721"`` | 1440 × 721 global | 0.25°      | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"240x121"``  | 240 × 121 global  | 1.5°       | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"64x32"``    | 64 × 32 global    | ~5.6°      | 6-hourly, 13 lev |
+        +----------------+-------------------+------------+------------------+
+        | ``"full"``     | 1440 × 721 global | 0.25°      | hourly, 37 lev   |
+        +----------------+-------------------+------------+------------------+
 
     See ``_WB2_ERA5_DEFAULT_LEVELS`` for default pressure levels per resolution.
 
@@ -428,16 +425,11 @@ class WeatherBench2ERA5Dataset(BaseDataset):
     # ------------------------------------------------------------------
 
     def _init_fs(self) -> None:
-        fs_config = {
-            "cache_timeout": -1,
-            "token": "anon",  # noqa: S106 # nosec B106
-            "access": "read_only",
-            "block_size": 8**20,
-            "asynchronous": True,
-            "skip_instance_cache": True,
-        }
-        self._fs = GCSFileSystem(**fs_config)
-        self.store = zarr.storage.FsspecStore(fs=self._fs, path=self.store_path)
+        # skip_signature -> anonymous access to the public WeatherBench2 bucket; without it
+        # obstore tries to fetch a token from the GCP metadata server (fails off-GCP, e.g. CI).
+        obs_store = obs.from_url(self.store_path, config={"skip_signature": True})
+        self._fs = True  # marker: store initialized
+        self.store = zarr.storage.ObjectStore(obs_store, read_only=True)
 
     def _cache_grid(self, ds: xr.Dataset) -> None:
         """Cache this source's native grid, once — call only when not yet cached.
@@ -496,14 +488,16 @@ class WeatherBench2ERA5Dataset(BaseDataset):
             else:
                 ds_t = ds
 
+            # WeatherBench2 stores spatial dims as (longitude, latitude); transpose
+            # to (latitude, longitude) to match the CREDIT (lat, lon) convention.
             for vname in vars_3D:
-                arr = ds_t[vname].sel({self.level_coord: self.levels}).values
+                arr = ds_t[vname].sel({self.level_coord: self.levels}).transpose(..., "latitude", "longitude").values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
                 key = self._get_field_name(field_type, "3d", vname)
                 sample[key] = tensor
 
             for vname in vars_2D:
-                arr = ds_t[vname].values
+                arr = ds_t[vname].transpose(..., "latitude", "longitude").values
                 tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
                 key = self._get_field_name(field_type, "2d", vname)
                 sample[key] = tensor

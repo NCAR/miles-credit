@@ -18,7 +18,7 @@ from echo.src.base_objective import BaseObjective
 import torch
 from torch.amp import GradScaler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper, get_rank_info, select_device, setup
 
 from credit.seed import seed_everything
 from credit.losses import load_loss
@@ -228,10 +228,7 @@ def main(rank, world_size, conf, backend=None, trial=False):
         setup(rank, world_size, conf["trainer"]["mode"], backend)
 
     # infer device id from rank
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    )
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    device = select_device(rank)
 
     # Load the dataset using the provided dataset_type
     train_dataset = load_dataset(conf, rank=rank, world_size=world_size, is_train=True)

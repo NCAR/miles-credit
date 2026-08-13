@@ -2,7 +2,11 @@ from fastapi import FastAPI
 import xarray as xr
 import base64
 from os.path import exists, join
-import xesmf as xe
+
+try:
+    import xesmf as xe
+except ImportError:
+    raise ImportError("xesmf not installed. Please install esmpy and esmf with conda then pip install xesmf")
 from fastapi.middleware.cors import CORSMiddleware
 from scipy.ndimage import gaussian_filter
 

@@ -10,9 +10,6 @@ class StochasticDecompositionLayer(nn.Module):
         noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
         modulation (nn.Parameter): A learnable scaling factor applied to the noise.
         noise_factor (float): A scaling factor for controlling the intensity of the injected noise.
-
-    Methods:
-        forward(feature_map, noise): Adds noise to the feature map, modulated by style and the modulation parameter.
     """
 
     def __init__(self, noise_dim, feature_channels, noise_factor=0.1):

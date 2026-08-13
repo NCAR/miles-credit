@@ -27,7 +27,7 @@ from credit.data import concat_and_reshape, reshape_only
 from credit.datasets import setup_data_loading
 from credit.datasets.gen_1.era5_multistep_batcher import Predict_Dataset_Batcher
 from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.distributed import distributed_model_wrapper, get_rank_info, select_device, setup
 from credit.forecast import load_forecasts
 from credit.metrics import LatWeightedMetrics, LatWeightedMetricsClimatology
 
@@ -143,13 +143,7 @@ def predict(rank, world_size, conf, backend=None, p=None, trial=None, num_sample
     data_config = setup_data_loading(conf)
 
     # infer device id from rank
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = select_device(rank)
 
     # config settings
     seed = conf["seed"]
