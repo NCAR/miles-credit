@@ -32,6 +32,7 @@ from credit.cli import (
     _build_rollout_pbs_script,
     _print_ensemble_rollout_plan,
     _find_torchrun,
+    _resolve_torchrun,
     _is_ncar_system,
     _build_channel_map,
     _agent_read_file,
@@ -345,8 +346,55 @@ class TestResolvePbsOpts:
         args = self._minimal_args(cluster="casper")
         r = _resolve_pbs_opts(args, {})
         assert r.cpus == 8
-        assert r.mem == "128GB"
+        # mem scales with the GPU count (4 of 8 "any GPGPU" slots)
+        assert r.mem == "512GB"
         assert r.queue == "casper@casper-pbs"
+
+    def test_casper_mem_scales_with_gpus(self):
+        args = self._minimal_args(cluster="casper", gpus=1)
+        assert _resolve_pbs_opts(args, {}).mem == "64GB"
+
+        args = self._minimal_args(cluster="casper", gpus=4, gpu_type="a100_80gb")
+        assert _resolve_pbs_opts(args, {}).mem == "960GB"
+
+    def test_explicit_mem_beats_gpu_scaling(self):
+        args = self._minimal_args(cluster="casper", gpus=1, mem="256GB")
+        assert _resolve_pbs_opts(args, {}).mem == "256GB"
+
+        args = self._minimal_args(cluster="casper", gpus=1)
+        assert _resolve_pbs_opts(args, {"mem": "200GB"}).mem == "200GB"
+
+    def test_cross_cluster_queue_is_rejected(self, capsys):
+        # A Derecho pbs block submitted to Casper: qsub would reject 'main' only
+        # after submission, so _resolve_pbs_opts must catch it first.
+        args = self._minimal_args(cluster="casper")
+        with pytest.raises(SystemExit) as exc:
+            _resolve_pbs_opts(args, {"queue": "main"})
+        assert exc.value.code == 1
+        assert "Derecho queue" in capsys.readouterr().err
+
+        args = self._minimal_args(cluster="derecho")
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {"queue": "casper"})
+
+    def test_queue_valid_or_unknown_passes(self):
+        # Shared, cluster-correct, ``@server``-suffixed, and site-specific queue
+        # names must all survive the cross-cluster check.
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "gpudev"}).queue.startswith("gpudev@")
+        assert _resolve_pbs_opts(self._minimal_args(cluster="derecho"), {"queue": "gpudev"}).queue.startswith("gpudev@")
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "largemem"}).queue == (
+            "largemem@casper-pbs"
+        )
+        assert _resolve_pbs_opts(self._minimal_args(cluster="casper"), {"queue": "casper@casper-pbs"}).queue == (
+            "casper@casper-pbs"
+        )
+        assert _resolve_pbs_opts(self._minimal_args(cluster="derecho"), {"queue": "some_new_queue"}).queue == (
+            "some_new_queue@desched1"
+        )
+
+    def test_queue_flag_overrides_bad_config_queue(self):
+        args = self._minimal_args(cluster="casper", queue="casper")
+        assert _resolve_pbs_opts(args, {"queue": "main"}).queue == "casper@casper-pbs"
 
     def test_derecho_defaults(self):
         args = self._minimal_args(cluster="derecho")
@@ -414,7 +462,8 @@ class TestBuildPbsScript:
         args = _derecho_args(nodes=2)
         script = _build_pbs_script(args, "/path/to/config.yml", "/path/to/repo")
         assert "mpiexec" in script
-        assert "--rdzv-backend=c10d" in script
+        assert "--rdzv-backend" not in script
+        assert "python " in script
 
     def test_depend_on_added(self):
         args = _casper_args(torchrun="/usr/bin/torchrun")
@@ -445,6 +494,41 @@ class TestBuildPbsScript:
         args = _casper_args(torchrun="/usr/bin/torchrun")
         script = _build_pbs_script(args, "/cfg.yml", "/my/repo")
         assert "/my/repo" in script
+
+
+# ===========================================================================
+# TestResolveTorchrun
+# ===========================================================================
+
+
+class TestResolveTorchrun:
+    def test_bare_name_resolves_at_runtime(self):
+        # A bare env name must NOT be treated as a CWD-relative directory
+        # (the repo's ``credit/`` package dir made ``conda: credit`` yield a
+        # bogus ``credit/bin/torchrun``); it resolves at runtime instead.
+        tr = _resolve_torchrun("credit")
+        assert tr.endswith("/bin/torchrun")
+        assert tr.startswith("${CONDA_PREFIX:-")
+
+    def test_bare_name_does_not_assume_conda_base_envs_dir(self):
+        # envs living outside the base install (envs_dirs in ~/.condarc) are
+        # not under $(conda info --base)/envs, so that path must not be built.
+        tr = _resolve_torchrun("credit")
+        assert "conda info --base" not in tr
+        # $CONDA_PREFIX from the script's `conda activate`, else lookup by name
+        assert "conda info --envs" in tr
+        assert "n=credit " in tr
+
+    def test_bare_name_ignores_matching_cwd_dir(self, monkeypatch, tmp_path):
+        (tmp_path / "credit").mkdir()
+        monkeypatch.chdir(tmp_path)
+        assert not _resolve_torchrun("credit").startswith("credit/")
+
+    def test_full_path_used_directly(self):
+        assert _resolve_torchrun("/opt/envs/credit") == "/opt/envs/credit/bin/torchrun"
+
+    def test_none_falls_back_to_find_torchrun(self):
+        assert _resolve_torchrun(None) == _find_torchrun()
 
 
 # ===========================================================================
@@ -1507,9 +1591,8 @@ class TestResolvePbsOptsEnv:
             conda_env=None,
         )
         r = _resolve_pbs_opts(args, {})
-        # gpu_type falls back to hardcoded value; if pbs_cfg has no gpu_type either,
-        # _first returns the hardcoded fallback "a100_80gb"
-        assert r.gpu_type == "a100_80gb"
+        # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
+        assert r.gpu_type is None
         assert r.walltime == "12:00:00"
 
 
@@ -1776,3 +1859,29 @@ class TestAgentBashEdgeCases:
     def test_append_redirect_blocked(self):
         result = _agent_bash("echo hello >> /tmp/out.txt")
         assert "Blocked" in result
+
+
+class TestCondaEnvShared:
+    """The PBS, Slurm, and CLI launchers must resolve conda envs identically."""
+
+    def test_all_three_launchers_agree(self):
+        from credit.cli._common import _resolve_torchrun as cli_resolve
+        from credit.conda_env import torchrun_path
+        from credit.slurm import _resolve_torchrun as slurm_resolve
+
+        for env in ("credit", "/opt/envs/credit"):
+            shared = torchrun_path(env)
+            assert cli_resolve(env) == shared, env
+            assert slurm_resolve(env) == shared, env
+
+    def test_no_duplicate_inline_lookup(self):
+        """The awk lookup must live only in credit/conda_env.py."""
+        import pathlib
+
+        root = pathlib.Path(__file__).resolve().parents[1] / "credit"
+        offenders = [
+            path.relative_to(root).as_posix()
+            for path in root.rglob("*.py")
+            if path.name != "conda_env.py" and "conda info --envs" in path.read_text()
+        ]
+        assert offenders == [], f"inline conda lookup duplicated in: {offenders}"

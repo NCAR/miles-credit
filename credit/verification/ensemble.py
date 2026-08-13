@@ -1,5 +1,4 @@
 import logging
-
 import numpy as np
 import xarray as xr
 from pysteps.verification.ensscores import rankhist

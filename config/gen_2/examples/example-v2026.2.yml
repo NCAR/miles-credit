@@ -1,0 +1,330 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# CREDIT starter config — gen2 data schema, 1-degree ERA5, 6-hourly CrossFormer
+#
+# Quick-start: edit the USER SETTINGS sections below, then:
+#
+#   # Preview the PBS script (no submission)
+#   credit submit --cluster casper -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --chain 14 --dry-run
+#
+#   # Submit 14 chained jobs (~70 epochs at 5 epochs/job)
+#   credit submit --cluster casper  -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --chain 14
+#   credit submit --cluster derecho -c config/gen_2/examples/example-v2026.2.yml --gpus 4 --nodes 1 --chain 14
+# --------------------------------------------------------------------------------------------------------------------- #
+
+# ---- USER SETTINGS: output directory ---- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2'
+seed: 1000
+
+
+# ---- USER SETTINGS: training data ---- #
+# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
+data:
+  source:
+    ERA5:
+      dataset_type: "local"
+      level_coord: "level"
+      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      variables:
+        # Prognostic: model both predicts and receives as input next step
+        prognostic:
+          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
+          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        # Diagnostic: model predicts these but does not feed them back as input
+        diagnostic:
+          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        # Dynamic forcing: time-varying inputs (not predicted)
+        dynamic_forcing:
+          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        # Static: time-invariant inputs (not predicted)
+        static:
+          vars_2D: [ 'z_norm', 'land_sea_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+  start_datetime: "1979-01-01"
+  end_datetime: "2018-12-31"
+  timestep: "6h"
+
+  history_len: 1            # number of past states fed as input
+  forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- USER SETTINGS: validation data ---- #
+validation_data:
+  source:
+    ERA5:
+      dataset_type: "local"
+      level_coord: "level"
+      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      variables:
+        prognostic:
+          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
+          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        diagnostic:
+          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        dynamic_forcing:
+          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        static:
+          vars_2D: [ 'z_norm', 'land_sea_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+  start_datetime: "2019-01-01"
+  end_datetime: "2020-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- USER SETTINGS: training hyperparameters ---- #
+trainer:
+  type: gen2                # use the v2 trainer (new nested data schema)
+
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1               # tensor-parallel degree  (1 = disabled)
+    domain: 1               # domain-parallel shards  (1 = disabled)
+
+  activation_checkpoint: True
+
+  load_weights: False     # set True to resume from checkpoint
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: False
+
+  save_backup_weights: True
+  save_best_weights: True
+
+  learning_rate: 1.0e-03
+  weight_decay: 0
+
+  train_batch_size: 8     # per-GPU batch size; total = batch_size × n_gpus
+  valid_batch_size: 8
+
+  batches_per_epoch: 5    # 0 = use full dataset each epoch
+  valid_batches_per_epoch: 100
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 1            # epochs per qsub job (checkpoint after each)
+  epochs: &epochs 70      # total training target
+
+  use_tensorboard: True
+  use_ema: True           # exponential moving average of weights for validation
+  ema_decay: 0.9999
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 1000
+    total_steps: 500000  # ~ batches/epoch × total epochs
+    min_lr: 1.0e-5
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 4
+
+
+# ---- Preblocks / Postblocks ---- #
+# Preblocks run before the model; postblocks run after each forward pass.
+# scaler (BridgeScaler) normalizes inputs/targets before the model and
+# denormalizes outputs after. concat assembles the nested variable dict into
+# the flat (B, C, H, W) tensor the model expects. reconstruct is required
+# for forecast_len > 1 rollout.
+preblocks:
+  per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
+                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
+                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
+                    'ERA5/prognostic/2d/VAR_10V', 'ERA5/dynamic_forcing/2d/toa_incident_solar_radiation',
+                    'ERA5/diagnostic/2d/total_precipitation', 'ERA5/diagnostic/2d/evaporation',
+                    'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        method: transform
+        scaler_params:
+          channels_last: False   # CREDIT tensors are channels-first; only used when fitting a new scaler
+    concat:
+      type: concat
+
+postblocks:
+  per_step:
+    # detach: false is REQUIRED — BaseLoss scores y_processed, so gradients must
+    # flow through the postblocks back into y_pred (and any physics fixers).
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: false
+    # Inverse-transform ALL variables (empty list = all) so every scored
+    # variable is in physical units, matching the target twin below.
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: []
+        method: inverse_transform
+    # Target twin: split + inverse-scale the flat target y into
+    # y_target_processed so BaseLoss compares variables in physical units.
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: 'y'
+        out_key: 'y_target_processed'
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: []
+        method: inverse_transform
+        key: 'y_target_processed'
+
+
+# ---- Architecture (pre-filled for 1-degree ERA5, 181×360) ---- #
+# Most users should not need to change these. If you change the grid or
+# number of variables, update image_height/width, levels, channels, and
+# surface_channels to match your data.
+model:
+  type: "wxformer"
+  frames: 1
+  image_height: 181       # 1-degree ERA5 latitude grid
+  image_width: 360        # 1-degree ERA5 longitude grid
+  levels: 18              # number of ERA5 model levels (matches data.levels above)
+  channels: 4             # 3D prognostic variables (u, v, T, q)
+  surface_channels: 4     # 2D prognostic variables (SP, 2T, 10U, 10V)
+  input_only_channels: 4  # dynamic_forcing (2) + static (2)
+  output_only_channels: 8 # diagnostic variables
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  # Model capacity: increase dim/depth for a larger model
+  dim: [32, 64, 128, 256]
+  depth: [ 2, 2, 8, 2 ]
+
+  # Window sizes — these must divide the padded spatial dims at each stage.
+  # With pad_lat=[30,30] and pad_lon=[12,12]:
+  #   stage dims H=[120,60,30,15], W=[192,96,48,24] — all divisible by 8 and 3.
+  global_window_size: [ 8, 4, 2, 1 ]
+  local_window_size: 4
+  cross_embed_kernel_sizes:
+    - [ 4, 8, 16, 32 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+  cross_embed_strides: [ 2, 2, 2, 2 ]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  interp: True                      # final bilinear resize to grid; mild low-pass, suppresses residual checkerboard
+  use_spectral_norm: True
+  upsample_with_ps: True            # pixel-shuffle (ICNR-initialized) decoder avoids checkerboard artifacts
+
+  padding_conf:
+    activate: True
+    mode: earth          # spherical (latitude-wrapping) padding
+    pad_lat: [ 37, 38 ]
+    pad_lon: [ 12, 12 ]
+
+  
+# ---- Loss ---- #
+# Follows the preblocks/postblocks structure: type + args. "base" = BaseLoss:
+# univariate loss per variable on the postblocks output (physical units),
+# combined across variables. Requires the reconstruct + scaler postblocks
+# above (including the y_target_processed twin).
+loss:
+  type: base
+  args:
+    training_loss: "mse"              # univariate loss per variable (mse | mae | huber | logcosh | ...)
+    base_loss_parameters: {}
+    # base_loss_overrides:            # optional per-variable univariate loss
+    #   ERA5/diagnostic/2d/total_precipitation: {loss: "mae"}
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
+    # file (approximates normalized-space training). Options:
+    # inverse_variance | manual | learnable | none
+    var_weighting: "inverse_variance"
+    scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: true           # rescale combination weights to mean 1
+
+    # Data diagnostic variables are always scored; postblock-computed
+    # diagnostics (e.g. from mslp_diagnostic) only when true.
+    include_computed_diagnostics: true
+
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+inference:
+  run_mode: batch                   # batch | single
+  mode: ddp                         # none | ddp | fsdp2  (distributed inference backend)
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/starter_v2'
+  batch_forecast:                   # active when run_mode: batch
+    forecast_length: "1d"           # forecast duration per init (e.g. "10d", "1m", "1y")
+    first_init_date: "2020-01-01"   # first init time (inclusive), ISO 8601
+    last_init_date: "2020-01-01"    # last init time (inclusive)
+    init_interval: "12h"            # interval between init times
+
+  single_forecast:                  # active when run_mode: single
+    forecast_length: "10d"          # forecast duration
+    start_datetime: "2020-01-01T00:00Z"   # init time, ISO 8601
+
+  output:
+    format: netcdf                  # netcdf | zarr
+    output_interval: null           # write every Nth step; null = every step (e.g. "6h", "24h")
+    group_by: null                  # null (per-step) | "day" | "month" | "year" | "full"
+    variables: null                 # null = save all; or list of {name:, levels:} to subset
+    metadata: "era5.yaml"           # CF attribute YAML (null = no variable attributes)
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4                  # 1 (fast) to 9 (small)
+
+pbs: #derecho
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "wxformer_1deg_6hr_gen2"
+  walltime: "12:00:00"
+  nodes: 8
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'

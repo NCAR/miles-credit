@@ -5,6 +5,7 @@ import pandas as pd
 from os.path import dirname, abspath, join
 from os import makedirs
 from shutil import rmtree
+import pytest
 
 
 def generate_synthetic_gfs_data(date):
@@ -586,6 +587,7 @@ def cleanup_gfs_data(gfs_path):
 
 
 def test_build_GFS_init():
+    pytest.importorskip("xesmf")
     date = pd.Timestamp("2025-01-05")
     base_path, dir_path = generate_synthetic_gfs_data(date)
     output_grid = xr.Dataset(

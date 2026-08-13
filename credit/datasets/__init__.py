@@ -1,19 +1,136 @@
+import glob
+import importlib
+import logging
 import os
 import sys
-import glob
-import logging
-
-from credit.datasets.multi_source import MultiSourceDataset
-from credit.datasets.era5 import ERA5Dataset, ARCOERA5Dataset
-from credit.datasets.MRMS import MRMSDataset
-from credit.datasets.hrrr import HRRRDataset
-
-__all__ = ["MultiSourceDataset", "ERA5Dataset", "MRMSDataset", "ARCOERA5Dataset", "HRRRDataset"]
-
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Config-driven dispatch: maps config-file keys → class.
+# Currently empty — built-in Gen2 source types are registered in
+# credit.datasets.gen_2.multi_source._SOURCE_REGISTRY instead. This registry is populated at
+# runtime by @register_dataset (via custom_objects) and consulted by
+# MultiSourceDataset.route_to_dataset_class as a fallback for dataset_type values that
+# aren't one of the built-in sources.
+# Registry entries are either:
+#   (module_path: str, class_name: str)  — built-in lazy entries
+#   cls: type                             — externally registered classes
+_DATASET_REGISTRY = {}
 
+# Direct-import table: maps Python names → object for lazy module attribute access.
+# Enables ``from credit.datasets import ARCOERA5Dataset`` without eager imports; kept for backward compatibility.
+# Entries are mostly classes, but also includes functions (build_channel_layout, update_x).
+_CLASS_SOURCES = {
+    "BaseDataset": ("credit.datasets.gen_2.base_dataset", "BaseDataset"),
+    "MultiSourceDataset": ("credit.datasets.gen_2.multi_source", "MultiSourceDataset"),
+    "ARCOERA5Dataset": ("credit.datasets.gen_2.era5", "ARCOERA5Dataset"),
+    "WeatherBench2ERA5Dataset": ("credit.datasets.gen_2.era5", "WeatherBench2ERA5Dataset"),
+    "GOESDataset": ("credit.datasets.gen_2.goes", "GOESDataset"),
+    "MRMSDataset": ("credit.datasets.gen_2.mrms", "MRMSDataset"),
+    "HRRRDataset": ("credit.datasets.gen_2.hrrr", "HRRRDataset"),
+    "GFSDataset": ("credit.datasets.gen_2.gfs", "GFSDataset"),
+    "GEFSDataset": ("credit.datasets.gen_2.gefs", "GEFSDataset"),
+    "TISRDataset": ("credit.datasets.gen_2.tisr", "TISRDataset"),
+    "build_channel_layout": ("credit.datasets.gen_2.channel_utils", "build_channel_layout"),
+    "update_x": ("credit.datasets.gen_2.channel_utils", "update_x"),
+    "ChannelGroup": ("credit.datasets.gen_2.channel_utils", "ChannelGroup"),
+}
+
+
+# ---------------------------------------------------------------------------
+# Module __getattr__: called when a name is not found via normal attribute lookup.
+# Resolves names listed in _CLASS_SOURCES lazily so submodules are only imported on first access.
+# Example: ``from credit.datasets import ARCOERA5Dataset`` triggers __getattr__("ARCOERA5Dataset"),
+#          which imports credit.datasets.gen_2.era5 on the spot and returns the class.
+def __getattr__(name):
+    if name in _CLASS_SOURCES:
+        module_path, class_name = _CLASS_SOURCES[name]
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise AttributeError(f"Cannot import {name!r}: optional dependencies missing.") from exc
+    raise AttributeError(f"module 'credit.datasets' has no attribute {name!r}")
+
+
+# ---------------------------------------------------------------------------
+# Registration
+def register_dataset(dataset_type):
+    """Decorator that adds an external dataset class to the dataset registry.
+
+    The class must inherit from :class:`credit.datasets.gen_2.base_dataset.BaseDataset`
+    and will be instantiated with the signature::
+
+        dataset = MyDataset(conf, rank=rank, world_size=world_size, is_train=is_train)
+
+    Args:
+        dataset_type: Key used in the config ``data.dataset_type`` field.
+
+    Example::
+
+        from credit.datasets import register_dataset
+        from credit.datasets.gen_2.base_dataset import BaseDataset
+
+        @register_dataset("my_dataset")
+        class MyDataset(BaseDataset):
+            def __init__(self, conf, rank=0, world_size=1, is_train=True):
+                ...
+    """
+
+    def decorator(cls):
+        from credit.datasets.gen_2.base_dataset import (
+            BaseDataset,
+        )  # imported here to avoid loading it at module import time
+
+        # isinstance(cls, type) guards against passing an instance or function;
+        # issubclass then confirms it inherits the required base class.
+        if not (isinstance(cls, type) and issubclass(cls, BaseDataset)):
+            raise TypeError(
+                f"register_dataset: '{cls.__name__}' must inherit from credit.datasets.gen_2.base_dataset.BaseDataset."
+            )
+        if dataset_type in _DATASET_REGISTRY:  # warn instead of silently overwriting
+            logger.warning(f"register_dataset: overwriting existing registry entry for '{dataset_type}'")
+        _DATASET_REGISTRY[dataset_type] = cls  # store the class under the given key
+        return cls  # must return the class, otherwise it becomes None after decoration
+
+    return decorator
+
+
+def _load_dataset_entry(dataset_type):
+    """Return the class for a registered dataset type, importing lazily if needed.
+
+    Used by ``credit.datasets.gen_2.multi_source.route_to_dataset_class`` (the Gen2 dispatch
+    path) as a fallback when ``dataset_type`` isn't one of the built-in sources in
+    ``credit.datasets.gen_2.multi_source._SOURCE_REGISTRY`` — i.e. for datasets registered via
+    ``custom_objects``.
+
+    Raises:
+        ValueError: If dataset_type is not in _DATASET_REGISTRY.
+        ImportError: If the dataset's module cannot be imported (missing optional dependencies).
+    """
+    if dataset_type not in _DATASET_REGISTRY:
+        raise ValueError(
+            f"Unknown dataset type '{dataset_type}'. "
+            f"Available types: {sorted(_DATASET_REGISTRY)}. "
+            "Register a custom dataset with @register_dataset or via custom_objects in your config."
+        )
+    entry = _DATASET_REGISTRY[dataset_type]
+    if isinstance(entry, tuple):
+        module_path, class_name = entry
+        try:
+            module = importlib.import_module(module_path)
+            return getattr(module, class_name)
+        except ImportError as exc:
+            raise ImportError(
+                f"Dataset type '{dataset_type}' requires optional dependencies that are not installed. "
+                f"Original error: {exc}"
+            ) from exc
+    return entry  # externally registered class stored directly
+
+
+# ---------------------------------------------------------------------------
+# Data loading utilities
 def set_globals(data_config, namespace=None):
     """
     Sets global variables from the provided configuration dictionary in the specified namespace.

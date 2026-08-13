@@ -7,7 +7,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
 from credit.models.unet_attention_modules import load_unet_attention
 

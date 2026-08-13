@@ -12,7 +12,7 @@ from credit.scheduler import update_on_batch
 from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.losses.crps import ring_crps_loss
 import optuna
 
@@ -258,7 +258,7 @@ class TrainerEnsembleGen1(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y)
                     total_std = (y_pred - y).detach().std()
 
                     accum_log(logs, {"loss": total_loss.item()})
@@ -582,7 +582,7 @@ class TrainerEnsembleGen1(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y)
                     total_std = (y_pred - y).detach().std()
 
                     accum_log(logs, {"loss": total_loss.item()})

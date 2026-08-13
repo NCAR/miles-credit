@@ -16,16 +16,18 @@ from glob import glob
 from collections import Counter
 
 from credit.data import get_forward_data
-from credit.datasets.downscaling_dataset import DownscalingDataset
+from credit.datasets.gen_1.downscaling_dataset import DownscalingDataset
 
-# from credit.datasets.datamap import DataMap
+# from credit.datasets.gen_1.datamap import DataMap
 from credit.datasets.count_channels import count_channels
+
 # from credit.transforms_downscaling import DataTransforms
+from credit.models import load_custom_model_modules
 
 
 def validate_args(function, argdict, context, ignore=[]):
     """
-    For calling 'function(**argdict)'.  Checks that all arguments
+    For calling ``function(**argdict)``.  Checks that all arguments
     required by function exist in argdict and throws an error if they
     don't.  Checks that arguments in argdict appear in the sigature of
     function and deletes any that don't (with a warning).  'context'
@@ -103,6 +105,8 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
         - applications/rollout_to_netcdf.py
 
     """
+
+    load_custom_model_modules(conf)
 
     # many config options don't apply when downscaling to regional
     is_downscaling = "datasets" in conf["data"]
@@ -897,7 +901,7 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
             )
 
         if "save_metric_vars" not in conf["trainer"]:
-            conf["trainer"]["save_metric_vars"] = []  # averaged metrics only
+            conf["trainer"]["save_metric_vars"] = True  # per-variable metrics plus combined aggregates
 
         if "use_scheduler" in conf["trainer"]:
             # ------------------------------------------------------------------------------ #
@@ -979,7 +983,9 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
     # --------------------------------------------------------- #
     # conf['loss'] section
 
-    if parse_training:
+    # New-style Gen 2 loss sections use {type, args} and are self-contained;
+    # the legacy flat-key checks below do not apply to them.
+    if parse_training and "type" not in conf["loss"]:
         assert "training_loss" in conf["loss"], "Training loss ('training_loss') is missing from conf['loss']"
 
         if is_downscaling:

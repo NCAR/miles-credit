@@ -1,0 +1,728 @@
+import gc
+import logging
+import os
+from collections import defaultdict
+
+import numpy as np
+import optuna
+import torch
+import torch.distributed as dist
+import tqdm
+
+from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema, resolve_num_levels
+from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
+from credit.losses import BaseLoss, effective_loss_name, is_crps_loss
+from credit.metrics import BaseCombinedMetric, BaseVariableMetric
+from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_, total_grad_norm
+from credit.parallel.domain import (
+    gather_spatial,
+    get_domain_manager,
+    get_raw_model,
+    shard_spatial,
+    sync_domain_gradients,
+    unpad_shard_interp,
+)
+from credit.parallel.fsdp2 import fsdp2_is_applied
+from credit.postblock import apply_postblocks, build_postblocks
+from credit.preblock import apply_preblocks, attach_channel_schema, build_preblocks
+from credit.scheduler import update_on_batch
+from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.rollout_utils import apply_rollout_renames, assemble_rollout_batch
+from credit.trainers.utils import accum_log, cycle
+
+logger = logging.getLogger(__name__)
+
+
+def _copy_named_input(input_dict: dict) -> dict:
+    """Shallow-structural copy of a nested ``{source: {var_key: tensor}}`` input.
+
+    New dict objects at the source level, tensors shared (never copied — they
+    must not be mutated in place anyway). This snapshots the physical, named
+    input the model consumed this step so a downstream preblock pass that
+    normalizes the original cannot clobber the t0 state the conservation fixers
+    read from ``x_physical``.
+    """
+    return {src: dict(vars_) for src, vars_ in input_dict.items()}
+
+
+class TrainerERA5Gen2(BaseTrainer):
+    def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
+        """
+        Gen 2 trainer for the ERA5 nested data schema.
+
+        Key differences from TrainerERA5Gen1:
+          - Uses new nested data schema: conf["data"]["source"]["ERA5"]["variables"]
+          - Applies preblocks to assemble batch tensors before the model forward pass
+          - forecast_len semantics: 1 = 1 step (Gen 1 used 0 = 1 step)
+          - backprop_on_timestep: range(1, forecast_len+1) instead of range(0, forecast_len+2)
+          - Validation config read from conf["validation_data"] if present, else conf["data"]
+          - Postblocks applied after model forward pass via apply_postblocks(phase="per_step")
+          - Multi-step rollout uses assemble_rollout_batch() + apply_preblocks(phase="per_step") each step
+
+        Args:
+            model: The (possibly DDP/FSDP-wrapped) model.
+            rank: Global rank of this process.
+            conf: Full configuration dict.
+        """
+        super().__init__(model, rank, conf)
+
+        # The config can request fsdp2 while the wrapper skips it (dp_size <= 1).
+        # AMP decisions must follow what was actually applied: when FSDP2 is
+        # active its MixedPrecisionPolicy replaces autocast; when it was
+        # skipped, plain autocast (trainer.amp) is all the mixed precision
+        # this run has.
+        self._fsdp2_active = fsdp2_is_applied(model)
+
+        # ---- Domain parallel manager (None when not using domain parallel) ----
+        self.domain_manager = get_domain_manager(model)
+        self._raw_model = get_raw_model(model)
+        raw_m = self._raw_model
+        if (
+            self.domain_manager is not None
+            and self.domain_manager.domain_parallel_size > 1
+            and getattr(raw_m, "use_padding", False)
+        ):
+            self._domain_pre_pad = raw_m.padding_opt
+            self._domain_image_h = raw_m.image_height
+            self._domain_image_w = raw_m.image_width
+            raw_m.use_padding = False
+            raw_m.use_interp = False
+        else:
+            self._domain_pre_pad = None
+            self._domain_image_h = None
+            self._domain_image_w = None
+
+        self.ic_preblocks = build_preblocks(conf, phase="ic_only")
+        self.step_preblocks = build_preblocks(conf, phase="per_step")
+
+        # Channel schema: the frozen layout contract for the flat input/target
+        # tensors. Attached to concat so the first real target map is validated
+        # against it, and saved to save_loc so inference (which has no targets,
+        # hence no diagnostic tensors to derive a map from) reconstructs the
+        # full y_pred — diagnostics included.
+        self.channel_schema = ChannelSchema.load_or_from_config(conf)
+        attach_channel_schema(self.ic_preblocks, self.channel_schema)
+        attach_channel_schema(self.step_preblocks, self.channel_schema)
+        if self.channel_schema is not None and rank == 0:
+            self.channel_schema.save(os.path.join(os.path.expandvars(conf["save_loc"]), DEFAULT_SCHEMA_FILENAME))
+
+        # Grid schema: unlike channel_schema, no live dataset is available yet here
+        # (only inside train_one_epoch, via trainloader.dataset) — resolved and
+        # saved once there, on the first real batch. See train_one_epoch.
+        self._grid_schema_saved = False
+
+        self.step_postblocks = build_postblocks(conf, phase="per_step")
+        self.rollout_postblocks = build_postblocks(conf, phase="post_rollout")
+
+        # ---- Data schema extraction (new nested schema) ----
+        data_conf = conf["data"]
+        source = next(iter(data_conf["source"].values()))
+        vars_conf = source["variables"]
+        diag = vars_conf.get("diagnostic") or {}
+        num_levels = resolve_num_levels(source, conf)
+        self.varnum_diag = (len(diag.get("vars_3D", [])) * num_levels + len(diag.get("vars_2D", []))) if diag else 0
+
+        self.retain_graph = data_conf.get("retain_graph", False)
+
+        # forecast_len: 1 = 1 step (new semantics, unlike v1 where 0 = 1 step)
+        self.forecast_len = data_conf["forecast_len"]
+        # history_len: 1 = single-step input (gen2 default). > 1 feeds the model a
+        # history_len-step input window; during multi-step rollout the trainer
+        # slides that window forward one step at a time (drop oldest, append
+        # newest) instead of replacing it wholesale.
+        self.history_len = data_conf.get("history_len", 1)
+        trainer_conf = conf.get("trainer", {})
+        bpt = trainer_conf.get("backprop_on_timestep") or data_conf.get("backprop_on_timestep")
+        self.backprop_on_timestep = bpt if bpt is not None else list(range(1, self.forecast_len + 1))
+
+        data_clamp = data_conf.get("data_clamp")
+        if data_clamp is None:
+            self.flag_clamp = False
+            self.clamp_min = None
+            self.clamp_max = None
+        else:
+            self.flag_clamp = True
+            self.clamp_min = float(data_clamp[0])
+            self.clamp_max = float(data_clamp[1])
+
+        # Validation config: use validation_data block if present, else fall back to data
+        data_valid = conf.get("validation_data", data_conf)
+        self.valid_history_len = data_valid.get("history_len", data_conf.get("history_len", 1))
+        self.valid_forecast_len = data_valid.get("forecast_len", self.forecast_len)
+
+        # If True, log a warning on NaN loss instead of raising TrialPruned.
+        self.skip_nan_prune = conf.get("trainer", {}).get("skip_nan_prune", False)
+
+        # Resolves the univariate training_loss inside a BaseLoss section, so
+        # ring-crps under `type: base` gets the same ensemble setup as flat use.
+        loss_name = effective_loss_name(conf.get("loss", {}))
+        if is_crps_loss(loss_name) and self.ensemble_size <= 1:
+            raise ValueError(
+                f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+                f"got trainer.ensemble_size={self.ensemble_size}."
+            )
+        self.is_ring_crps = loss_name == "ring-crps"
+        self.is_crps_ensemble = is_crps_loss(loss_name) and self.ensemble_size > 1
+        self.use_batch_axis_ensemble = self.ensemble_size > 1 and not self.is_ring_crps
+
+    # ------------------------------------------------------------------
+    # Rollout history-window helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _slide_history_window(x_prev: torch.Tensor, x_new: torch.Tensor) -> torch.Tensor:
+        """Advance a ``history_len``-step input window by one step (free-running).
+
+        Drops the oldest time step of ``x_prev`` and appends the newest step from
+        ``x_new`` along the time dimension (dim=2), so the model keeps seeing a
+        window of ``history_len`` steps during multi-step rollout.
+
+        This is the autoregressive (free-running) slide: the carried-over steps
+        are whatever was in ``x_prev`` (model predictions from earlier rollout
+        steps, except at the initial condition), never re-fetched ground truth.
+        That is the point of rollout training — the model must learn from its own
+        accumulated forecast drift.
+
+        Args:
+            x_prev: Previous input window, shape ``(B, C, H, lat, lon)`` with
+                ``H == history_len``.
+            x_new: Newly assembled single-step input, shape ``(B, C, 1, lat, lon)``
+                (same channel layout as ``x_prev``).
+
+        Returns:
+            torch.Tensor: Updated window ``(B, C, H, lat, lon)``.
+        """
+        # Keep the newest H-1 steps, append the new step at the end.
+        return torch.cat([x_prev[:, :, 1:, ...], x_new[:, :, -1:, ...]], dim=2)
+
+    # ------------------------------------------------------------------
+    # Domain-parallel forward helpers (shared by train and validate)
+    # ------------------------------------------------------------------
+
+    def _sharded_forward(self, full_data_dict, amp_enabled):
+        """Model forward with domain-parallel pad/shard handling.
+
+        Pads + shards the input over the domain group, runs the model with its
+        internal padding suppressed (the trainer pre-pads the full grid), unpads
+        the prediction back to the shard's target shape, flattens 5D output to
+        4D, and shards y to match y_pred's spatial shard. A no-op passthrough
+        (plus the forward) when domain parallelism is off.
+        """
+        if self._domain_pre_pad is not None:
+            full_data_dict["x"] = self._domain_pre_pad.pad(full_data_dict["x"])
+        full_data_dict["x"] = shard_spatial(full_data_dict["x"], self.domain_manager)
+
+        if self._domain_pre_pad is not None:
+            self._raw_model._skip_internal_padding = True
+        try:
+            with torch.autocast(device_type="cuda", enabled=amp_enabled):
+                full_data_dict["y_pred"] = self.model(full_data_dict["x"])
+        finally:
+            if self._domain_pre_pad is not None:
+                self._raw_model._skip_internal_padding = False
+        if self._domain_pre_pad is not None:
+            full_data_dict["y_pred"] = unpad_shard_interp(
+                full_data_dict["y_pred"],
+                self._domain_pre_pad,
+                self.domain_manager,
+                self._domain_image_h,
+                self._domain_image_w,
+            )
+        if full_data_dict["y_pred"].dim() == 5:
+            full_data_dict["y_pred"] = full_data_dict["y_pred"].flatten(1, 2)
+
+        # domain parallel: shard y to match y_pred's spatial shard
+        if "y" in full_data_dict and full_data_dict["y"] is not None:
+            _y = full_data_dict["y"]
+            if _y.dim() == 5:
+                _y = _y.flatten(1, 2)
+            full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
+
+    def _gather_for_next_step(self, full_data_dict):
+        """Prepare y_processed to seed the next rollout step.
+
+        Detaches the carried prediction at the rollout boundary so each step's
+        loss backpropagates only through that step's forward + postblocks
+        (truncated per-step BPTT). This matters now that ``Reconstruct`` can run
+        with ``detach=False`` (to keep conservation fixers in the per-step
+        gradient): without this boundary detach, step t's ``backward()`` would
+        free graph buffers that step t+1 still references.
+
+        Under domain parallelism it also gathers each domain-sharded field back
+        to full height, since assemble_rollout_batch concats the previous step's
+        prognostics with full-height forcings/statics and every domain rank
+        needs the full-grid prediction (shard_spatial re-shards at the next
+        forward). No-op-but-detach without domain parallelism.
+        """
+        y_processed = full_data_dict.get("y_processed")
+        if not isinstance(y_processed, dict):
+            return
+        domain_active = self.domain_manager is not None and self.domain_manager.domain_parallel_size > 1
+        for source_vars in y_processed.values():
+            for var_key, tensor in source_vars.items():
+                tensor = tensor.detach()
+                if domain_active:
+                    tensor = gather_spatial(tensor, self.domain_manager)
+                source_vars[var_key] = tensor
+
+    # ------------------------------------------------------------------
+    # Training loop
+    # ------------------------------------------------------------------
+
+    def train_one_epoch(self, epoch, trainloader, optimizer, criterion, scaler, scheduler, metrics):
+        """
+        Train for one epoch.
+
+        The inner loop iterates over forecast_len autoregressive steps. For each step:
+          1. Pull the next batch from the dataloader (raw, unnormalized).
+          2. At t=1: IC-only preblocks produce ic_preprocessed (regridded statics);
+             rollout preblocks produce the final normalized input x.
+             At t>1: assemble rollout batch from corrected_pred (prognostic),
+             ic_preprocessed (statics), and curr_batch (dynamic forcing);
+             rollout preblocks normalize and concat.
+          3. Forward pass → y_pred_flat (flat, normalized).
+          4. Apply postblocks: Reconstruct → inverse scaler → physics fixers.
+             After this, full_data_dict["y_processed"] is a nested dict split by Reconstruct.
+          5. Compute loss on y_pred_flat vs the normalized target from preblocks.
+
+        Args:
+            epoch: Current epoch number.
+            trainloader: DataLoader for training.
+            optimizer, criterion, scaler, scheduler, metrics: Standard training objects.
+
+        Returns:
+            dict: Training metrics for the epoch.
+        """
+        if self.ensemble_size > 1:
+            logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
+
+        if self.use_scheduler and self.scheduler_type == "lambda":
+            scheduler.step()
+
+        from torch.utils.data import IterableDataset
+
+        batches_per_epoch = self.batches_per_epoch
+        if not isinstance(trainloader.dataset, IterableDataset):
+            if hasattr(trainloader.dataset, "batches_per_epoch"):
+                dataset_batches = trainloader.dataset.batches_per_epoch()
+            elif hasattr(trainloader.sampler, "batches_per_epoch"):
+                dataset_batches = trainloader.sampler.batches_per_epoch()
+            else:
+                dataset_batches = len(trainloader)
+            batches_per_epoch = (
+                self.batches_per_epoch if 0 < self.batches_per_epoch < dataset_batches else dataset_batches
+            )
+
+        grad_accum_every = self.conf.get("trainer", {}).get("grad_accum_every", 1)
+
+        # Reseed the shared shuffle permutation each epoch. Without this the
+        # sampler (now seeded identically on all ranks — required for disjoint
+        # sharding) would yield the same order every epoch.
+        _sampler = getattr(trainloader, "batch_sampler", None) or getattr(trainloader, "sampler", None)
+        if hasattr(_sampler, "set_epoch"):
+            _sampler.set_epoch(epoch)
+
+        batch_group_generator = tqdm.tqdm(
+            range(batches_per_epoch),
+            total=batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
+        self.model.train()
+
+        dl = cycle(trainloader)
+        results_dict = defaultdict(list)
+
+        for steps in range(batches_per_epoch):
+            logs = {}
+            loss = 0
+            full_data_dict = {}
+
+            # Suppress gradient sync on non-boundary micro-steps during
+            # gradient accumulation — otherwise DDP all-reduces / FSDP2
+            # reduce-scatters on every backward, multiplying comms by
+            # grad_accum_every. Both wrappers expose a per-iteration flag
+            # (what no_sync() toggles), checked at the next forward/backward.
+            is_accum_boundary = (steps + 1) % grad_accum_every == 0 or steps == batches_per_epoch - 1
+            if grad_accum_every > 1:
+                if self.mode == "fsdp2" and hasattr(self.model, "set_requires_gradient_sync"):
+                    self.model.set_requires_gradient_sync(is_accum_boundary)
+                elif isinstance(self.model, torch.nn.parallel.DistributedDataParallel):
+                    self.model.require_backward_grad_sync = is_accum_boundary
+
+            for t in range(1, self.forecast_len + 1):
+                batch = next(dl)
+
+                if not self._grid_schema_saved and self.rank == 0:
+                    # Once, on the first real batch: trainloader.dataset has now
+                    # actually read data, so lazily-populated native grids (HRRR,
+                    # remote ERA5) are available if this process read them itself
+                    # (num_workers=0), or via the {source}_grid_schema.nc a worker
+                    # already wrote as a side effect of that same read (see
+                    # write_source_grid_schema_if_missing, called from each dataset
+                    # class) — that fallback is what makes this reliable regardless
+                    # of num_workers.
+                    self._grid_schema_saved = True
+                    try:
+                        save_loc = os.path.expandvars(self.conf["save_loc"])
+                        grid_schema = GridSchema.resolve(
+                            trainloader.dataset, self.ic_preblocks, self.step_preblocks, save_loc=save_loc
+                        )
+                        if grid_schema.origin == "regridded":
+                            # Only write output_grid_schema.nc when it actually differs
+                            # from the source's own file — no regridder means the
+                            # per-source {source}_grid_schema.nc already *is* the
+                            # effective output grid, so a second identical copy would
+                            # be pure duplication.
+                            grid_schema.save(os.path.join(save_loc, OUTPUT_GRID_SCHEMA_FILENAME))
+                    except (ValueError, AttributeError) as e:
+                        logger.warning("TrainerERA5Gen2: could not resolve grid schema (%s).", e)
+
+                if t == 1:
+                    full_data_dict["ic_raw"] = batch["input"]
+                    full_data_dict["x_raw"] = batch["input"]
+                    full_data_dict["y_raw"] = batch["target"]
+                    full_data_dict["ic_preprocessed"] = apply_preblocks(self.ic_preblocks, batch, device=self.device)
+                    full_data_dict["ic_preprocessed"] = apply_rollout_renames(
+                        full_data_dict["ic_preprocessed"], self.step_preblocks
+                    )
+                    step_input = full_data_dict["ic_preprocessed"]
+                    # t0 physical, named input the model consumes this step (= IC
+                    # for forecast_len=1); the conservation fixers read t0 here.
+                    full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                    full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                    if self.history_len > 1:
+                        # Keep the (un-ensembled) history window separate from the
+                        # tensor fed to the model, so the per-step ensemble
+                        # repeat_interleave below does not accumulate into the slide.
+                        history_x = full_data_dict["x"]
+                else:
+                    full_data_dict["x_raw"] = batch["input"]
+                    full_data_dict["y_raw"] = batch["target"]
+                    rollout_batch = apply_rollout_renames(batch, self.ic_preblocks, self.step_preblocks)
+                    step_input = assemble_rollout_batch(full_data_dict, rollout_batch, history_len=self.history_len)
+                    # At t>1 the t0 state is the previous step's predicted physical
+                    # state plus this step's forcing, not the original IC.
+                    full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                    full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                    if self.history_len > 1:
+                        # assemble_rollout_batch produced a single-step x; slide the
+                        # previous history_len-step window forward by one step.
+                        history_x = self._slide_history_window(history_x, full_data_dict["x"])
+                        full_data_dict["x"] = history_x
+
+                if self.use_batch_axis_ensemble:
+                    full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
+
+                if self.flag_clamp:
+                    full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
+
+                # FSDP2's MixedPrecisionPolicy replaces manual autocast (and
+                # conflicts with SpectralNorm power-iteration buffers); when
+                # FSDP2 was skipped (dp_size <= 1), plain autocast applies.
+                _amp = self.amp and not self._fsdp2_active
+                self._sharded_forward(full_data_dict, _amp)
+
+                # BaseLoss scores the postblocks output (y_processed) against a target
+                # twin (y_target_processed) built from y by the same chain — clamp y
+                # before postblocks so the clamp propagates into it.
+                if isinstance(criterion, BaseLoss) and self.flag_clamp:
+                    full_data_dict["y"] = torch.clamp(
+                        full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                    )
+
+                full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                if t < self.forecast_len:
+                    self._gather_for_next_step(full_data_dict)
+
+                if t in self.backprop_on_timestep:
+                    if isinstance(criterion, BaseLoss):
+                        with torch.autocast(device_type="cuda", enabled=_amp):
+                            loss = criterion(full_data_dict)
+                    else:
+                        if self.flag_clamp:
+                            full_data_dict["y"] = torch.clamp(
+                                full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                            )
+                        with torch.autocast(device_type="cuda", enabled=_amp):
+                            loss = criterion(
+                                full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                                full_data_dict["y_pred"],
+                            ).mean()
+                    accum_log(logs, {"loss": loss.item()})
+                    if isinstance(criterion, BaseLoss):
+                        accum_log(logs, {f"loss_var/{k}": v for k, v in criterion.last_var_losses.items()})
+                    if self.is_crps_ensemble:
+                        # Ensemble spread proxy: std of member errors.
+                        target = full_data_dict["y"]
+                        if full_data_dict["y_pred"].shape[0] == target.shape[0] * self.ensemble_size:
+                            target = torch.repeat_interleave(target, self.ensemble_size, 0)
+                        accum_log(logs, {"std": (full_data_dict["y_pred"] - target).detach().std().item()})
+                    scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
+                # No barrier here: NCCL collectives (grad sync, halo exchange)
+                # already order ranks; a per-timestep barrier only adds latency.
+
+            full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
+
+            # optimizer step at accumulation boundary
+            if is_accum_boundary:
+                sync_domain_gradients(self.model, self.domain_manager)
+                _tp_group = getattr(self._raw_model, "_tp_group", None)
+                if _tp_group is not None:
+                    from credit.parallel.tensor_parallel import sync_replicated_gradients
+
+                    sync_replicated_gradients(self.model, _tp_group)
+                scaler.unscale_(optimizer)
+                if self.grad_max_norm == "dynamic":
+                    # Global L2 norm: sum SQUARED norms across ranks, then sqrt.
+                    # (Summing the norms themselves and sqrt-ing mixes units.)
+                    # DTensor grads (FSDP2 / native TP) go through the
+                    # mesh-grouped total_grad_norm, whose full_tensor()
+                    # reduction is already global — no extra all_reduce.
+                    # Plain grads keep the local sq-sum + SUM all_reduce; that
+                    # still over-counts replicated grads when tp/domain ranks
+                    # hold copies; acceptable for a clip threshold.
+                    from torch.distributed.tensor import DTensor
+
+                    plain, sharded = [], []
+                    for p in self.model.parameters():
+                        if p.grad is not None:
+                            (sharded if isinstance(p.grad, DTensor) else plain).append(p.grad.detach())
+                    sq_terms = []
+                    if plain:
+                        local_sq = torch.stack([g.norm(2) for g in plain]).square().sum()
+                        if self.distributed:
+                            dist.all_reduce(local_sq, op=dist.ReduceOp.SUM)
+                        sq_terms.append(local_sq)
+                    if sharded:
+                        sq_terms.append(total_grad_norm(sharded, 2.0).square())
+                    global_norm = torch.stack(sq_terms).sum().sqrt()
+                    clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                elif self.grad_max_norm > 0.0:
+                    clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+
+                scaler.step(optimizer)
+                scaler.update()
+                optimizer.zero_grad()
+
+                if self.ema is not None:
+                    self.ema.update(self.model)
+
+            if full_data_dict.get("y_pred") is not None and full_data_dict.get("y") is not None:
+                if isinstance(metrics, (BaseCombinedMetric, BaseVariableMetric)):
+                    metrics_dict = metrics(full_data_dict)
+                else:
+                    metrics_dict = metrics(full_data_dict["y_pred"], full_data_dict["y"])
+                for name, value in metrics_dict.items():
+                    value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                    if self.distributed:
+                        all_reduce_avg(value)
+                    results_dict[f"train_{name}"].append(value[0].item())
+
+            batch_loss = torch.Tensor([logs.get("loss", 0.0)]).to(self.device)
+            if self.distributed:
+                all_reduce_avg(batch_loss)
+            results_dict["train_loss"].append(batch_loss[0].item())
+            if isinstance(criterion, BaseLoss):
+                for name in criterion.last_var_losses:
+                    var_loss = torch.Tensor([logs.get(f"loss_var/{name}", 0.0)]).to(self.device)
+                    if self.distributed:
+                        all_reduce_avg(var_loss)
+                    results_dict[f"train_loss_var/{name}"].append(var_loss[0].item())
+            results_dict["train_forecast_len"].append(self.forecast_len)
+            results_dict["train_history_len"].append(self.history_len)
+
+            if self.is_crps_ensemble and "std" in logs:
+                batch_std = torch.Tensor([logs["std"]]).to(self.device)
+                if self.distributed:
+                    dist.all_reduce(batch_std, dist.ReduceOp.AVG, async_op=False)
+                results_dict["train_std"].append(batch_std[0].item())
+
+            if not np.isfinite(np.mean(results_dict["train_loss"])):
+                print(results_dict["train_loss"])
+                if self.skip_nan_prune:
+                    logger.warning("NaN/Inf loss detected but skip_nan_prune=True; continuing.")
+                else:
+                    raise optuna.TrialPruned()
+
+            self._log_batch_progress(epoch, results_dict, optimizer, batch_group_generator, phase="train")
+
+            if self.use_scheduler and self.scheduler_type in update_on_batch:
+                scheduler.step()
+
+        batch_group_generator.close()
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return results_dict
+
+    # ------------------------------------------------------------------
+    # Validation loop
+    # ------------------------------------------------------------------
+
+    def validate(self, epoch, valid_loader, criterion, metrics):
+        """
+        Validate for one epoch.
+
+        Runs self.valid_forecast_len autoregressive steps per sample.
+        Loss and metrics are computed only at the final step.
+
+        Args:
+            epoch: Current epoch number.
+            valid_loader: DataLoader for validation.
+            criterion, metrics: Loss and metric callables.
+
+        Returns:
+            dict: Validation metrics for the epoch.
+        """
+        self.model.eval()
+
+        from torch.utils.data import IterableDataset
+
+        valid_batches_per_epoch = self.valid_batches_per_epoch
+        if not isinstance(valid_loader.dataset, IterableDataset):
+            if hasattr(valid_loader.dataset, "batches_per_epoch"):
+                dataset_batches = valid_loader.dataset.batches_per_epoch()
+            elif hasattr(valid_loader.sampler, "batches_per_epoch"):
+                dataset_batches = valid_loader.sampler.batches_per_epoch()
+            else:
+                dataset_batches = len(valid_loader)
+            valid_batches_per_epoch = (
+                self.valid_batches_per_epoch if 0 < self.valid_batches_per_epoch < dataset_batches else dataset_batches
+            )
+
+        results_dict = defaultdict(list)
+        batch_group_generator = tqdm.tqdm(
+            range(valid_batches_per_epoch),
+            total=valid_batches_per_epoch,
+            leave=True,
+            disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
+        )
+
+        dl = cycle(valid_loader)
+        with torch.no_grad():
+            for steps in range(valid_batches_per_epoch):
+                y_pred_flat = None
+                y = None
+                loss = 0
+
+                full_data_dict = {}
+
+                for t in range(1, self.valid_forecast_len + 1):
+                    batch = next(dl)
+
+                    if t == 1:
+                        full_data_dict["ic_raw"] = batch["input"]
+                        full_data_dict["x_raw"] = batch["input"]
+                        full_data_dict["y_raw"] = batch["target"]
+                        full_data_dict["ic_preprocessed"] = apply_preblocks(
+                            self.ic_preblocks, batch, device=self.device
+                        )
+                        full_data_dict["ic_preprocessed"] = apply_rollout_renames(
+                            full_data_dict["ic_preprocessed"], self.step_preblocks
+                        )
+                        step_input = full_data_dict["ic_preprocessed"]
+                        # t0 physical, named input (= IC for forecast_len=1).
+                        full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                        full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                        if self.valid_history_len > 1:
+                            history_x = full_data_dict["x"]
+                    else:
+                        full_data_dict["x_raw"] = batch["input"]
+                        full_data_dict["y_raw"] = batch["target"]
+                        rollout_batch = apply_rollout_renames(batch, self.ic_preblocks, self.step_preblocks)
+                        step_input = assemble_rollout_batch(
+                            full_data_dict, rollout_batch, history_len=self.valid_history_len
+                        )
+                        # t0 = previous step's predicted physical state + this
+                        # step's forcing, not the original IC.
+                        full_data_dict["x_physical"] = _copy_named_input(step_input["input"])
+                        full_data_dict.update(apply_preblocks(self.step_preblocks, step_input, device=self.device))
+                        if self.valid_history_len > 1:
+                            history_x = self._slide_history_window(history_x, full_data_dict["x"])
+                            full_data_dict["x"] = history_x
+
+                    if self.use_batch_axis_ensemble:
+                        full_data_dict["x"] = torch.repeat_interleave(full_data_dict["x"], self.ensemble_size, 0)
+
+                    if self.flag_clamp:
+                        full_data_dict["x"] = torch.clamp(full_data_dict["x"], min=self.clamp_min, max=self.clamp_max)
+
+                    # Validation runs full precision (no autocast), as before.
+                    self._sharded_forward(full_data_dict, False)
+
+                    # BaseLoss: clamp y before postblocks so y_target_processed
+                    # (built by the same chain) inherits the clamp.
+                    if isinstance(criterion, BaseLoss) and self.flag_clamp and t == self.valid_forecast_len:
+                        full_data_dict["y"] = torch.clamp(
+                            full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                        )
+
+                    full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                    if t < self.valid_forecast_len:
+                        self._gather_for_next_step(full_data_dict)
+
+                    if t == self.valid_forecast_len:
+                        if isinstance(criterion, BaseLoss):
+                            loss = criterion(full_data_dict)
+                            for name, value in criterion.last_var_losses.items():
+                                value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                                if self.distributed:
+                                    all_reduce_avg(value)
+                                results_dict[f"valid_loss_var/{name}"].append(value[0].item())
+                        else:
+                            if self.flag_clamp:
+                                full_data_dict["y"] = torch.clamp(
+                                    full_data_dict["y"].float(), min=self.clamp_min, max=self.clamp_max
+                                )
+                            loss = criterion(
+                                full_data_dict["y"].float().to(full_data_dict["y_pred"].dtype),
+                                full_data_dict["y_pred"],
+                            ).mean()
+                        if isinstance(metrics, (BaseCombinedMetric, BaseVariableMetric)):
+                            metrics_dict = metrics(full_data_dict)
+                        else:
+                            metrics_dict = metrics(full_data_dict["y_pred"].float(), full_data_dict["y"].float())
+                        for name, value in metrics_dict.items():
+                            value = torch.Tensor([value]).to(self.device, non_blocking=True)
+                            if self.distributed:
+                                all_reduce_avg(value)
+                            results_dict[f"valid_{name}"].append(value[0].item())
+
+                full_data_dict = apply_postblocks(self.rollout_postblocks, full_data_dict)
+
+                batch_loss = torch.Tensor([loss.item() if torch.is_tensor(loss) else loss]).to(self.device)
+                # Average validation loss across ranks (the train loop already
+                # does this). Without it each rank tracks a different local
+                # valid_loss, and fit() makes early-stopping / best-checkpoint
+                # decisions from divergent per-rank histories — ranks can then
+                # break out of training at different epochs and hang in the
+                # next collective.
+                if self.distributed:
+                    all_reduce_avg(batch_loss)
+
+                results_dict["valid_loss"].append(batch_loss[0].item())
+                results_dict["valid_forecast_len"].append(self.valid_forecast_len)
+                results_dict["valid_history_len"].append(self.valid_history_len)
+
+                self._log_batch_progress(
+                    epoch,
+                    results_dict,
+                    optimizer=None,
+                    pbar=batch_group_generator,
+                    phase="valid",
+                    show_metrics=False,
+                )
+
+        batch_group_generator.close()
+
+        if self.distributed:
+            torch.distributed.barrier()
+
+        torch.cuda.empty_cache()
+        gc.collect()
+
+        return results_dict
+
+
+Trainer = TrainerERA5Gen2  # canonical alias, matches other trainer modules

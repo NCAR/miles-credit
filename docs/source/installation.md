@@ -1,5 +1,9 @@
 # Installing CREDIT from source
 
+Most users do not need to build from source — follow the
+[Quickstart](quickstart.md) and install with `pip install miles-credit`
+instead. This page is for source builds and special HPC setups.
+
 If you want to take advantage of the full power of CREDIT,
 which includes scaling training across multiple nodes, you
 will need to build PyTorch from source. The instructions
@@ -24,7 +28,7 @@ command.
     * gcc (gnu compilers for C, C++, and Fortran)
     * netcdf (for reading and writing netCDF files)
     * wget (for downloading files from the internet)
-    * mpich (for MPI distributed training support)
+    * mpich or openmpi (for MPI distributed training support)
 ### Linux
 1. Install the following dependencies with your OS package manager or ask your sysadmins to make sure
 they are installed:
@@ -44,7 +48,7 @@ interconnect. Ben Kirk has created a special [makefile](https://github.com/benki
 build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
 Please follow instructions there if you wish to build your own version of PyTorch from source. Otherwise,
 Conda packages for PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho
-at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_env_derecho.sh`.
+at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_derecho_env.sh`.
 
 ## PyTorch Python Dependencies
 1. Install a Python virtual environment manager. My preferred one for now is
@@ -91,7 +95,7 @@ can be found [here](https://github.com/pytorch/vision/blob/main/CONTRIBUTING.md#
 ## Installing CREDIT
 Clone miles-credit from github and install using pip:
 ```bash
-git clone git@github.com:NCAR/miles-credit.git
+git clone https://github.com:NCAR/miles-credit.git
 cd miles-credit
 pip install -e .
 ```
@@ -107,4 +111,4 @@ cd miles-credit
 pytest .
 ```
 
-If all tests pass, run `applications/rollout_to_netcdf.py` on a test case.
+If all tests pass, run `credit_train -c config/example-v2026.1.0.yml` on a test case.

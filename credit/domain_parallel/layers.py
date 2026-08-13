@@ -15,6 +15,17 @@ from credit.domain_parallel.halo_exchange import HaloExchange
 from credit.domain_parallel.manager import get_domain_parallel_manager
 
 
+def _run_forward_pre_hooks(module, x):
+    """Run a module's forward pre-hooks without invoking its full forward pass.
+
+    Required when bypassing module.__call__ (e.g. calling F.conv2d directly)
+    but parameterization hooks such as SpectralNorm must still fire to
+    recompute the weight attribute on the correct device before use.
+    """
+    for hook in module._forward_pre_hooks.values():
+        hook(module, (x,))
+
+
 class DomainParallelConv2d(nn.Module):
     """Domain-parallel Conv2d with automatic halo exchange.
 
@@ -69,6 +80,9 @@ class DomainParallelConv2d(nn.Module):
         if self.halo_width == 0:
             return self.conv(x)
 
+        # Trigger forward pre-hooks (e.g. SpectralNorm) before bypassing __call__
+        _run_forward_pre_hooks(self.conv, x)
+
         # Exchange halos
         x_padded = self.halo_exchange(x)
 
@@ -91,6 +105,120 @@ class DomainParallelConv2d(nn.Module):
             self.conv.bias,
             self.conv.stride,
             new_padding,
+            self.conv.dilation,
+            self.conv.groups,
+        )
+
+        return out
+
+    @property
+    def weight(self):
+        return self.conv.weight
+
+    @property
+    def bias(self):
+        return self.conv.bias
+
+
+class DomainParallelCrossEmbedBranch(nn.Module):
+    """Domain-parallel wrapper for one CrossEmbedLayer kernel branch.
+
+    CrossEmbedLayer (credit/models/wxformer/crossformer.py) pads each kernel
+    branch explicitly with nn.ZeroPad2d before an otherwise-unpadded Conv2d,
+    so every kernel size in the multi-scale conv gets the exact "same" output
+    shape regardless of (kernel - stride) parity. Domain-parallel conversion
+    must NOT apply that padding along the sharded (H) dimension as-is: at an
+    interior domain-shard boundary the correct "padding" is real neighbor
+    data from the adjacent shard (halo exchange), not zeros -- zero-padding
+    an interior boundary is wrong, and it also corrupts the halo exchange,
+    which then exchanges those fabricated zeros as if they were real
+    boundary data. Along the un-sharded (W) dimension the zero-padding is
+    still exactly right and must be preserved.
+
+    Plain DomainParallelConv2d isn't sufficient here: credit/domain_parallel/
+    convert.py's module walk finds only the inner Conv2d inside the branch's
+    nn.Sequential(ZeroPad2d, Conv2d) and wraps that alone, leaving the
+    sibling ZeroPad2d in place -- it keeps firing unconditionally, before
+    DomainParallelConv2d's halo exchange ever sees the input. And even if the
+    inner Conv2d were wrapped directly, DomainParallelConv2d.forward() falls
+    back to the wrapped conv's own `.padding` attribute for the W direction,
+    which is always (0, 0) here: all of this branch's padding was
+    deliberately moved out of the Conv2d and into the ZeroPad2d. So the W
+    padding must be read from the ZeroPad2d and reapplied explicitly instead.
+
+    convert.py matches this class (CrossEmbedConvBranch, a distinctly-named
+    nn.Sequential subclass) by isinstance, ahead of the generic Conv2d rule,
+    and replaces the whole branch with this wrapper -- not just its inner
+    Conv2d.
+
+    Args:
+        branch: A CrossEmbedConvBranch (nn.Sequential(ZeroPad2d, Conv2d)) to wrap.
+        shard_dim: Spatial dimension being sharded (-2 for H in BCHW).
+    """
+
+    def __init__(self, branch, shard_dim=-2):
+        super().__init__()
+        zero_pad, conv = branch[0], branch[1]
+        self.conv = conv
+        self.shard_dim = shard_dim
+
+        # nn.ZeroPad2d.padding is (left, right, top, bottom); CrossEmbedLayer
+        # always applies the same (pad_left, pad_right) pair to both the H and
+        # W axes, so (left, right) here is exactly the W-direction padding to
+        # preserve.
+        pad_left, pad_right, _pad_top, _pad_bottom = zero_pad.padding
+        self.w_padding = (pad_left, pad_right)
+
+        if isinstance(conv.kernel_size, int):
+            k_h = conv.kernel_size
+        else:
+            k_h = conv.kernel_size[0]
+
+        if isinstance(conv.stride, int):
+            s_h = conv.stride
+        else:
+            s_h = conv.stride[0]
+
+        # Same formula as DomainParallelConv2d/the branch's own H-padding
+        # (pad_total // 2, since CrossEmbedLayer's pad_total = kernel - stride
+        # and this is its floor-halved left component) -- halo exchange is
+        # inherently symmetric, so an odd pad_total (asymmetric pad_left !=
+        # pad_right, only possible at stride=1 with an even kernel) can't be
+        # fully replicated by a plain halo exchange along H either; that's a
+        # pre-existing limitation of HaloExchange, not something this fix
+        # introduces or resolves.
+        if s_h == 1:
+            self.halo_width = (k_h - 1) // 2
+        else:
+            self.halo_width = max(0, (k_h - s_h) // 2)
+
+        self.halo_exchange = HaloExchange(self.halo_width, dim=shard_dim)
+
+    def forward(self, x):
+        if self.halo_width == 0:
+            # No H halo needed; W padding is still required (it's 0 too
+            # whenever halo_width is 0, since both come from the same
+            # (kernel - stride) difference, but F.pad with (0, 0) is a
+            # no-op, so applying it unconditionally here is harmless).
+            x = F.pad(x, (self.w_padding[0], self.w_padding[1], 0, 0))
+            return self.conv(x)
+
+        # Trigger forward pre-hooks (e.g. SpectralNorm) before bypassing __call__
+        _run_forward_pre_hooks(self.conv, x)
+
+        # H gets real neighbor data via halo exchange instead of zero-padding.
+        x_padded = self.halo_exchange(x)
+        # W still needs the original zero-padding; the ZeroPad2d that used to
+        # provide it is bypassed (this wrapper replaces the whole branch), so
+        # it's applied explicitly here.
+        x_padded = F.pad(x_padded, (self.w_padding[0], self.w_padding[1], 0, 0))
+
+        out = F.conv2d(
+            x_padded,
+            self.conv.weight,
+            self.conv.bias,
+            self.conv.stride,
+            0,
             self.conv.dilation,
             self.conv.groups,
         )
@@ -143,6 +271,8 @@ class DomainParallelConv3d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        _run_forward_pre_hooks(self.conv, x)
 
         x_padded = self.halo_exchange(x)
 
@@ -208,6 +338,8 @@ class DomainParallelConvTranspose2d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        _run_forward_pre_hooks(self.conv, x)
 
         x_padded = self.halo_exchange(x)
 
@@ -287,6 +419,8 @@ class DomainParallelConvTranspose3d(nn.Module):
     def forward(self, x):
         if self.halo_width == 0:
             return self.conv(x)
+
+        _run_forward_pre_hooks(self.conv, x)
 
         x_padded = self.halo_exchange(x)
 

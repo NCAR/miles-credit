@@ -4,10 +4,10 @@
 
 [PyPI](https://pypi.org/project/miles-credit/)
 
-[CREDIT npj Climate and Atmospheric Science Article](nature.com/articles/s41612-025-01125-6)
+[CREDIT npj Climate and Atmospheric Science Article](https://www.nature.com/articles/s41612-025-01125-6)
 
 ## About
-CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models 
+CREDIT is an open software platform to train and deploy AI atmospheric prediction models. CREDIT offers fast models
 that can be flexibly configured both in terms of input data and neural network architecture. The interface is designed
 to be user-friendly and enable fast spin-up and iteration. CREDIT is backed by the AI and atmospheric science expertise
 of the MILES group and the NSF National Center for Atmospheric Research, leading to design choices that balance advanced
@@ -16,8 +16,29 @@ AI/ML with our physical knowledge of the atmosphere.
 CREDIT has reached its first stable release with a full set of models, training, and deployment options. It continues
 to be under active development. Please contact [the MILES group](mailto:milescore@ucar.edu) if you have any questions about CREDIT.
 
-MILES CREDIT also provides more detailed [documentation](https://miles-credit.readthedocs.io/en/latest/) with installation
-instructions, how to get started training and deploying models, how to interpret the config files, and full API docs. 
+**New to CREDIT?** See [QUICKSTART.md](QUICKSTART.md) to get up and running locally, or the [full online Quickstart](https://miles-credit.readthedocs.io/en/latest/quickstart.html) for detailed guidance.
+
+## Getting started
+
+Install CREDIT and launch the interactive config wizard:
+
+```bash
+conda create -n credit -y python=3.13 uv
+conda activate credit
+uv pip install miles-credit
+credit begin
+```
+
+`credit begin` walks you through creating a starter config, then validates it
+with `credit check` and prints the `credit preprocess` / `credit train`
+commands to run next. See [QUICKSTART.md](QUICKSTART.md) for the NCAR
+Casper/Derecho install paths and the rest of the workflow.
+
+## Documentation
+
+The [full documentation](https://miles-credit.readthedocs.io/en/latest/) covers installation,
+training and deploying models, the config file schema, datasets, and the gen2 pipeline, along
+with complete [API docs](https://miles-credit.readthedocs.io/en/latest/api/index.html).
 
 ## Citing CREDIT
 If you are interested in using CREDIT as part of your research, please cite the following paper:
@@ -25,11 +46,12 @@ Schreck, J.S., Sha, Y., Chapman, W. et al. Community Research Earth Digital Inte
 for AI-driven Earth System Modeling. npj Clim Atmos Sci 8, 239 (2025). https://doi.org/10.1038/s41612-025-01125-6
 
 # Model Weights and Data
-Model weights for the CREDIT 6-hour WXFormer and FuXi models and the 1-hour WXFormer are available on huggingface.
+Model weights for the CREDIT 6-hour WXFormer and FuXi models, the 1-hour WXFormer, and the CAMulator climate emulator are available on huggingface.
 
 * [6-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_6h)
 * [1-Hour WXFormer](https://huggingface.co/djgagne2/wxformer_1h)
 * [6-Hour FuXi](https://huggingface.co/djgagne2/fuxi_6h)
+* [CAMulator](https://huggingface.co/willychap/camulator)
 
 Processed ERA5 Zarr Data are available for download through Globus (requires free account) through the [CREDIT ERA5 Zarr Files](https://app.globus.org/file-manager/collections/2fc90d8f-10b7-44e1-a6a5-cf844112822e/overview) collection.
 
@@ -43,4 +65,4 @@ This software is based upon work supported by the NSF National Center for Atmosp
 U.S. National Science Foundation  under Cooperative Agreement No. 1852977 and managed by the University Corporation for Atmospheric Research. Any opinions, findings and conclusions or recommendations 
 expressed in this material do not necessarily reflect the views of NSF. Additional support for development was provided by 
 The NSF AI Institute for Research on Trustworthy AI for Weather, Climate, and Coastal Oceanography (AI2ES)  with grant
-number RISE-2019758 and by Schmidt Sciences, LLC. 
+number RISE-2019758, NSF Grant [RISE-2425659](https://www.nsf.gov/awardsearch/show-award/?AWD_ID=2425659), and by Schmidt Sciences, LLC. 

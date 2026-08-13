@@ -472,19 +472,19 @@ This means SST lives in the normalized forcing tensor at each timestep, **not** 
 ```python
 from Model_State import initialize_camulator, StateVariableAccessor
 
-ctx = initialize_camulator(config_path, model_name='checkpoint.pt00091.pt')
-stepper = ctx['stepper']
-state = ctx['initial_state']
-state_transformer = ctx['state_transformer']
-forcing_ds_norm = ctx['forcing_dataset']
-static_forcing = ctx['static_forcing']
+ctx = initialize_camulator(config_path, model_name="checkpoint.pt00091.pt")
+stepper = ctx["stepper"]
+state = ctx["initial_state"]
+state_transformer = ctx["state_transformer"]
+forcing_ds_norm = ctx["forcing_dataset"]
+static_forcing = ctx["static_forcing"]
 
-accessor_input  = StateVariableAccessor(conf, tensor_type='input')
-accessor_output = StateVariableAccessor(conf, tensor_type='output')
+accessor_input = StateVariableAccessor(conf, tensor_type="input")
+accessor_output = StateVariableAccessor(conf, tensor_type="output")
 
 # Each step:
 model_input = stepper.state_manager.build_input_with_forcing(state, dynamic_forcing_t, static_forcing)
-accessor_input.set_state_var(model_input, 'SST', normalized_sst_tensor)  # inject ocean SST
+accessor_input.set_state_var(model_input, "SST", normalized_sst_tensor)  # inject ocean SST
 with torch.no_grad():
     prediction = stepper.model(model_input.float())
 prediction = stepper._apply_postprocessing(prediction, model_input)
@@ -1098,13 +1098,13 @@ The fixed 50 m was accidentally correct for polar regions but **12–18% too low
 
 ```python
 # In camulator_server.py startup:
-hybi_bot    = float(hybi[-2])               # 0.98511219 for CAM6 L32
-p_mid_frac  = 0.5 * (hybi_bot + 1.0)       # 0.99255610
-Z_BOT_SCALE = (287.058 / 9.80616) * (-np.log(p_mid_frac))   # 0.21872 m/K
+hybi_bot = float(hybi[-2])  # 0.98511219 for CAM6 L32
+p_mid_frac = 0.5 * (hybi_bot + 1.0)  # 0.99255610
+Z_BOT_SCALE = (287.058 / 9.80616) * (-np.log(p_mid_frac))  # 0.21872 m/K
 
 # Each coupling step:
 T_bot_cam = accessor_output.get_state_var(prediction_out, "T")[0, -1, 0].cpu().numpy()
-z_bot_cam = Z_BOT_SCALE * T_bot_cam   # (192, 288) field, values ~50–67 m
+z_bot_cam = Z_BOT_SCALE * T_bot_cam  # (192, 288) field, values ~50–67 m
 ```
 
 ---
@@ -1132,12 +1132,12 @@ instead of the correct `FSNS`. This is a **~6% underestimate** for open ocean an
 We have CICE ice fraction (`ifrac`) from the **same coupling step** (already in `sst_in.nc`). Use it to estimate the effective surface albedo and invert:
 
 ```python
-_alpha_ocean = 0.06     # open-water SW albedo (consistent with CICE5 default)
-_alpha_ice   = 0.60     # effective sea-ice SW albedo (includes melt ponds)
-_alpha_sfc   = (1.0 - ifrac_flat) * _alpha_ocean + ifrac_flat * _alpha_ice
-_one_minus_a = np.maximum(1.0 - _alpha_sfc, 0.10)   # floor prevents explosion
-fsds = np.where(fsns > 0.0, fsns / _one_minus_a, 0.0)   # zero at night
-fsds = np.minimum(fsds, 1500.0)                           # physical cap
+_alpha_ocean = 0.06  # open-water SW albedo (consistent with CICE5 default)
+_alpha_ice = 0.60  # effective sea-ice SW albedo (includes melt ponds)
+_alpha_sfc = (1.0 - ifrac_flat) * _alpha_ocean + ifrac_flat * _alpha_ice
+_one_minus_a = np.maximum(1.0 - _alpha_sfc, 0.10)  # floor prevents explosion
+fsds = np.where(fsns > 0.0, fsns / _one_minus_a, 0.0)  # zero at night
+fsds = np.minimum(fsds, 1500.0)  # physical cap
 ```
 
 The field written to `cam_out.nc` is renamed **`fsds`** (downwelling SW); Fortran reads it and splits it into the four `Faxa_sw*` bands using CORE2 fractions (VDR=0.28, NDR=0.31, VDF=0.24, NDF=0.17). The coupler then correctly applies ocean/ice albedo to derive absorbed SW.
@@ -1181,9 +1181,10 @@ FSNS  mean= xxx.x W/m²  FSDS  mean= xxx.x W/m²  FLNSD mean= xxx.x W/m²  |U_bo
 **2. `camulator_sst_in.nc` — SST reaching CAMulator**
 ```python
 import xarray as xr
-ds = xr.open_dataset('.../run/camulator_sst_in.nc')
-ds['sst'].plot()   # should show spatially varying ocean SST, land=0
-ds['ifrac'].plot() # should show sea ice fraction in polar regions
+
+ds = xr.open_dataset(".../run/camulator_sst_in.nc")
+ds["sst"].plot()  # should show spatially varying ocean SST, land=0
+ds["ifrac"].plot()  # should show sea ice fraction in polar regions
 ```
 - Ocean points should be 271–305 K
 - Land points should be 0 (masked out in server before normalization)
@@ -1192,7 +1193,7 @@ ds['ifrac'].plot() # should show sea ice fraction in polar regions
 
 **3. `camulator_cam_out.nc` — CAMulator forcing reaching CESM**
 ```python
-ds = xr.open_dataset('.../run/camulator_cam_out.nc')
+ds = xr.open_dataset(".../run/camulator_cam_out.nc")
 # Check all 10 fields are non-trivial:
 # u10, v10, tbot, zbot, tref, qbot, pbot, fsds, flnsd, prect
 ```
@@ -1217,15 +1218,16 @@ ncdump -v TEMP /glade/derecho/scratch/.../run/g.e21.CAMULATOR_GIAF_v02.pop.h.nda
 The CORE2 forcing files live at `/glade/campaign/cesm/cesmdata/inputdata/ocn/iaf/`. Load a NCEP wind file and compare against `camulator_cam_out.nc` for the same calendar date:
 ```python
 import xarray as xr
-core2 = xr.open_dataset('.../ncep.u_10.T62.1948.nc')  # CORE2 u-wind
-cam   = xr.open_dataset('.../camulator_cam_out.nc')    # CAMulator u-wind
+
+core2 = xr.open_dataset(".../ncep.u_10.T62.1948.nc")  # CORE2 u-wind
+cam = xr.open_dataset(".../camulator_cam_out.nc")  # CAMulator u-wind
 # Spatial patterns should be broadly similar; amplitudes within factor ~2
 ```
 
 **6. CICE ice extent responds to forcing**
 ```python
-ds_ice = xr.open_dataset('.../g.e21.CAMULATOR_GIAF_v02.cice.h.*.nc')
-ds_ice['aice'].sum(['ni','nj']).plot()   # total ice area over time
+ds_ice = xr.open_dataset(".../g.e21.CAMULATOR_GIAF_v02.cice.h.*.nc")
+ds_ice["aice"].sum(["ni", "nj"]).plot()  # total ice area over time
 ```
 - Should show seasonal cycle if run is long enough
 - If ice area is static → CICE not receiving valid forcing

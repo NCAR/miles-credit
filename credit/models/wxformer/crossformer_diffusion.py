@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from credit.diffusion import ModifiedGaussianDiffusion
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
 from credit.models.crossformer import (
     Attention,

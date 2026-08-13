@@ -3,10 +3,9 @@ import copy
 import torch
 from datetime import datetime, timedelta
 from credit.data import concat_and_reshape, reshape_only
-from credit.datasets.load_dataset_and_dataloader import BatchForecastLenDataLoader
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.datasets.gen_1.load_dataset_and_dataloader import BatchForecastLenDataLoader
+from credit.postblock.gen1 import PostBlock, GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.ensemble.utils import hemispheric_rescale as hemi_rescale
-from credit.postblock import PostBlock
 from typing import Callable, Optional
 from collections import OrderedDict
 import numpy as np

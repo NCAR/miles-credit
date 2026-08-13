@@ -169,6 +169,9 @@ cython_debug/
 .idea/
 climate/Look_at_Tens.ipynb
 
+# VS Code
+.vscode/
+
 # local dev / HPC-specific test scripts
 test_energy_fixer_updown.py
 regional_smoke.o*

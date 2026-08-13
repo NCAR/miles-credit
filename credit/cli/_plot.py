@@ -6,13 +6,15 @@ import sys
 
 import yaml
 
+from credit.datasets.gen_2.channel_utils import resolve_num_levels
+
 logger = logging.getLogger(__name__)
 
 
 def _build_channel_map(conf):
     """Return a dict mapping variable name -> list of channel indices in the output tensor."""
     src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -37,14 +39,23 @@ def _build_denorm_stats(conf):
     import xarray as xr
 
     src = conf["data"]["source"]["ERA5"]
-    levels = src["levels"]
+    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
     level_coord = src["level_coord"]
-    n_levels = len(levels)
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
 
-    norm_args = conf.get("preblocks", {}).get("norm", {}).get("args", {})
+    # Support both v1 (preblocks.norm.args) and v2 (preblocks.per_step.norm.args) schemas
+    preblocks_cfg = conf.get("preblocks", {})
+    norm_args = (
+        preblocks_cfg.get("per_step", {}).get("norm", {}).get("args") or preblocks_cfg.get("norm", {}).get("args") or {}
+    )
+    if not norm_args.get("mean_path") or not norm_args.get("std_path"):
+        raise KeyError(
+            "preblocks norm mean_path/std_path not found in config. "
+            "Set preblocks.per_step.norm.args.mean_path and std_path, or omit --denorm."
+        )
     mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
     std_ds = xr.open_dataset(norm_args["std_path"]).load()
 
@@ -53,8 +64,11 @@ def _build_denorm_stats(conf):
             n = n_levels if is_3d else 1
             return np.zeros(n, dtype=np.float32), np.ones(n, dtype=np.float32)
         if is_3d:
-            m = mean_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
-            s = std_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
+            # Explicit level subset -> select it; else take every level in file order.
+            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
+            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
+            m = m_da.values.astype(np.float32)
+            s = s_da.values.astype(np.float32)
         else:
             m = np.array([float(mean_ds[varname].values)], dtype=np.float32)
             s = np.array([float(std_ds[varname].values)], dtype=np.float32)
@@ -128,10 +142,19 @@ def _plot(args) -> None:
     import pandas as pd
     from torch.utils.data import default_collate
 
-    from credit.datasets.multi_source import MultiSourceDataset
+    from credit.datasets.gen_2.multi_source import MultiSourceDataset
     from credit.preblock import apply_preblocks, build_preblocks
+    from credit.registry import load_custom_objects
 
-    data_conf = conf.get("data_valid", conf["data"])
+    # Build the effective validation data config: start from training data, then overlay
+    # validation_data overrides (date range, etc.) if present.  This mirrors how the
+    # trainer constructs its validation dataloader.
+    import copy
+
+    data_conf = copy.deepcopy(conf["data"])
+    val_override = conf.get("validation_data") or conf.get("data_valid") or {}
+    data_conf.update(val_override)
+    load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
     dataset = MultiSourceDataset(data_conf, return_target=True)
 
     if args.sample_date is not None:
@@ -149,10 +172,16 @@ def _plot(args) -> None:
 
     sample = dataset[(ts, 0)]
     batch = default_collate([sample])
-    preblocks = build_preblocks(conf.get("preblocks", {}))
-    x, y, _ = apply_preblocks(preblocks, batch)
-    x = x.to(device)
-
+    preblocks = build_preblocks(conf)
+    _batch = apply_preblocks(preblocks, batch, device=device)
+    # apply_preblocks renames 'input' → 'x' and 'target' → 'y'
+    x = _batch.get("x", _batch.get("input"))
+    if x is None:
+        print("ERROR: preblocks did not produce an 'x' or 'input' key in batch.", file=sys.stderr)
+        sys.exit(1)
+    y = _batch.get("y", _batch.get("target"))
+    if "meta" in _batch:
+        meta = _batch["meta"]
     with torch.no_grad():
         y_pred = model(x)
 

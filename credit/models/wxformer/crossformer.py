@@ -1,5 +1,6 @@
 import torch
 import logging
+import re
 import torch.nn.functional as F
 
 from torch import nn, einsum
@@ -7,7 +8,7 @@ from einops import rearrange
 from einops.layers.torch import Rearrange
 
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from credit.boundary_padding import TensorPadding
 from credit.models.unet_attention_modules import load_unet_attention
 
@@ -66,6 +67,29 @@ class CubeEmbedding(nn.Module):
         return x
 
 
+def icnr_init_(weight, scale, init=nn.init.kaiming_normal_):
+    """ICNR init for a sub-pixel conv feeding nn.PixelShuffle (Aitken et al. 2017).
+
+    Initializes the conv weight so that, immediately after PixelShuffle(scale), the
+    output equals a nearest-neighbor upsample of a single initialized sub-kernel.
+    All scale**2 sub-pixel channels start identical, which removes the checkerboard
+    grid pattern present at initialization with default init.
+
+    Args:
+        weight: conv weight of shape (out_ch * scale**2, in_ch, kh, kw).
+        scale: PixelShuffle upscale factor.
+        init: in-place initializer applied to the sub-kernel.
+    """
+    out_ch = weight.shape[0] // (scale**2)
+    sub = torch.zeros(out_ch, *weight.shape[1:], device=weight.device, dtype=weight.dtype)
+    init(sub)
+    # PixelShuffle consumes channels in contiguous (r**2) blocks per output channel,
+    # so each sub-kernel must be repeated contiguously along the channel dim.
+    sub = sub.repeat_interleave(scale**2, dim=0)
+    with torch.no_grad():
+        weight.copy_(sub)
+
+
 class UpBlock(nn.Module):
     def __init__(
         self,
@@ -76,8 +100,11 @@ class UpBlock(nn.Module):
         attention_type=None,
         reduction=32,
         spatial_kernel=7,
+        fsdp2_shard=True,
     ):
         super().__init__()
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
 
         # Always use ConvTranspose2d for upsampling
         self.conv = nn.ConvTranspose2d(in_chans, out_chans, kernel_size=2, stride=2)
@@ -108,10 +135,14 @@ class UpBlock(nn.Module):
 
 
 class UpBlockPS(nn.Module):
-    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2):
+    def __init__(self, in_ch, out_ch, num_groups, scale=2, num_residuals=2, fsdp2_shard=True):
         super().__init__()
-        # sub-pixel conv at low res
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
+        # sub-pixel conv at low res (ICNR init removes checkerboard at initialization)
         self.conv = nn.Conv2d(in_ch, out_ch * scale**2, 3, stride=1, padding=1)
+        icnr_init_(self.conv.weight, scale)
+        nn.init.zeros_(self.conv.bias)
         self.ps = nn.PixelShuffle(scale)
         # sharpening branch (identity init)
         self.sharp = nn.Conv2d(out_ch, out_ch, 3, padding=1)
@@ -134,6 +165,37 @@ class UpBlockPS(nn.Module):
 # cross embed layer
 
 
+def crossembed_pad_total(kernel: int, stride: int) -> int:
+    """Total zero-padding a CrossEmbedLayer conv branch applies per spatial dim."""
+    return kernel - stride
+
+
+def crossembed_out_size(size: int, kernel: int, stride: int) -> int:
+    """Spatial output size of one CrossEmbedLayer conv branch.
+
+    Standard conv arithmetic with the layer's asymmetric zero-padding; with
+    pad_total = kernel - stride this is kernel-independent (floor(size/stride)),
+    which is why the cat() across kernel sizes works. Shared with the
+    `credit begin` wizard's grid-spec search so the two cannot drift apart.
+    """
+    return (size + crossembed_pad_total(kernel, stride) - kernel) // stride + 1
+
+
+class CrossEmbedConvBranch(nn.Sequential):
+    """nn.Sequential(ZeroPad2d, Conv2d) for one CrossEmbedLayer kernel branch.
+
+    A distinctly-named nn.Sequential subclass -- behaves identically to a
+    plain nn.Sequential (same forward, same auto-indexed "0"/"1" children,
+    so state_dict keys are unaffected) -- purely so domain-parallel
+    conversion (credit/domain_parallel/convert.py) can recognize this exact
+    pattern via isinstance and replace it as a unit instead of matching only
+    the inner Conv2d. See DomainParallelCrossEmbedBranch for why that
+    distinction matters: the inner Conv2d alone doesn't carry enough
+    information to redo this branch's padding correctly under domain
+    parallelism.
+    """
+
+
 class CrossEmbedLayer(nn.Module):
     def __init__(self, dim_in, dim_out, kernel_sizes, stride=2):
         super().__init__()
@@ -146,19 +208,149 @@ class CrossEmbedLayer(nn.Module):
 
         self.convs = nn.ModuleList([])
         for kernel, dim_scale in zip(kernel_sizes, dim_scales):
+            # Symmetric padding = (kernel - stride) // 2 only gives a true "same"
+            # shape (out = ceil(in / stride)) when (kernel - stride) is even. For
+            # an even kernel at stride=1 that's odd, so // 2 rounds down and drops
+            # one cell (e.g. kernel=4, stride=1: padding=1, 480 in -> 479 out). All
+            # kernel branches lose the same cell, so the cat() still succeeds --
+            # silently, at the wrong size. Use explicit asymmetric zero-padding
+            # instead so every (kernel, stride) combination gets the exact "same"
+            # shape; this is a no-op vs. the old formula whenever (kernel - stride)
+            # is even (the previously-working case, e.g. every default stride=2 config).
+            pad_total = crossembed_pad_total(kernel, stride)
+            pad_left = pad_total // 2
+            pad_right = pad_total - pad_left
             self.convs.append(
-                nn.Conv2d(
-                    dim_in,
-                    dim_scale,
-                    kernel,
-                    stride=stride,
-                    padding=(kernel - stride) // 2,
+                CrossEmbedConvBranch(
+                    nn.ZeroPad2d((pad_left, pad_right, pad_left, pad_right)),
+                    nn.Conv2d(dim_in, dim_scale, kernel, stride=stride, padding=0),
                 )
             )
+
+        # Migrate pre-ZeroPad2d checkpoints as load_state_dict descends into this
+        # layer, so old weights load on every path that goes through it.
+        self.register_load_state_dict_pre_hook(_crossembed_load_state_dict_pre_hook)
 
     def forward(self, x):
         fmaps = tuple(map(lambda conv: conv(x), self.convs))
         return torch.cat(fmaps, dim=1)
+
+
+# --- legacy checkpoint compatibility ------------------------------------------------- #
+
+# Before the asymmetric-padding fix, CrossEmbedLayer.convs held bare Conv2d modules
+# and stored their parameters at ``convs.<i>.<suffix>``. Wrapping each conv in
+# nn.Sequential(ZeroPad2d, Conv2d) moved them to ``convs.<i>.1.<suffix>``. The
+# negative lookahead makes the rewrite idempotent: an already-migrated key has a
+# digit as its next component and is left alone. ``<suffix>`` is matched loosely so
+# the spectral-norm parametrization (weight_orig / weight_u / weight_v) migrates too.
+_LEGACY_CONVS_KEY = re.compile(r"^convs\.(\d+)\.(?!\d+\.)(.+)$")
+
+
+def _remap_crossembed_prefix(state_dict: dict, prefix: str) -> int:
+    """Rewrite one CrossEmbedLayer's legacy conv keys in place.
+
+    Args:
+        state_dict: state dict to mutate.
+        prefix: dotted prefix of the CrossEmbedLayer within it (``""`` at the root).
+
+    Returns:
+        int: number of keys renamed.
+    """
+    renamed = 0
+    for key in [k for k in state_dict if k.startswith(prefix)]:
+        match = _LEGACY_CONVS_KEY.match(key[len(prefix) :])
+        if match is None:
+            continue
+        new_key = f"{prefix}convs.{match.group(1)}.1.{match.group(2)}"
+        # Never clobber a key the checkpoint already carries in the new format.
+        if new_key not in state_dict:
+            state_dict[new_key] = state_dict.pop(key)
+            renamed += 1
+    return renamed
+
+
+def _crossembed_load_state_dict_pre_hook(module, state_dict, prefix, *args):
+    """load_state_dict pre-hook: migrate this layer's legacy conv keys."""
+    renamed = _remap_crossembed_prefix(state_dict, prefix)
+    if renamed:
+        logger.warning(
+            "Legacy CrossEmbedLayer checkpoint at '%s': remapped %d conv key(s) to the "
+            "ZeroPad2d-wrapped layout (convs.<i>.X -> convs.<i>.1.X).",
+            prefix.rstrip(".") or "<root>",
+            renamed,
+        )
+
+
+def _decoder_is_incompatible(model: nn.Module, state_dict: dict, prefix: str = "") -> bool:
+    """True if the checkpoint holds the removed ConvTranspose2d decoder but the model doesn't.
+
+    ``up_block4`` was an ``nn.ConvTranspose2d`` (parameters at ``up_block4.weight``)
+    when ``upsample_with_ps=False``; it is now always the PixelShuffle
+    ``nn.Sequential`` (``up_block4.0.weight``). Detected structurally rather than by
+    key alone because crossformer_diffusion still uses a real ConvTranspose2d there,
+    for which ``up_block4.weight`` is the correct, current key.
+    """
+    up_block4 = getattr(model, "up_block4", None)
+    if up_block4 is None or hasattr(up_block4, "weight"):
+        return False
+    return f"{prefix}up_block4.weight" in state_dict
+
+
+_DECODER_ERROR = (
+    "This checkpoint was trained with upsample_with_ps=False, whose ConvTranspose2d "
+    "decoder has been removed (it is checkerboard-artifact-prone at init). Its "
+    "up_block1-4 weights have no counterpart in the PixelShuffle decoder, so they "
+    "cannot be migrated -- loading it would silently leave the entire decoder at "
+    "random initialization. Retrain, or check out a commit before the decoder change "
+    "to run this checkpoint."
+)
+
+
+def _crossformer_decoder_guard_pre_hook(module, state_dict, prefix, *args):
+    """load_state_dict pre-hook: fail loudly on an unmigratable ConvTranspose2d decoder."""
+    if _decoder_is_incompatible(module, state_dict, prefix):
+        raise RuntimeError(_DECODER_ERROR)
+
+
+def migrate_legacy_state_dict(model: nn.Module, state_dict: dict) -> dict:
+    """Migrate a legacy checkpoint in place for ``model``, or raise if it can't be.
+
+    The same migrations the load_state_dict pre-hooks perform, applied up front.
+    Needed for the FSDP2 path: ``set_model_state_dict`` reconciles the checkpoint
+    against the model's current parameter names *before* calling load_state_dict, so
+    the hooks fire too late to help there.
+
+    Walks the model to find real ``CrossEmbedLayer`` instances rather than pattern-
+    matching key names, so sibling architectures that define their own unwrapped
+    ``convs`` (camulator, crossformer_downscaling) are untouched.
+
+    Args:
+        model: the instantiated model the checkpoint is destined for. Pass the
+            unwrapped module (``getattr(model, "module", model)``) so the names line
+            up with the checkpoint's.
+        state_dict: checkpoint state dict; mutated in place.
+
+    Returns:
+        dict: the same ``state_dict``, for convenience.
+
+    Raises:
+        RuntimeError: if the checkpoint holds the removed ConvTranspose2d decoder.
+    """
+    if _decoder_is_incompatible(model, state_dict):
+        raise RuntimeError(_DECODER_ERROR)
+
+    renamed = 0
+    for name, module in model.named_modules():
+        if isinstance(module, CrossEmbedLayer):
+            renamed += _remap_crossembed_prefix(state_dict, f"{name}." if name else "")
+    if renamed:
+        logger.warning(
+            "Legacy checkpoint: remapped %d CrossEmbedLayer conv key(s) to the "
+            "ZeroPad2d-wrapped layout (convs.<i>.X -> convs.<i>.1.X).",
+            renamed,
+        )
+    return state_dict
 
 
 # dynamic positional bias
@@ -202,8 +394,13 @@ class LayerNorm(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult=4, dropout=0.0):
+    def __init__(self, dim, mult=4, dropout=0.0, tp_col="layers.1", tp_row="layers.4"):
         super(FeedForward, self).__init__()
+        # Tensor-parallel opt-in: dotted paths to the column-parallel layer
+        # (Conv2d dim → dim*mult, output channels sharded) and the row-parallel
+        # layer (Conv2d dim*mult → dim, input channels sharded + all_reduce).
+        self._tp_col = tp_col
+        self._tp_row = tp_row
         self.layers = nn.Sequential(
             LayerNorm(dim),
             nn.Conv2d(dim, dim * mult, 1),
@@ -220,6 +417,9 @@ class Attention(nn.Module):
     """
     Attention module for the CrossFormer model.
 
+    Tensor parallelism opt-in: ``to_qkv`` is column-parallel (output sharded),
+    ``to_out`` is row-parallel (input sharded, all_reduce).
+
     This module performs either short-range or long-range attention on the input tensor.
     It uses a dynamic positional bias to incorporate relative positional information.
 
@@ -231,8 +431,20 @@ class Attention(nn.Module):
         dropout (float, optional): Dropout rate. Defaults to 0.0.
     """
 
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0):
+    @staticmethod
+    def _tp_constraints(instance, tp_size):
+        if instance.heads % tp_size != 0:
+            raise ValueError(
+                f"Attention TP: heads={instance.heads} not divisible by tp_size={tp_size}. "
+                f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
+            )
+
+    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, tp_col="to_qkv", tp_row="to_out"):
         super().__init__()
+        # Tensor-parallel opt-in: to_qkv is column-parallel (output channels
+        # sharded), to_out is row-parallel (input sharded + all_reduce).
+        self._tp_col = tp_col
+        self._tp_row = tp_row
         assert attn_type in {
             "short",
             "long",
@@ -364,8 +576,11 @@ class Transformer(nn.Module):
         dim_head=32,
         attn_dropout=0.0,
         ff_dropout=0.0,
+        fsdp2_shard=True,
     ):
         super().__init__()
+        # FSDP2 per-block sharding / activation-checkpointing opt-in
+        self._fsdp2_shard = fsdp2_shard
         self.layers = nn.ModuleList([])
 
         for _ in range(depth):
@@ -431,15 +646,15 @@ class CrossFormer(BaseModel):
         use_spectral_norm: bool = True,
         attention_type: str = None,
         interp: bool = True,
-        upsample_with_ps: bool = False,
+        upsample_with_ps: bool = True,
         padding_conf: dict = None,
         post_conf: dict = None,
         **kwargs,
     ):
         """
         CrossFormer is the base architecture for the WXFormer model. It uses convolutions and long and short distance
-        attention layers in the encoder layer and then uses strided transpose convolution blocks for the decoder
-        layer.
+        attention layers in the encoder layer and then uses sub-pixel conv + PixelShuffle blocks (ICNR-initialized,
+        zero-init bias) for the decoder layer.
 
         Args:
             image_height (int): number of grid cells in the south-north direction.
@@ -463,6 +678,10 @@ class CrossFormer(BaseModel):
             ff_dropout (float): dropout rate for feedforward layers.
             use_spectral_norm (bool): whether to use spectral normalization
             interp (bool): whether to use interpolation
+            upsample_with_ps (bool): unused -- kept only so existing configs that set it
+                don't break. The decoder is always the PixelShuffle (ICNR-initialized,
+                zero-init bias) path; the checkerboard-prone ConvTranspose2d alternative
+                this used to select has been removed.
             padding_conf (dict): padding configuration
             post_conf (dict): configuration for postblock processing
             **kwargs:
@@ -575,39 +794,44 @@ class CrossFormer(BaseModel):
         )
 
         # =================================================================================== #
-        if self.upsample_with_ps:
-            self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
-            self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-            self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
-            scale = 2
-            self.up_block4 = nn.Sequential(
-                nn.Conv2d(
-                    2 * (last_dim // 8),  # in_channels
-                    self.output_channels * (scale**2),  # conv_out = target_channels * 4
-                    kernel_size=3,
-                    stride=1,
-                    padding=1,
-                ),
-                nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
-                nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
+        # Decoder: sub-pixel conv + PixelShuffle, ICNR-initialized, zero-init bias. The
+        # ConvTranspose2d/UpBlock decoder this replaced is a well-documented checkerboard-
+        # artifact generator (Odena et al. 2016, https://distill.pub/2016/deconv-checkerboard/;
+        # Aitken et al. 2017 ICNR fix, https://arxiv.org/abs/1707.02937;
+        # https://github.com/Lasagne/Lasagne/issues/862) -- ICNR init on the weights alone
+        # isn't enough to remove the pattern, since PixelShuffle regroups channels into
+        # space and a nonzero/random bias would differ across those regrouped positions and
+        # reintroduce it; the bias must be zero too. That's no longer optional here.
+        # upsample_with_ps is kept only so existing configs that pass it (all set it to
+        # True already) don't break; the value is otherwise unused.
+        if upsample_with_ps is False:
+            logger.warning(
+                "CrossFormer: upsample_with_ps=False was requested, but the ConvTranspose2d "
+                "decoder it selected has been removed (checkerboard-artifact-prone at init). "
+                "Using the PixelShuffle decoder regardless."
             )
-        else:
-            self.up_block1 = UpBlock(1 * last_dim, last_dim // 2, dim[0], attention_type=attention_type)
-            self.up_block2 = UpBlock(
-                2 * (last_dim // 2),
-                last_dim // 4,
-                dim[0],
-                attention_type=attention_type,
-            )
-            self.up_block3 = UpBlock(
-                2 * (last_dim // 4),
-                last_dim // 8,
-                dim[0],
-                attention_type=attention_type,
-            )
-            self.up_block4 = nn.ConvTranspose2d(
-                2 * (last_dim // 8), self.output_channels, kernel_size=4, stride=2, padding=1
-            )
+        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        scale = 2
+        ps_conv = nn.Conv2d(
+            2 * (last_dim // 8),  # in_channels
+            self.output_channels * (scale**2),  # conv_out = target_channels * 4
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+        icnr_init_(ps_conv.weight, scale)  # checkerboard-free sub-pixel init
+        nn.init.zeros_(ps_conv.bias)
+        self.up_block4 = nn.Sequential(
+            ps_conv,
+            nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
+            nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
+        )
+
+        # A pre-removal upsample_with_ps=False checkpoint cannot be migrated; say so
+        # at load time instead of silently random-initializing the whole decoder.
+        self.register_load_state_dict_pre_hook(_crossformer_decoder_guard_pre_hook)
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")

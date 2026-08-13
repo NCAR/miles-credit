@@ -1,1 +1,254 @@
-../../applications/train_gen2.py
+"""
+train_gen2.py
+-------------
+Gen2 training entry point for the nested ERA5 data schema.
+
+This script bypasses ``credit_main_parser`` entirely. It reads the config
+directly and assumes the new ``conf["data"]["source"]`` structure produced by
+``MultiSourceDataset`` / ``BaseDataset``.
+
+For the legacy flat schema (v1), use ``applications/train.py``.
+"""
+
+import logging
+import os
+import shutil
+import sys
+import warnings
+from argparse import ArgumentParser
+
+import torch
+import yaml
+
+from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
+from credit.losses import effective_loss_name, is_crps_loss
+from credit.models import load_model
+from credit.seed import seed_everything
+from credit.trainers import load_trainer
+from credit.trainers.utils import (
+    inject_flat_var_keys,
+    load_dataloader,
+    load_dataset,
+    load_model_states_and_optimizer,
+)
+
+warnings.filterwarnings("ignore")
+
+logger = logging.getLogger("train_gen2")
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+# Suppress the resource_tracker subprocess's "leaked semaphore" warning.
+# warnings.filterwarnings has no effect on subprocesses; PYTHONWARNINGS is inherited
+# at subprocess startup so the filter applies before the tracker's final audit runs.
+# The warning is cosmetic: the tracker still unlinks the semaphores — the unregister
+# acknowledgment from workers just arrives after the audit due to a timing race.
+_pw = os.environ.get("PYTHONWARNINGS", "")
+_addon = "ignore::UserWarning:multiprocessing.resource_tracker"
+if _addon not in _pw:
+    os.environ["PYTHONWARNINGS"] = (_pw + "," + _addon).lstrip(",")
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
+
+def main_cli():
+    description = (
+        "Train a Gen2 AI weather model using the nested ERA5 data schema "
+        "(conf['data']['source']). For the legacy flat schema, use train.py."
+    )
+    parser = ArgumentParser(description=description)
+    parser.add_argument(
+        "-c",
+        "--config",
+        dest="model_config",
+        type=str,
+        required=True,
+        help="Path to the model config YAML (Gen2 nested schema).",
+    )
+    parser.add_argument(
+        "--backend", type=str, default="nccl", choices=["nccl", "gloo", "mpi"], help="Backend for distributed training."
+    )
+    parser.add_argument(
+        "--log-all-ranks",
+        action="store_true",
+        default=False,
+        help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
+    )
+    args = parser.parse_args()
+    config = args.model_config
+    backend = args.backend
+
+    try:
+        with open(config) as cf:
+            conf = yaml.load(cf, Loader=yaml.FullLoader)
+    except OSError as exc:
+        print(f"ERROR: failed to load config file '{config}': {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    assert "source" in conf["data"], (
+        "train.py requires the Gen2 nested data schema (conf['data']['source']). "
+        "For the legacy flat schema, use applications/train.py."
+    )
+    # Loss sections are either legacy flat keys (training_loss: ...) or the
+    # new-style {type, args} structure (mirrors preblocks/postblocks).
+    # effective_loss_name resolves the univariate training_loss inside a
+    # BaseLoss section, so ring-crps under `type: base` gets the same
+    # shared-batch ensemble setup as flat ring-crps use.
+    loss_name = effective_loss_name(conf["loss"])
+    ensemble_size = int(conf["trainer"].get("ensemble_size", 1))
+    if is_crps_loss(loss_name) and ensemble_size <= 1:
+        raise ValueError(
+            f"{loss_name} is an ensemble CRPS loss and requires trainer.ensemble_size > 1; "
+            f"got trainer.ensemble_size={ensemble_size}."
+        )
+
+    # V2 parallelism configs read rank info from the launcher (torchrun or MPI).
+    # Without a launcher (plain `python`/`credit train` on one GPU), run
+    # single-process instead of letting get_rank_info sys.exit hunting for env vars.
+    # RANK: torchrun; OMPI: Open MPI; PMI: cray-mpich/MPICH; PALS: Cray PALS
+    # without PMI passthrough; SLURM_PROCID: srun.
+    _launcher_env = ("LOCAL_RANK", "RANK", "OMPI_COMM_WORLD_RANK", "PMI_RANK", "PALS_RANKID", "SLURM_PROCID")
+    if any(v in os.environ for v in _launcher_env):
+        local_rank, world_rank, world_size = get_rank_info("ddp")
+    else:
+        local_rank, world_rank, world_size = 0, 0, 1
+    rank = world_rank  # conventional DDP shorthand; local_rank is only needed for device assignment below
+
+    # ── Logging ──────────────────────────────────────────────────────────────
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    if not root.handlers:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter("%(levelname)s:%(name)s:%(message)s"))
+        root.addHandler(ch)
+    gettrace = getattr(sys, "gettrace", None)
+    level = (
+        (logging.DEBUG if gettrace and gettrace() else logging.INFO)
+        if (rank == 0 or args.log_all_ranks)
+        else logging.WARNING
+    )
+    for h in root.handlers:
+        h.setLevel(level)
+
+    save_loc = os.path.expandvars(conf["save_loc"])
+    os.makedirs(save_loc, exist_ok=True)
+    if not os.path.exists(os.path.join(save_loc, "model.yml")):
+        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+
+    _trainer_conf = conf["trainer"]
+    assert "parallelism" in _trainer_conf, (
+        "Gen2 training configs must define trainer.parallelism with data, tensor, "
+        "and domain fields. Configs from before the parallelism block (legacy "
+        "trainer.mode) can be migrated with `credit convert`."
+    )
+
+    conf["save_loc"] = os.path.expandvars(conf["save_loc"])
+
+    device = select_device(local_rank)
+
+    if world_size > 1:
+        setup(rank, world_size, "ddp", backend, device_id=device if torch.cuda.is_available() else None)
+
+    # Dataset sharding uses the DATA-PARALLEL coordinate, not the global rank.
+    # Ranks that differ only in tensor/domain coordinate must see the same batch
+    # (TP all_reduce sums partial outputs; domain halo exchange passes boundary
+    # rows) — see credit.parallel.mesh.data_parallel_coords for the full contract.
+    from credit.parallel.mesh import data_parallel_coords
+
+    data_rank, data_world_size = data_parallel_coords(conf)
+    if loss_name == "ring-crps" and ensemble_size != data_world_size:
+        raise ValueError(
+            "ring-crps uses one ensemble member per data-parallel rank, so "
+            f"trainer.ensemble_size must match the data-parallel world size; "
+            f"got trainer.ensemble_size={ensemble_size}, data-parallel world size={data_world_size}."
+        )
+
+    # CRPS ensemble training requires every dp rank to see the SAME training
+    # batches. Member diversity comes from ensemble sampling in the trainer and
+    # per-dp-rank RNG seeds. Validation keeps dp sharding.
+    ensemble_mode = is_crps_loss(loss_name) and ensemble_size > 1
+    train_rank, train_world_size = (0, 1) if ensemble_mode else (data_rank, data_world_size)
+    if ensemble_mode and data_world_size > 1:
+        logger.info(
+            f"CRPS ensemble training: {data_world_size} dp ranks receive shared batches; dp data sharding disabled"
+        )
+
+    train_dataset = load_dataset(conf, is_train=True)
+    train_loader = load_dataloader(conf, train_dataset, rank=train_rank, world_size=train_world_size, is_train=True)
+
+    skip_validation = conf["trainer"].get("skip_validation", False)
+    if skip_validation:
+        valid_loader = None
+    else:
+        valid_dataset = load_dataset(conf, is_train=False)
+        valid_loader = load_dataloader(conf, valid_dataset, rank=data_rank, world_size=data_world_size, is_train=False)
+
+    # Two-stage seeding. Stage 1: seed identically on ALL ranks before model
+    # construction so every rank initializes the SAME weights. FSDP2's
+    # fully_shard does not broadcast params from rank 0 (unlike DDP), so each
+    # rank keeps its own dim-0 shard of whatever it built locally — per-rank
+    # init seeds would make the global model a mixture of different inits,
+    # varying with the mesh layout (e.g. tp=1 vs tp=2 train different models).
+    # Ring-CRPS also requires identical weights on all dp replicas.
+    seed = conf.get("seed", 42)
+    seed_everything(seed)
+    inject_flat_var_keys(conf)
+    if "post_conf" in conf["model"]:
+        warnings.warn(
+            "Gen 2 training does not support Gen 1 postblocks (conf['model']['post_conf']). "
+            "These will be ignored. Gen 2 postblocks (conf['postblocks']) are still applied normally."
+        )
+        conf["model"].pop("post_conf", None)
+    m = load_model(conf)
+    m.to(device)
+
+    if conf["trainer"].get("compile", False):
+        m = torch.compile(m)
+
+    model = distributed_model_wrapper_gen2(conf, m, device)
+
+    # Stage 2: now that the model is built and wrapped, re-seed by the
+    # data-parallel rank so training-time RNG (dropout masks, stochastic
+    # preblocks, ensemble perturbations) differs across dp replicas for
+    # ensemble diversity. TP/domain peers share a data_rank, so they still
+    # draw identical masks as required by the parallelism contract.
+    seed_everything(seed + data_rank)
+
+    conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
+
+    from credit.losses import load_loss
+
+    train_criterion = load_loss(conf)
+    valid_criterion = load_loss(conf, validation=True)
+
+    # BaseLoss with var_weighting="learnable" owns trainable per-variable
+    # log-variance parameters — they must join the optimizer explicitly.
+    # (Checkpointing of these parameters is not wired; they re-init on resume.)
+    from credit.losses import BaseLoss
+
+    if isinstance(train_criterion, BaseLoss) and train_criterion.log_variance is not None:
+        train_criterion.to(device)
+        optimizer.add_param_group({"params": list(train_criterion.parameters())})
+        logger.info("BaseLoss learnable variance weights added to the optimizer.")
+    from credit.metrics import load_metric
+
+    metrics = load_metric(conf)
+
+    trainer_cls = load_trainer(conf)
+    trainer = trainer_cls(model, rank, conf)
+
+    trainer.fit(
+        conf,
+        train_loader=train_loader,
+        valid_loader=valid_loader,
+        optimizer=optimizer,
+        train_criterion=train_criterion,
+        valid_criterion=valid_criterion,
+        scaler=scaler,
+        scheduler=scheduler,
+        metrics=metrics,
+    )
+
+
+if __name__ == "__main__":
+    main_cli()

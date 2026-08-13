@@ -61,7 +61,7 @@ from .Quick_Climate import (
 )
 
 # Output utilities
-from .output import (
+from credit.output import (
     load_metadata,
     split_and_reshape,
     make_xarray,

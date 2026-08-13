@@ -3,7 +3,6 @@ import logging
 from collections import defaultdict
 
 import numpy as np
-import torch
 import torch.distributed as dist
 import torch.fft
 import tqdm
@@ -32,7 +31,8 @@ class TrainerWRFMulti(BaseTrainer):
         rank (int): The rank of the process in distributed training.
         module (bool): If True, use model with module parallelism (default: False).
 
-    Methods:
+    Methods::
+
         train_one_epoch(epoch, conf, trainloader, optimizer, criterion, scaler,
                         scheduler, metrics):
             Perform training for one epoch and return training metrics.

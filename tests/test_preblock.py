@@ -1,40 +1,50 @@
 """test_preblock.py — unit tests for credit.preblock modules."""
 
+import copy
+
 import numpy as np
 import pytest
 import torch
+import torch.nn as nn
 import xarray as xr
 
-try:
-    from bridgescaler.distributed_tensor import DStandardScalerTensor
-    from bridgescaler import save_scaler_dict, scale_var_dict
-    from credit.preblock.scaler import BridgeScalerTransformer
-
-    _BRIDGESCALER_AVAILABLE = True
-except (ImportError, Exception):
-    _BRIDGESCALER_AVAILABLE = False
-
+from bridgescaler.distributed_tensor import DStandardScalerTensor
+from bridgescaler import save_scaler_dict, scale_var_dict
+from credit.preblock import apply_preblocks, build_preblocks
+from credit.preblock.concat import ConcatToTensor
+from credit.preblock.log import LogTransform
 from credit.preblock.regrid import Regridder
+from credit.preblock.rename import RenameVariables
+from credit.preblock.scaler import BridgeScalerTransform
+from credit.preblock.sqrt import SqrtTransform
+from credit.preblock.device import ToDevice
+from credit.preblock._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+)
+from credit.postblock import build_postblocks
+from credit.datasets.gen_2.channel_utils import ChannelSchema
 
 
 def create_synthetic_data() -> dict:
     """
     Creates synthetic data as a nested dictionary of torch tensors.
 
-    Structure: data[source][split][var_name]
-    - source: "ERA5"
-    - split: "input" | "target"
-    - var_name: "era5/pronostic/3d/T" | "era5/pronostic/3d/U" | "era5/pronostic/3d/V"
+    Structure: data[data_type][source][var_name]
+    - data_type: "input" | "target"
+    - source: "Test_ERA5"
+    - var_name: "Test_ERA5/prognostic/3d/T" | ...
     - tensor shape: (100, 16, 1, 8, 8)
     """
     shape = (100, 16, 1, 8, 8)
     var_names = [
-        "era5/pronostic/3d/T",
-        "era5/pronostic/3d/U",
-        "era5/pronostic/3d/V",
+        "Test_ERA5/prognostic/3d/T",
+        "Test_ERA5/prognostic/3d/U",
+        "Test_ERA5/prognostic/3d/V",
     ]
 
-    return {"era5": {split: {var: torch.randn(*shape) for var in var_names} for split in ("input", "target")}}
+    return {split: {"Test_ERA5": {var: torch.randn(*shape) for var in var_names}} for split in ("input", "target")}
 
 
 # ---------------------------------------------------------------------------
@@ -84,6 +94,8 @@ def weight_file(tmp_path):
             "row": xr.DataArray(rows.astype(np.int32), dims=("n_s",)),
             "col": xr.DataArray(cols.astype(np.int32), dims=("n_s",)),
             "S": xr.DataArray(vals.astype(np.float64), dims=("n_s",)),
+            "yc_b": xr.DataArray(np.repeat(np.arange(n_dst_lat), n_dst_lon).astype(np.float64), dims=("n_b",)),
+            "xc_b": xr.DataArray(np.tile(np.arange(n_dst_lon), n_dst_lat).astype(np.float64), dims=("n_b",)),
         }
     )
     path = tmp_path / "weights.nc"
@@ -99,59 +111,135 @@ def weight_file(tmp_path):
 def test_regrid_output_shape(weight_file):
     """Downsampling regrid produces the destination grid shape for all splits."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables)
     batch = create_synthetic_data()
     result = regrid(batch)
     for split in ("input", "target"):
-        assert result["era5"][split]["era5/pronostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+        assert result[split]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+
+
+def test_regrid_unstructured_input(weight_file):
+    """A source tensor with the spatial dims already flattened (e.g. an unstructured/
+    curvilinear source grid, or any pre-flattened (..., n_a) input) must regrid to the
+    exact same result as the structured (lat, lon) input -- _regrid detects spatial_dims
+    (1 vs 2) from the tensor shape rather than always assuming 2D."""
+    path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
+    variables = ["Test_ERA5/prognostic/3d/T"]
+    batch_2d = create_synthetic_data()
+    batch_flat = copy.deepcopy(batch_2d)
+    batch_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"] = batch_flat["input"]["Test_ERA5"][
+        "Test_ERA5/prognostic/3d/T"
+    ].reshape(100, 16, 1, n_src_lat * n_src_lon)
+
+    result_2d = Regridder(path, variables=variables)(batch_2d)
+    result_flat = Regridder(path, variables=variables)(batch_flat)
+
+    t_2d = result_2d["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    t_flat = result_flat["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"]
+    assert t_flat.shape == (100, 16, 1, n_dst_lat, n_dst_lon)
+    assert torch.equal(t_flat, t_2d)
 
 
 def test_regrid_uniform_input(weight_file):
     """Block-average regrid: uniform input maps to uniform output of the same value."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables)
-    batch = {"era5": {"input": {"era5/pronostic/3d/T": torch.ones(1, 1, 1, n_src_lat, n_src_lon)}}}
+    batch = {"input": {"Test_ERA5": {"Test_ERA5/prognostic/3d/T": torch.ones(1, 1, 1, n_src_lat, n_src_lon)}}}
     result = regrid(batch)
     assert torch.allclose(
-        result["era5"]["input"]["era5/pronostic/3d/T"],
+        result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
         torch.ones(1, 1, 1, n_dst_lat, n_dst_lon),
         atol=1e-5,
     )
 
 
 def test_regrid_reshape_false(weight_file):
-    """reshape_to_xy=False returns a flat (prod(lead_dims), n_b) tensor."""
+    """reshape_to_xy=False skips the (ny, nx) reshape but still preserves the
+    leading (batch, level, time) dims, returning (*lead_dims, n_b) — batch must
+    stay a distinct leading dim for downstream consumers (e.g. ConcatToTensor)."""
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables, reshape_to_xy=False)
     batch = create_synthetic_data()
     result = regrid(batch)
-    assert result["era5"]["input"]["era5/pronostic/3d/T"].shape == (100 * 16 * 1, n_dst_lat * n_dst_lon)
+    assert result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"].shape == (100, 16, 1, n_dst_lat * n_dst_lon)
 
 
 def test_regrid_flip_axis(weight_file):
     """flip_axis is applied to the input before regridding."""
-    import copy
-
     path, n_src_lat, n_src_lon, n_dst_lat, n_dst_lon = weight_file
-    variables = ["era5/pronostic/3d/T"]
+    variables = ["Test_ERA5/prognostic/3d/T"]
     regrid = Regridder(path, variables=variables)
     regrid_flip = Regridder(path, variables=variables, flip_axis=[-1])
     batch = create_synthetic_data()
     result = regrid(copy.deepcopy(batch))
     result_flip = regrid_flip(copy.deepcopy(batch))
     assert not torch.allclose(
-        result["era5"]["input"]["era5/pronostic/3d/T"],
-        result_flip["era5"]["input"]["era5/pronostic/3d/T"],
+        result["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
+        result_flip["input"]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
     )
 
 
-_skip_bridgescaler = pytest.mark.skipif(
-    not _BRIDGESCALER_AVAILABLE,
-    reason="bridgescaler not available in this environment",
-)
+def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
+    """Positive flip axes are rejected instead of flipping a leading dimension."""
+    path, n_src_lat, n_src_lon, _, _ = weight_file
+    variable = "Test_ERA5/prognostic/3d/T"
+    x = torch.arange(2 * 1 * 2 * n_src_lat * n_src_lon, dtype=torch.float32).reshape(2, 1, 2, n_src_lat, n_src_lon)
+    batch = {"input": {"Test_ERA5": {variable: x}}}
+    baseline = Regridder(path, variables=[variable])(batch)
+    caplog.set_level("WARNING")
+    result = Regridder(path, variables=[variable], flip_axis=[2])(batch)
+
+    torch.testing.assert_close(result["input"]["Test_ERA5"][variable], baseline["input"]["Test_ERA5"][variable])
+    assert "invalid flip_axis values [2]" in caplog.text
+
+
+def test_grid_schema_resolve_rejects_unstructured_native_grid():
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    with pytest.raises(ValueError, match="native grid_type='unstructured'"):
+        GridSchema.resolve(dataset)
+
+
+def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
+    from types import SimpleNamespace
+
+    from credit.datasets.gen_2.grid_utils import GridSchema
+
+    path, *_ = weight_file
+    regrid = Regridder(path, variables=["Test_ERA5/prognostic/3d/T"])
+    dataset = SimpleNamespace(
+        static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
+    )
+
+    schema = GridSchema.resolve(dataset, step_preblocks=nn.ModuleDict({"regrid": regrid}))
+
+    assert schema.origin == "regridded"
+    assert schema.grid_type == "rectilinear"
+    assert schema.lat.shape == (4,)
+    assert schema.lon.shape == (4,)
+
+
+def test_unstructured_source_grid_schema_is_skipped(tmp_path, caplog):
+    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+
+    caplog.set_level("INFO")
+    write_source_grid_schema_if_missing(
+        "Test_Local",
+        {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)},
+        str(tmp_path),
+    )
+
+    assert not (tmp_path / "Test_Local_grid_schema.nc").exists()
+    assert "unstructured" in caplog.text
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +255,7 @@ def scaler_file(tmp_path):
     (8×8) so the fixture stays fast.
     """
     x_dict = create_synthetic_data()
-    variables = x_dict["era5"]["input"].keys()
+    variables = x_dict["input"]["Test_ERA5"].keys()
     scaler = DStandardScalerTensor(channels_last=False)
     scaler_dict = scale_var_dict(x_dict, scaler, method="fit")
     path = str(tmp_path / "scaler.json")
@@ -179,40 +267,940 @@ def scaler_file(tmp_path):
 # Scaler tests
 # ---------------------------------------------------------------------------
 
-# VAR_NAMES = ["era5/pronostic/3d/T", "era5/pronostic/3d/U", "era5/pronostic/3d/V"]
 
-
-@_skip_bridgescaler
 def test_scaler_output_shape(scaler_file):
     """Transform preserves the input tensor shape for every variable."""
     path, variables, data = scaler_file
-    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
-    original_shapes = {v: data["era5"]["input"][v].shape for v in variables}
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
+    original_shapes = {v: data["input"]["Test_ERA5"][v].shape for v in variables}
     result = scaler(data)
     for v in variables:
-        assert result["era5"]["input"][v].shape == original_shapes[v]
+        assert result["input"]["Test_ERA5"][v].shape == original_shapes[v]
 
 
-@_skip_bridgescaler
 def test_scaler_transform_changes_values(scaler_file):
     """Transform produces different values than the raw input."""
     path, variables, data = scaler_file
-    scaler = BridgeScalerTransformer(scaler_path=path, variables=list(variables), method="transform")
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
     var = list(variables)[0]
-    original = data["era5"]["input"][var].clone()
+    original = data["input"]["Test_ERA5"][var].clone()
     result = scaler(data)
-    assert not torch.allclose(result["era5"]["input"][var].float(), original.float())
+    assert not torch.allclose(result["input"]["Test_ERA5"][var].float(), original.float())
 
 
-@_skip_bridgescaler
 def test_scaler_round_trip(scaler_file):
     """transform followed by inverse recovers the original tensor."""
     path, variables, data = scaler_file
     var_list = list(variables)
-    fwd = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="transform")
-    inv = BridgeScalerTransformer(scaler_path=path, variables=var_list, method="inverse_transform")
+    fwd = BridgeScalerTransform(scaler_path=path, variables=var_list, method="transform")
+    inv = BridgeScalerTransform(scaler_path=path, variables=var_list, method="inverse_transform")
     var = var_list[0]
-    original = data["era5"]["input"][var].clone()
+    original = data["input"]["Test_ERA5"][var].clone()
     data = fwd(data)
     data = inv(data)
-    assert torch.allclose(data["era5"]["input"][var].float(), original.float(), atol=1e-5)
+    assert torch.allclose(data["input"]["Test_ERA5"][var].float(), original.float(), atol=1e-5)
+
+
+def test_scaler_data_types_input_only(scaler_file):
+    """data_types=['input'] scales input tensors and leaves target tensors unchanged."""
+    path, variables, data = scaler_file
+    var = list(variables)[0]
+    input_before = data["input"]["Test_ERA5"][var].clone()
+    target_before = data["target"]["Test_ERA5"][var].clone()
+
+    scaler = BridgeScalerTransform(
+        scaler_path=path, variables=list(variables), method="transform", data_types=["input"]
+    )
+    result = scaler(data)
+
+    assert not torch.allclose(result["input"]["Test_ERA5"][var].float(), input_before.float()), (
+        "input tensor should have been scaled"
+    )
+    assert torch.allclose(result["target"]["Test_ERA5"][var].float(), target_before.float()), (
+        "target tensor must not be touched when data_types=['input']"
+    )
+
+
+def test_scaler_data_types_target_only(scaler_file):
+    """data_types=['target'] scales target tensors and leaves input tensors unchanged."""
+    path, variables, data = scaler_file
+    var = list(variables)[0]
+    input_before = data["input"]["Test_ERA5"][var].clone()
+    target_before = data["target"]["Test_ERA5"][var].clone()
+
+    scaler = BridgeScalerTransform(
+        scaler_path=path, variables=list(variables), method="transform", data_types=["target"]
+    )
+    result = scaler(data)
+
+    assert torch.allclose(result["input"]["Test_ERA5"][var].float(), input_before.float()), (
+        "input tensor must not be touched when data_types=['target']"
+    )
+    assert not torch.allclose(result["target"]["Test_ERA5"][var].float(), target_before.float()), (
+        "target tensor should have been scaled"
+    )
+
+
+def test_scaler_data_types_none_scales_all(scaler_file):
+    """data_types=None (default) scales both input and target tensors."""
+    path, variables, data = scaler_file
+    var = list(variables)[0]
+    input_before = data["input"]["Test_ERA5"][var].clone()
+    target_before = data["target"]["Test_ERA5"][var].clone()
+
+    scaler = BridgeScalerTransform(scaler_path=path, variables=list(variables), method="transform")
+    result = scaler(data)
+
+    assert not torch.allclose(result["input"]["Test_ERA5"][var].float(), input_before.float()), (
+        "input tensor should have been scaled with data_types=None"
+    )
+    assert not torch.allclose(result["target"]["Test_ERA5"][var].float(), target_before.float()), (
+        "target tensor should have been scaled with data_types=None"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _flatten_spatial_tensors / _unflatten_spatial_tensors  (grid-wise scaling)
+# ---------------------------------------------------------------------------
+
+
+def _spatial_state() -> dict:
+    """A nested state dict with one spatial-eligible (2D, singleton level/time)
+    variable and one ordinary per-level (3D) variable, under two sources."""
+    return {
+        "input": {
+            "src_a": {
+                "src_a/prognostic/2d/SP": torch.randn(3, 1, 1, 4, 5),
+                "src_a/prognostic/3d/T": torch.randn(3, 6, 1, 4, 5),
+            },
+            "src_b": {
+                "src_b/prognostic/2d/SP": torch.randn(3, 1, 1, 4, 5),
+            },
+        }
+    }
+
+
+def test_flatten_spatial_tensors_empty_is_noop():
+    """No spatial_variables -> the same dict object and an empty shape map."""
+    state = _spatial_state()
+    out, shapes = _flatten_spatial_tensors(state, [])
+    assert out is state
+    assert shapes == {}
+
+
+def test_flatten_spatial_tensors_folds_matched_vars_to_rank2():
+    """Matched vars fold (level, time, H, W) into one trailing axis -> (B, H*W);
+    unmatched vars are left untouched, and every source's copy is folded."""
+    state = _spatial_state()
+    spatial = ["src_a/prognostic/2d/SP", "src_b/prognostic/2d/SP"]
+    out, shapes = _flatten_spatial_tensors(state, spatial)
+
+    assert out["input"]["src_a"]["src_a/prognostic/2d/SP"].shape == (3, 20)
+    assert out["input"]["src_b"]["src_b/prognostic/2d/SP"].shape == (3, 20)
+    # ordinary per-level variable is not touched
+    assert out["input"]["src_a"]["src_a/prognostic/3d/T"].shape == (3, 6, 1, 4, 5)
+    # original shapes recorded for both matched vars
+    assert shapes["src_a/prognostic/2d/SP"] == (3, 1, 1, 4, 5)
+    assert shapes["src_b/prognostic/2d/SP"] == (3, 1, 1, 4, 5)
+
+
+def test_flatten_unflatten_round_trip_restores_shapes_and_values():
+    """Unflatten exactly reverses flatten: shapes and values are preserved."""
+    state = _spatial_state()
+    spatial = ["src_a/prognostic/2d/SP"]
+    original = state["input"]["src_a"]["src_a/prognostic/2d/SP"].clone()
+
+    flat, shapes = _flatten_spatial_tensors(state, spatial)
+    restored = _unflatten_spatial_tensors(flat, shapes)
+
+    got = restored["input"]["src_a"]["src_a/prognostic/2d/SP"]
+    assert got.shape == original.shape
+    assert torch.equal(got, original)
+
+
+def test_flatten_spatial_tensors_rejects_nonsingleton_level():
+    """Flattening a >1 level variable would blend distinct level slices into the
+    same per-gridpoint statistic, so it must raise."""
+    state = _spatial_state()
+    with pytest.raises(ValueError, match="singleton level and time"):
+        _flatten_spatial_tensors(state, ["src_a/prognostic/3d/T"])
+
+
+def test_flatten_spatial_tensors_rejects_nonsingleton_time():
+    """Same guard on the time dim (index 2)."""
+    state = {"input": {"src": {"src/prognostic/2d/SP": torch.randn(3, 1, 2, 4, 5)}}}
+    with pytest.raises(ValueError, match="singleton level and time"):
+        _flatten_spatial_tensors(state, ["src/prognostic/2d/SP"])
+
+
+def test_unflatten_spatial_tensors_empty_is_noop():
+    """No recorded shapes -> the same dict object, unchanged."""
+    state = _spatial_state()
+    assert _unflatten_spatial_tensors(state, {}) is state
+
+
+# ---------------------------------------------------------------------------
+# BridgeScalerTransform (preblock) — spatial_variables
+# ---------------------------------------------------------------------------
+
+
+def _fit_and_save_preblock_scaler(path, batch, spatial_variables):
+    """Fit a fresh standard scaler on *batch* (flattening *spatial_variables*
+    per-gridpoint) and persist it, returning the fitted block."""
+    block = BridgeScalerTransform(
+        scaler_path=path,
+        variables=[],
+        method="transform",
+        scaler_params={"channels_last": False},
+        spatial_variables=list(spatial_variables),
+    )
+    block.fit_scaler_batch(batch)
+    save_scaler_dict(block.scaler, path)
+    return block
+
+
+def test_preblock_scaler_spatial_round_trip(tmp_path):
+    """A spatial variable transforms and inverse-transforms back to its original
+    values and shape, alongside an ordinary per-level variable."""
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    level_var = "Test_ERA5/prognostic/3d/T"
+    B, L, H, W = 64, 5, 8, 8
+
+    def make_side():
+        return {
+            spatial_var: torch.randn(B, 1, 1, H, W),
+            level_var: torch.randn(B, L, 1, H, W),
+        }
+
+    batch = {"input": {source: make_side()}, "target": {source: make_side()}}
+    path = str(tmp_path / "scaler.json")
+    _fit_and_save_preblock_scaler(path, copy.deepcopy(batch), [spatial_var])
+
+    fwd = BridgeScalerTransform(scaler_path=path, variables=[], method="transform", spatial_variables=[spatial_var])
+    inv = BridgeScalerTransform(
+        scaler_path=path, variables=[], method="inverse_transform", spatial_variables=[spatial_var]
+    )
+    original = {v: batch["input"][source][v].clone() for v in (spatial_var, level_var)}
+    out = inv(fwd(copy.deepcopy(batch)))
+
+    for v in (spatial_var, level_var):
+        got = out["input"][source][v]
+        assert got.shape == original[v].shape, f"{v} shape changed across round trip"
+        assert torch.allclose(got.float(), original[v].float(), atol=1e-4), f"{v} not recovered"
+
+
+def test_preblock_scaler_spatial_is_per_gridpoint(tmp_path):
+    """Spatial scaling centres each gridpoint independently (one stat per cell),
+    unlike ordinary per-level scaling which uses a single stat for the 2D field.
+
+    The field gives every gridpoint a large, distinct mean offset. After spatial
+    scaling, each gridpoint's mean over the batch collapses to ~0; a plain scaler
+    leaves those per-gridpoint means spread apart.
+    """
+    source = "Test_ERA5"
+    spatial_var = "Test_ERA5/prognostic/2d/SP"
+    B, H, W = 256, 4, 4
+
+    offsets = torch.arange(H * W, dtype=torch.float32).reshape(1, 1, 1, H, W) * 100.0
+    field = offsets + torch.randn(B, 1, 1, H, W)
+    batch = {
+        "input": {source: {spatial_var: field.clone()}},
+        "target": {source: {spatial_var: field.clone()}},
+    }
+
+    # Non-vacuous setup: raw per-gridpoint means span a wide range.
+    raw_gp_mean = field.reshape(B, H * W).mean(dim=0)
+    assert (raw_gp_mean.max() - raw_gp_mean.min()).item() > 100.0
+
+    spatial_path = str(tmp_path / "scaler_spatial.json")
+    _fit_and_save_preblock_scaler(spatial_path, copy.deepcopy(batch), [spatial_var])
+    spatial_fwd = BridgeScalerTransform(
+        scaler_path=spatial_path, variables=[], method="transform", spatial_variables=[spatial_var]
+    )
+    spatial_scaled = spatial_fwd(copy.deepcopy(batch))["input"][source][spatial_var]
+    spatial_gp_mean = spatial_scaled.reshape(B, H * W).mean(dim=0)
+    assert spatial_gp_mean.abs().max().item() < 1e-3, "each gridpoint should be independently centred"
+
+    # Contrast: a plain (non-spatial) scaler uses one stat for the whole field,
+    # so per-gridpoint means stay spread apart after scaling.
+    plain_path = str(tmp_path / "scaler_plain.json")
+    _fit_and_save_preblock_scaler(plain_path, copy.deepcopy(batch), [])
+    plain_fwd = BridgeScalerTransform(scaler_path=plain_path, variables=[], method="transform")
+    plain_scaled = plain_fwd(copy.deepcopy(batch))["input"][source][spatial_var]
+    plain_gp_mean = plain_scaled.reshape(B, H * W).mean(dim=0)
+    assert (plain_gp_mean.max() - plain_gp_mean.min()).item() > 1.0, "plain scaling should not centre per gridpoint"
+
+
+def test_preblock_scaler_spatial_variables_must_be_subset(tmp_path):
+    """spatial_variables not covered by `variables` is a config error and raises."""
+    source = "Test_ERA5"
+    batch = {
+        "input": {
+            source: {
+                "Test_ERA5/prognostic/2d/SP": torch.randn(2, 1, 1, 4, 4),
+                "Test_ERA5/prognostic/3d/T": torch.randn(2, 3, 1, 4, 4),
+            }
+        }
+    }
+    block = BridgeScalerTransform(
+        scaler_path=str(tmp_path / "scaler.json"),
+        variables=["Test_ERA5/prognostic/3d/T"],  # SP deliberately omitted
+        method="transform",
+        spatial_variables=["Test_ERA5/prognostic/2d/SP"],
+    )
+    with pytest.raises(ValueError, match="must also be selected"):
+        block(batch)
+
+
+# ---------------------------------------------------------------------------
+# _parse_variable_selection
+# ---------------------------------------------------------------------------
+
+
+def _selection_state() -> dict:
+    """A state dict following the CREDIT convention: state[data_type][source][var_name].
+
+    var_name uses the canonical `source/field_type/dim/varname` layout, and the
+    source key (e.g. "era5") matches the first segment of each variable name.
+    """
+    return {
+        "input": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/prognostic/3d/U": object(),
+                "era5/prognostic/2d/SP": object(),
+                "era5/static/2d/Z": object(),
+            },
+        },
+        "target": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/diagnostic/2d/precip": object(),
+            },
+        },
+        "prediction": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+            },
+        },
+    }
+
+
+def test_parse_variable_selection_expands_partial():
+    """A partial name expands to every variable beneath it in the hierarchy."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d"], state)
+    assert result == ["era5/prognostic/3d/T", "era5/prognostic/3d/U"]
+
+
+def test_parse_variable_selection_full_name_matches_only_itself():
+    """A full variable name matches exactly and does not pull in siblings."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d/T"], state)
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_empty_list_returns_all():
+    """An empty selection returns every variable across all data types (deduped)."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state)
+    assert result == [
+        "era5/prognostic/3d/T",
+        "era5/prognostic/3d/U",
+        "era5/prognostic/2d/SP",
+        "era5/static/2d/Z",
+        "era5/diagnostic/2d/precip",
+    ]
+
+
+def test_parse_variable_selection_dedupes_across_data_types():
+    """A variable present in multiple data types appears only once."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/prognostic/3d/T"], state)
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_data_types_filter():
+    """Only the requested data types contribute candidate variables."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state, data_types=["prediction"])
+    assert result == ["era5/prognostic/3d/T"]
+
+    result = _parse_variable_selection(["era5"], state, data_types=["target"])
+    assert result == ["era5/prognostic/3d/T", "era5/diagnostic/2d/precip"]
+
+
+def test_parse_variable_selection_missing_data_type_ignored():
+    """A requested data type that is absent from the state is skipped, not an error."""
+    state = _selection_state()
+    result = _parse_variable_selection([], state, data_types=["prediction", "nonexistent"])
+    assert result == ["era5/prognostic/3d/T"]
+
+
+def test_parse_variable_selection_prefix_boundary():
+    """Matching respects '/' boundaries: a prefix that is not a full path segment
+    does not match."""
+    state = _selection_state()
+    # "era5/prognostic/3" is a string prefix of "era5/prognostic/3d/..." but not a
+    # hierarchy ancestor, so nothing should match.
+    result = _parse_variable_selection(["era5/prognostic/3"], state)
+    assert result == []
+
+
+def test_parse_variable_selection_preserves_selection_order():
+    """Multiple partials expand in the order they are listed."""
+    state = _selection_state()
+    result = _parse_variable_selection(["era5/static", "era5/prognostic/2d"], state)
+    assert result == ["era5/static/2d/Z", "era5/prognostic/2d/SP"]
+
+
+def test_parse_variable_selection_multiple_sources():
+    """Variables are collected across all sources within a data type, and a
+    source-level partial selects only that source's variables."""
+    state = {
+        "input": {
+            "era5": {
+                "era5/prognostic/3d/T": object(),
+                "era5/prognostic/2d/SP": object(),
+            },
+            "gfs": {
+                "gfs/prognostic/3d/T": object(),
+                "gfs/static/2d/Z": object(),
+            },
+        },
+    }
+    # Empty list pulls in every variable from every source.
+    assert _parse_variable_selection([], state) == [
+        "era5/prognostic/3d/T",
+        "era5/prognostic/2d/SP",
+        "gfs/prognostic/3d/T",
+        "gfs/static/2d/Z",
+    ]
+    # A source-rooted partial selects only that source's variables.
+    assert _parse_variable_selection(["gfs"], state) == [
+        "gfs/prognostic/3d/T",
+        "gfs/static/2d/Z",
+    ]
+
+
+# ---------------------------------------------------------------------------
+# build_preblocks and build_postblocks — two-section format enforcement
+# ---------------------------------------------------------------------------
+
+
+class TestBuildPreblocks:
+    """Tests for build_preblocks() config validation and section selection."""
+
+    def test_flat_format_raises_value_error(self):
+        """Old flat format (no ic_only/per_step sections) raises ValueError."""
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_preblocks({"preblocks": {"concat": {"type": "concat"}}})
+
+    def test_unknown_section_key_raises(self):
+        """A key that is neither ic_only nor per_step raises ValueError."""
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_preblocks({"preblocks": {"per_step": {}, "bad_section": {}}})
+
+    def test_valid_two_section_per_step_builds(self):
+        """per_step section builds an nn.ModuleDict with the named block."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert "concat" in preblocks
+
+    def test_to_device_moves_nested_state(self):
+        """Every tensor nested in the state moves to the device, non-tensors are untouched."""
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        block = ToDevice(device)
+        state = {
+            "input": {"ERA5": {"ERA5/prognostic/2d/SP": torch.ones(1)}},
+            "target": {"ERA5": {"ERA5/prognostic/2d/SP": torch.zeros(1)}},
+            "metadata": {"levels": [500, 850], "tensor": torch.ones(2)},
+            "sequence": (torch.ones(1), "unchanged"),
+        }
+
+        result = block(state)
+
+        # Compare device.type, not the device itself: an unindexed torch.device("cuda")
+        # is not equal to the "cuda:0" that a moved tensor reports.
+        assert result["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == device.type
+        assert result["target"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == device.type
+        assert result["metadata"]["tensor"].device.type == device.type
+        assert result["metadata"]["levels"] == [500, 850]
+        assert result["sequence"][0].device.type == device.type
+        assert result["sequence"][1] == "unchanged"
+        assert state["input"]["ERA5"]["ERA5/prognostic/2d/SP"].device.type == "cpu"
+
+    def test_to_device_builds_from_config(self):
+        preblocks = build_preblocks(
+            {"preblocks": {"per_step": {"to_device": {"type": "to_device", "args": {"device": "cpu"}}}}}
+        )
+
+        assert isinstance(preblocks["to_device"], ToDevice)
+        assert preblocks["to_device"].device == torch.device("cpu")
+
+    def test_valid_two_section_ic_only_builds(self):
+        """ic_only section builds an nn.ModuleDict with the named block."""
+
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="ic_only")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert "concat" in preblocks
+
+    def test_empty_config_returns_empty_module_dict(self):
+        """Empty config builds an empty ModuleDict without error."""
+        preblocks = build_preblocks({}, phase="per_step")
+        assert isinstance(preblocks, nn.ModuleDict)
+        assert len(preblocks) == 0
+
+    def test_missing_phase_returns_empty_module_dict(self):
+        """Requesting a phase absent from the config returns an empty ModuleDict."""
+        # ic_only is configured but per_step is requested
+        preblocks = build_preblocks({"preblocks": {"ic_only": {"concat": {"type": "concat"}}}}, phase="per_step")
+        assert len(preblocks) == 0
+
+    def test_invalid_phase_raises(self):
+        """An unrecognized phase name raises ValueError."""
+        with pytest.raises(ValueError, match="phase must be one of"):
+            build_preblocks({}, phase="invalid_phase")
+
+    def test_unknown_block_type_raises_with_valid_types(self):
+        """An unregistered block type raises ValueError naming the block and listing valid types."""
+        with pytest.raises(ValueError, match="unknown preblock type 'not_a_block'.*'concat'"):
+            build_preblocks({"preblocks": {"per_step": {"bogus": {"type": "not_a_block"}}}}, phase="per_step")
+
+
+class TestBuildPostblocks:
+    """Tests for build_postblocks() config validation (mirrors build_preblocks)."""
+
+    def test_flat_format_raises_value_error(self):
+        """Old flat postblock format raises ValueError."""
+        with pytest.raises(ValueError, match="unexpected top-level keys"):
+            build_postblocks({"postblocks": {"reconstruct": {"type": "reconstruct"}}})
+
+    def test_valid_two_section_per_step_builds(self):
+        """per_step section builds a ModuleDict with the named block."""
+
+        postblocks = build_postblocks(
+            {"postblocks": {"per_step": {"reconstruct": {"type": "reconstruct"}}}}, phase="per_step"
+        )
+        assert isinstance(postblocks, nn.ModuleDict)
+        assert "reconstruct" in postblocks
+
+    def test_empty_config_returns_empty_module_dict(self):
+        postblocks = build_postblocks({}, phase="per_step")
+        assert len(postblocks) == 0
+
+    def test_unknown_block_type_raises_with_valid_types(self):
+        """An unregistered block type raises ValueError naming the block and listing valid types."""
+        with pytest.raises(ValueError, match="unknown postblock type 'not_a_block'.*'reconstruct'"):
+            build_postblocks({"postblocks": {"per_step": {"bogus": {"type": "not_a_block"}}}}, phase="per_step")
+
+    def test_flatten_to_tensor_registered(self):
+        """flatten_to_tensor builds without a scaler (scaler_path omitted)."""
+        postblocks = build_postblocks(
+            {"postblocks": {"per_step": {"flatten": {"type": "flatten_to_tensor"}}}}, phase="per_step"
+        )
+        assert "flatten" in postblocks
+
+    def test_flatten_to_tensor_expands_env_vars_in_scaler_path(self, monkeypatch, tmp_path):
+        """$VARS in scaler_path are expanded before the scaler file is opened."""
+        import json
+
+        from credit.postblock.reconstruct import FlattenToTensor
+
+        scaler_file = tmp_path / "scaler.json"
+        scaler_file.write_text(json.dumps({"target": {}}))
+        monkeypatch.setenv("CREDIT_TEST_SCALER_DIR", str(tmp_path))
+        block = FlattenToTensor(scaler_path="$CREDIT_TEST_SCALER_DIR/scaler.json")
+        assert block.scaler_path == str(scaler_file)
+
+    def test_global_energy_fixer_updown_alias(self):
+        """global_energy_fixer_updown resolves to the same class as global_energy_fixer."""
+        from credit.postblock import _POSTBLOCK_REGISTRY
+
+        assert _POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is _POSTBLOCK_REGISTRY["global_energy_fixer"]
+
+
+# ---------------------------------------------------------------------------
+# ConcatToTensor — channel ordering and channel map correctness
+# ---------------------------------------------------------------------------
+
+
+class TestConcatToTensorChannelOrder:
+    """ConcatToTensor must sort channels by FIELD_TYPE_RANK regardless of insertion order."""
+
+    def test_channel_order_follows_field_type_rank(self):
+        """prognostic(0) < static(1) < dynamic_forcing(2) regardless of dict insertion order."""
+        B, H, W = 1, 4, 4
+        # Insert in reverse-rank order to verify the sort is applied
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/dynamic_forcing/2d/df": torch.full((B, 1, 1, H, W), 9.0),
+                    "era5/static/2d/st": torch.full((B, 1, 1, H, W), 5.0),
+                    "era5/prognostic/2d/p": torch.full((B, 1, 1, H, W), 3.0),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        tensor, _meta = ct(batch)
+        # Shape: (B, 3_channels, 1_timestep, H, W)
+        assert tensor.shape == (B, 3, 1, H, W)
+        assert tensor[0, 0, 0, 0, 0].item() == pytest.approx(3.0)  # prognostic
+        assert tensor[0, 1, 0, 0, 0].item() == pytest.approx(5.0)  # static
+        assert tensor[0, 2, 0, 0, 0].item() == pytest.approx(9.0)  # dynamic_forcing
+
+    def test_input_channel_map_contains_all_variables(self):
+        """input _channel_map has an entry for every variable key in the batch."""
+        B, H, W = 1, 4, 4
+        var_keys = [
+            "era5/prognostic/2d/T",
+            "era5/static/2d/z",
+            "era5/dynamic_forcing/2d/insolation",
+        ]
+        batch = {"input": {"era5": {k: torch.randn(B, 1, 1, H, W) for k in var_keys}}}
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        channel_map = meta["input"]["_channel_map"]
+        for key in var_keys:
+            assert key in channel_map, f"Expected {key!r} in input _channel_map"
+
+    def test_target_channel_map_excludes_non_predictable_fields(self):
+        """Target _channel_map includes only prognostic and diagnostic; not static or dynfrc."""
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W),
+                    "era5/static/2d/z": torch.randn(B, 1, 1, H, W),
+                    "era5/dynamic_forcing/2d/insolation": torch.randn(B, 1, 1, H, W),
+                    "era5/diagnostic/2d/cape": torch.randn(B, 1, 1, H, W),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        target_map = meta["target"]["_channel_map"]
+        assert "era5/prognostic/2d/T" in target_map
+        assert "era5/diagnostic/2d/cape" in target_map
+        assert "era5/static/2d/z" not in target_map
+        assert "era5/dynamic_forcing/2d/insolation" not in target_map
+
+    def test_channel_map_slices_are_non_overlapping(self):
+        """Each variable's slice in _channel_map is disjoint from all others."""
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {
+                "era5": {
+                    "era5/prognostic/2d/a": torch.randn(B, 1, 1, H, W),
+                    "era5/prognostic/2d/b": torch.randn(B, 1, 1, H, W),
+                    "era5/static/2d/c": torch.randn(B, 1, 1, H, W),
+                }
+            }
+        }
+        ct = ConcatToTensor()
+        _, meta = ct(batch)
+        channel_map = meta["input"]["_channel_map"]
+
+        covered = []
+        for info in channel_map.values():
+            s = info["slice"]
+            covered.extend(range(s.start, s.stop))
+
+        assert len(covered) == len(set(covered)), "Channel slices must not overlap"
+
+
+# ---------------------------------------------------------------------------
+# ConcatToTensor — input side ChannelSchema validation
+# ---------------------------------------------------------------------------
+
+
+class TestConcatToTensorInputSchemaValidation:
+    def _schema(self):
+        return ChannelSchema(
+            input_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+            target_layout=[{"var_key": "era5/prognostic/2d/T", "n_levels": 1, "n_time": 1}],
+        )
+
+    def test_matching_input_passes_with_schema_attached(self):
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        tensor, _meta = ct(batch)  # must not raise
+        assert tensor.shape == (1, 1, 1, 4, 4)
+
+    def test_mismatched_input_raises_with_no_target_present(self):
+        """The inference (no-target) case this was added for: a renamed/extra/missing
+        input variable must be caught here, not surfaced as a shape mismatch later."""
+        batch = {"input": {"gfs": {"gfs/prognostic/2d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        with pytest.raises(ValueError, match="ChannelSchema mismatch"):
+            ct(batch)
+
+    def test_input_schema_validated_only_once(self):
+        """A second batch with the same (already-validated) layout must not re-raise
+        or otherwise re-run the comparison."""
+        batch = {"input": {"era5": {"era5/prognostic/2d/T": torch.randn(1, 1, 1, 4, 4)}}}
+        ct = ConcatToTensor()
+        ct.set_schema(self._schema())
+        ct(batch)
+        assert ct._input_schema_validated
+        ct(batch)  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# RenameVariables
+# ---------------------------------------------------------------------------
+
+
+class TestRenameVariables:
+    def test_renames_across_source_boundary(self):
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 4, 1, 4, 4)}}}
+        rn = RenameVariables(mapping={"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"})
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+        assert out["input"]["GFS"] == {}
+        # original batch must be untouched (shallow-copy contract)
+        assert list(batch["input"]["GFS"].keys()) == ["GFS/prognostic/3d/TMP"]
+
+    def test_key_absent_in_a_data_type_is_skipped(self):
+        """A mapping entry that doesn't apply to a given data_type (e.g. a static-only
+        rename during a target pass) is silently skipped, matching other preblocks."""
+        batch = {"input": {"GFS": {"GFS/static/2d/z": torch.randn(1, 1, 1, 4, 4)}}, "target": {}}
+        rn = RenameVariables(mapping={"GFS/static/2d/z": "ERA5/static/2d/z"})
+        out = rn(batch)
+        assert "ERA5" in out["input"]
+        assert out["target"] == {}
+
+    @pytest.mark.parametrize("mapping", [{"A/x": "B/x", "B/x": "C/x"}, {"B/x": "C/x", "A/x": "B/x"}])
+    def test_chained_mappings_use_original_keys_only(self, mapping):
+        """A mapped destination is not remapped again in the same pass."""
+        batch = {"input": {"A": {"A/x": torch.tensor(1.0)}}}
+
+        out = RenameVariables(mapping=mapping)(batch)
+
+        assert out["input"]["A"] == {}
+        assert torch.equal(out["input"]["B"]["B/x"], torch.tensor(1.0))
+        assert "C" not in out["input"]
+
+    def test_destination_collision_raises(self):
+        batch = {
+            "input": {
+                "GFS": {
+                    "GFS/prognostic/3d/A": torch.randn(1, 1, 1, 4, 4),
+                    "GFS/prognostic/3d/B": torch.randn(1, 1, 1, 4, 4),
+                }
+            }
+        }
+        rn = RenameVariables(
+            mapping={"GFS/prognostic/3d/A": "ERA5/prognostic/3d/T", "GFS/prognostic/3d/B": "ERA5/prognostic/3d/T"}
+        )
+        with pytest.raises(ValueError, match="already exists"):
+            rn(batch)
+
+    def test_mapping_file_loads_and_applies(self, tmp_path):
+        import yaml
+
+        path = tmp_path / "map.yaml"
+        path.write_text(yaml.safe_dump({"GFS/prognostic/3d/TMP": "ERA5/prognostic/3d/T"}))
+        rn = RenameVariables(mapping_file=str(path))
+        batch = {"input": {"GFS": {"GFS/prognostic/3d/TMP": torch.randn(1, 1, 1, 4, 4)}}}
+        out = rn(batch)
+        assert list(out["input"]["ERA5"].keys()) == ["ERA5/prognostic/3d/T"]
+
+    def test_requires_exactly_one_of_mapping_or_mapping_file(self):
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables()
+        with pytest.raises(ValueError, match="exactly one of"):
+            RenameVariables(mapping={"a": "b"}, mapping_file="unused.yaml")
+
+
+# ---------------------------------------------------------------------------
+# apply_preblocks — return format and mutation safety (purity)
+# ---------------------------------------------------------------------------
+
+
+class TestApplyPreblocks:
+    """Tests for apply_preblocks() return format and input-batch immutability."""
+
+    def test_return_format_with_concat_has_x_y_metadata(self):
+        """apply_preblocks returns {"x", "y", "metadata"} when ConcatToTensor is the final block."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        assert {"x", "y", "metadata"} <= set(result.keys())
+        assert isinstance(result["x"], torch.Tensor)
+        assert isinstance(result["y"], torch.Tensor)
+
+    def test_metadata_contains_input_and_target_channel_maps(self):
+        """Metadata from apply_preblocks contains populated _channel_map for input and target."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        var_key = "era5/prognostic/2d/T"
+        batch = {
+            "input": {"era5": {var_key: torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {var_key: torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        meta = result["metadata"]
+        assert "_channel_map" in meta["input"], "input _channel_map missing from metadata"
+        assert "_channel_map" in meta["target"], "target _channel_map missing from metadata"
+        assert var_key in meta["input"]["_channel_map"]
+        assert var_key in meta["target"]["_channel_map"]
+
+    def test_does_not_mutate_input_tensor_values(self):
+        """apply_preblocks does not modify the caller's batch tensors in-place."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        original_tensor = torch.ones(B, 1, 1, H, W)
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": original_tensor}},
+        }
+        before = original_tensor.clone()
+        _ = apply_preblocks(preblocks, batch)
+
+        # Reference identity preserved — same object, same values
+        assert batch["input"]["era5"]["era5/prognostic/2d/T"] is original_tensor
+        torch.testing.assert_close(original_tensor, before)
+
+    def test_does_not_add_keys_to_caller_batch(self):
+        """apply_preblocks does not add or remove keys from the caller's batch dict."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        original_keys = set(batch.keys())
+        _ = apply_preblocks(preblocks, batch)
+
+        assert set(batch.keys()) == original_keys
+
+    def test_empty_chain_returns_nested_dict_unchanged(self):
+        """An empty preblock chain passes the batch through unmodified."""
+        preblocks = build_preblocks({}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        # Without ConcatToTensor, _run_preblock_group returns the batch dict
+        assert isinstance(result, dict)
+        assert "input" in result
+        assert "era5/prognostic/2d/T" in result["input"]["era5"]
+
+    def test_concat_result_exposes_input_tensor_under_x(self):
+        """The concat result is a dict keyed by "x"; the rollout apps read result["x"]."""
+
+        preblocks = build_preblocks({"preblocks": {"per_step": {"concat": {"type": "concat"}}}}, phase="per_step")
+        B, H, W = 1, 4, 4
+        batch = {
+            "input": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+            "target": {"era5": {"era5/prognostic/2d/T": torch.randn(B, 1, 1, H, W)}},
+        }
+        result = apply_preblocks(preblocks, batch)
+
+        assert "x" in result
+        assert isinstance(result["x"], torch.Tensor)
+        assert result["x"].float().shape[0] == B
+
+
+# ---------------------------------------------------------------------------
+# LogTransform and SqrtTransform — lazy expansion (variables=[] and partial paths)
+# ---------------------------------------------------------------------------
+
+_TRANSFORM_SHAPE = (2, 4, 1, 4, 4)
+_TRANSFORM_SOURCE = "era5"
+_TRANSFORM_VARS = [
+    "era5/prognostic/3d/T",
+    "era5/prognostic/3d/U",
+    "era5/static/2d/Z",
+]
+
+
+def _transform_batch_positive():
+    """Batch with strictly positive values for transforms that require positivity."""
+    return {
+        split: {_TRANSFORM_SOURCE: {v: torch.rand(*_TRANSFORM_SHAPE) + 0.1 for v in _TRANSFORM_VARS}}
+        for split in ("input", "target")
+    }
+
+
+def _transform_batch_nonneg():
+    """Batch with non-negative values for SqrtTransform."""
+    return {
+        split: {_TRANSFORM_SOURCE: {v: torch.rand(*_TRANSFORM_SHAPE) for v in _TRANSFORM_VARS}}
+        for split in ("input", "target")
+    }
+
+
+def test_log_transform_empty_variables_transforms_all():
+    """variables=[] expands to all variables and transforms every one of them."""
+    batch = _transform_batch_positive()
+    originals = {v: batch["input"][_TRANSFORM_SOURCE][v].clone() for v in _TRANSFORM_VARS}
+    result = LogTransform(variables=[])(batch)
+    for v in _TRANSFORM_VARS:
+        assert not torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"variables=[] should have transformed {v}"
+        )
+
+
+def test_log_transform_partial_path_expands_to_matching_vars():
+    """A partial path transforms exactly the variables under that hierarchy."""
+    batch = _transform_batch_positive()
+    prog_vars = [v for v in _TRANSFORM_VARS if "prognostic" in v]
+    non_prog_vars = [v for v in _TRANSFORM_VARS if "prognostic" not in v]
+    originals = {v: batch["input"][_TRANSFORM_SOURCE][v].clone() for v in _TRANSFORM_VARS}
+
+    result = LogTransform(variables=[f"{_TRANSFORM_SOURCE}/prognostic"])(batch)
+
+    for v in prog_vars:
+        assert not torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should have transformed {v}"
+        )
+    for v in non_prog_vars:
+        assert torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should NOT have transformed {v}"
+        )
+
+
+def test_sqrt_transform_empty_variables_transforms_all():
+    """variables=[] expands to all variables and transforms every one of them."""
+    batch = _transform_batch_nonneg()
+    originals = {v: batch["input"][_TRANSFORM_SOURCE][v].clone() for v in _TRANSFORM_VARS}
+    result = SqrtTransform(variables=[])(batch)
+    for v in _TRANSFORM_VARS:
+        assert not torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"variables=[] should have transformed {v}"
+        )
+
+
+def test_sqrt_transform_partial_path_expands_to_matching_vars():
+    """A partial path transforms exactly the variables under that hierarchy."""
+    batch = _transform_batch_nonneg()
+    prog_vars = [v for v in _TRANSFORM_VARS if "prognostic" in v]
+    non_prog_vars = [v for v in _TRANSFORM_VARS if "prognostic" not in v]
+    originals = {v: batch["input"][_TRANSFORM_SOURCE][v].clone() for v in _TRANSFORM_VARS}
+
+    result = SqrtTransform(variables=[f"{_TRANSFORM_SOURCE}/prognostic"])(batch)
+
+    for v in prog_vars:
+        assert not torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should have transformed {v}"
+        )
+    for v in non_prog_vars:
+        assert torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
+            f"partial path should NOT have transformed {v}"
+        )

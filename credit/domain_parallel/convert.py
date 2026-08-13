@@ -13,8 +13,10 @@ from credit.domain_parallel.layers import (
     DomainParallelConv3d,
     DomainParallelConvTranspose2d,
     DomainParallelConvTranspose3d,
+    DomainParallelCrossEmbedBranch,
     DomainParallelGroupNorm,
 )
+from credit.models.wxformer.crossformer import CrossEmbedConvBranch
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +28,14 @@ def _needs_halo_conv2d(conv):
     else:
         k_h = conv.kernel_size[0]
     return k_h > 1
+
+
+def _needs_halo_crossembed_branch(branch):
+    """Check if a CrossEmbedConvBranch needs halo exchange (kernel > 1 along H).
+
+    Same test as _needs_halo_conv2d, applied to the branch's inner Conv2d.
+    """
+    return _needs_halo_conv2d(branch[1])
 
 
 def _needs_halo_conv3d(conv):
@@ -77,6 +87,10 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     """Convert a model to use domain-parallel layers.
 
     Walks the module tree and replaces:
+
+    - CrossEmbedConvBranch (kernel>1 in H) -> DomainParallelCrossEmbedBranch,
+      checked before the plain Conv2d rule so CrossEmbedLayer's per-branch
+      ZeroPad2d isn't left running unconverted next to a wrapped inner Conv2d
     - nn.Conv2d (kernel>1 in H) -> DomainParallelConv2d
     - nn.Conv3d (kernel>1 in H) -> DomainParallelConv3d
     - nn.ConvTranspose2d (kernel>stride in H) -> DomainParallelConvTranspose2d
@@ -84,6 +98,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     - nn.GroupNorm -> DomainParallelGroupNorm
 
     Leaves unchanged:
+
     - 1x1 Conv2d (FeedForward, projections)
     - Custom LayerNorm (channel-wise, no spatial reduction)
     - Attention modules (windowed, local within shard)
@@ -91,7 +106,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
 
     For custom module types that wrap a Conv2d internally (e.g. PeriodicConv2d),
     pass a custom_converters dict so the whole wrapper is replaced at once and
-    its inner Conv2d children are not double-processed:
+    its inner Conv2d children are not double-processed::
 
         from credit.models.unet_diffusion import PeriodicConv2d
         from credit.domain_parallel.layers import DomainParallelPeriodicConv2d
@@ -120,6 +135,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
         "conv_transpose2d": 0,
         "conv_transpose3d": 0,
         "group_norm": 0,
+        "crossembed_branch": 0,
         "custom": 0,
     }
 
@@ -161,7 +177,20 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
                 continue
 
             # --- Built-in rules ---
-            if isinstance(module, nn.Conv2d) and _needs_halo_conv2d(module):
+            # CrossEmbedConvBranch (nn.Sequential(ZeroPad2d, Conv2d)) is checked
+            # before the generic Conv2d rule and replaces the whole branch, not
+            # just its inner Conv2d: the sibling ZeroPad2d must not fire on its
+            # own under domain parallelism (see DomainParallelCrossEmbedBranch's
+            # docstring for why). Its descendants (the ZeroPad2d and the inner
+            # Conv2d) are marked replaced so the generic Conv2d rule below
+            # doesn't also match the inner conv independently.
+            if isinstance(module, CrossEmbedConvBranch) and _needs_halo_crossembed_branch(module):
+                replacements.append((parent_module, name, DomainParallelCrossEmbedBranch(module, shard_dim=shard_dim)))
+                counts["crossembed_branch"] += 1
+                for _, desc in module.named_modules():
+                    replaced_ids.add(id(desc))
+
+            elif isinstance(module, nn.Conv2d) and _needs_halo_conv2d(module):
                 replacements.append((parent_module, name, DomainParallelConv2d(module, shard_dim=shard_dim)))
                 counts["conv2d"] += 1
 
@@ -202,6 +231,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
         f"{counts['conv3d']} Conv3d, {counts['conv_transpose2d']} ConvTranspose2d, "
         f"{counts['conv_transpose3d']} ConvTranspose3d, "
         f"{counts['group_norm']} GroupNorm, "
+        f"{counts['crossembed_branch']} CrossEmbedConvBranch, "
         f"{counts['custom']} custom layers"
     )
 

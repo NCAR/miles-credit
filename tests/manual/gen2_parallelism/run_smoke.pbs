@@ -1,0 +1,153 @@
+#!/bin/bash -l
+#PBS -A NAML0001
+#PBS -N v2parallel_smoke
+#PBS -l walltime=02:00:00
+#PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
+#PBS -q develop@desched1
+#PBS -j oe
+#PBS -k eod
+#
+# Manual HPC smoke test for the V2 (gen2) parallelism matrix.
+# NOT run by GitHub CI (lives under tests/manual/). Requires a multi-GPU
+# Derecho node and the credit-main-derecho conda env.
+#
+# Submit from a Casper or Derecho login node:
+#   qsub tests/manual/gen2_parallelism/run_smoke.pbs
+#
+# Each config trains 1 epoch / 5 batches with a tiny model. We launch each
+# parallelism mode with torchrun, choosing nproc-per-node so every parallel
+# dimension is genuinely exercised. Results land in $LOGDIR/SUMMARY.txt.
+#
+# NOTE: legacy tensor parallelism is disabled (apply_tensor_parallel raises),
+#       so this matrix has no tp modes. Native TP for wxformer_next (issue
+#       #415) has its own acceptance run: run_tp_parity.pbs (tp=2 vs tp=1).
+#       The multistep entries exercise the domain-parallel between-step gather
+#       (gather_spatial of y_processed) with forecast_len=2.
+
+set -u
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+REPO=${REPO:-/glade/work/schreck/repos/miles-credit-main}
+TORCHRUN=/glade/work/schreck/conda-envs/credit-main-derecho/bin/torchrun
+LOGDIR=/glade/derecho/scratch/schreck/tmp/v2parallel_smoke_logs
+mkdir -p "$LOGDIR"
+
+cd "$REPO"
+export PYTHONPATH="applications:${PYTHONPATH:-}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export NCCL_SOCKET_IFNAME=lo
+export CUDA_VISIBLE_DEVICES=0,1,2,3
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+CFGDIR=tests/manual/gen2_parallelism/configs
+SUMMARY="$LOGDIR/SUMMARY.txt"
+: > "$SUMMARY"
+
+echo "Host : $(hostname)"
+echo "Date : $(date)"
+echo "GPUs : 4 (single node)"
+
+PYCHK=/glade/work/schreck/conda-envs/credit-main-derecho/bin/python
+
+# Every config trains multistep (forecast_len: 2). Each mode runs two phases:
+#   1. fresh:  train 1 epoch from scratch, save checkpoint.pt
+#   2. resume: reload weights + optimizer + scaler + scheduler (+ EMA where
+#      enabled) from that checkpoint and train a second epoch — proves the
+#      save/load plumbing stays in sync per parallelism mode (fsdp2 DCP
+#      full-state APIs, domain rewritten keys, sharded EMA shadow).
+# name:config:nproc   (nproc chosen so each parallelism dim is genuinely exercised)
+RUNS=(
+  "ddp:smoke_v2parallel_ddp_derecho.yml:2"
+  "fsdp2:smoke_v2parallel_fsdp2_derecho.yml:2"
+  "fsdp2_ac:smoke_v2parallel_fsdp2_ac_derecho.yml:2"
+  "domain:smoke_v2parallel_domain_derecho.yml:4"
+  "combo:smoke_v2parallel_combo_derecho.yml:4"
+)
+
+PORT=29500
+for entry in "${RUNS[@]}"; do
+  name="${entry%%:*}"; rest="${entry#*:}"; cfg="${rest%%:*}"; nproc="${rest##*:}"
+  log="$LOGDIR/${name}.log"
+  # clean save_loc so the resume phase resumes from THIS run's checkpoint
+  rm -rf "/glade/derecho/scratch/schreck/credit_tests/smoke_v2parallel_${name}"
+  echo "===================================================================="
+  echo ">>> [$name] nproc=$nproc cfg=$cfg  (port $PORT)"
+  echo "    log: $log"
+  timeout 720 ${TORCHRUN} \
+    --nnodes=1 --nproc-per-node="$nproc" \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" \
+    applications/train_gen2.py -c "${CFGDIR}/${cfg}" \
+    > "$log" 2>&1
+  rc=$?
+  if [ $rc -eq 0 ]; then
+    echo "PASS  $name (nproc=$nproc)" | tee -a "$SUMMARY"
+  elif [ $rc -eq 124 ]; then
+    echo "TIMEOUT $name (nproc=$nproc) — see $log" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  $name (nproc=$nproc) rc=$rc — tail:" | tee -a "$SUMMARY"
+    tail -n 15 "$log" | sed 's/^/      /' | tee -a "$SUMMARY"
+  fi
+  PORT=$((PORT+1))
+
+  # ── resume phase ──────────────────────────────────────────────────────
+  if [ $rc -ne 0 ]; then
+    echo "SKIP  ${name}_resume (fresh run did not pass)" | tee -a "$SUMMARY"
+    continue
+  fi
+  resume_cfg="$LOGDIR/${name}_resume.yml"
+  $PYCHK - "${CFGDIR}/${cfg}" "$resume_cfg" <<'PYEOF'
+import sys
+import yaml
+
+src, dst = sys.argv[1], sys.argv[2]
+conf = yaml.safe_load(open(src))
+conf["trainer"].update(
+    load_weights=True,
+    load_optimizer=True,
+    load_scaler=True,
+    load_scheduler=True,
+    reload_epoch=True,
+    epochs=2,
+    num_epoch=2,
+)
+yaml.safe_dump(conf, open(dst, "w"), sort_keys=False)
+PYEOF
+  rlog="$LOGDIR/${name}_resume.log"
+  echo ">>> [${name}_resume] nproc=$nproc cfg=$resume_cfg  (port $PORT)"
+  timeout 720 ${TORCHRUN} \
+    --nnodes=1 --nproc-per-node="$nproc" \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" \
+    applications/train_gen2.py -c "$resume_cfg" \
+    > "$rlog" 2>&1
+  rrc=$?
+  if [ $rrc -eq 0 ] && grep -q "Epoch: 1" "$rlog"; then
+    echo "PASS  ${name}_resume (epoch 1 trained from checkpoint)" | tee -a "$SUMMARY"
+  elif [ $rrc -eq 124 ]; then
+    echo "TIMEOUT ${name}_resume — see $rlog" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  ${name}_resume rc=$rrc — tail:" | tee -a "$SUMMARY"
+    tail -n 15 "$rlog" | sed 's/^/      /' | tee -a "$SUMMARY"
+  fi
+  PORT=$((PORT+1))
+done
+
+# ── Cross-mode parity: same dp layout ⇒ identical loss trajectories ────────
+# ddp (dp=2) vs domain (dp=2 × domain=2), multistep. Catches dataloader/halo/
+# rollout-gather wiring bugs that still "train" but diverge. ddp/domain:
+# crop-vs-interp output operator differs ~1%, so compare with rtol (see
+# check_parity.py docstring).
+for pair in "ddp domain --rtol 0.05"; do
+  set -- $pair
+  if $PYCHK tests/manual/gen2_parallelism/check_parity.py "$LOGDIR/$1.log" "$LOGDIR/$2.log" "${@:3}"; then
+    echo "PASS  parity: $1 ~= $2" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  parity: $1 != $2 — distributed wiring bug, see check_parity.py" | tee -a "$SUMMARY"
+  fi
+done
+
+echo "===================================================================="
+echo "SUMMARY:"
+cat "$SUMMARY"
+echo "Done at $(date)"

@@ -5,7 +5,7 @@ from timm.layers.helpers import to_2tuple
 from timm.models.swin_transformer_v2 import SwinTransformerV2Stage
 import logging
 
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 from credit.models.base_model import BaseModel
 from credit.boundary_padding import TensorPadding
 

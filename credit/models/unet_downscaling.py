@@ -4,7 +4,7 @@ import copy
 import os
 import torch.nn.functional as F
 from credit.models.base_model import BaseModel
-from credit.postblock import PostBlock
+from credit.postblock.gen1 import PostBlock
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
