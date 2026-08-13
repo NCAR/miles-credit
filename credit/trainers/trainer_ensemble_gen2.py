@@ -10,7 +10,7 @@ import tqdm
 import optuna
 
 from credit.losses.crps import ring_crps_loss
-from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from credit.preblock import build_preblocks, apply_preblocks
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
@@ -227,7 +227,7 @@ class TrainerEnsembleGen2(BaseTrainer):
                     if self.flag_clamp:
                         y = torch.clamp(y, min=self.clamp_min, max=self.clamp_max)
 
-                    loss = ring_crps_loss(y_pred.to(y.dtype), y, self.rank, dist.get_world_size())
+                    loss = ring_crps_loss(y_pred.to(y.dtype), y)
                     total_std = (y_pred - y).detach().std()
 
                     accum_log(logs, {"loss": loss.item()})
