@@ -1,4 +1,4 @@
-# Quickstart
+# Get Started
 
 With these instructions, you can get from zero to running a training session in under 10 minutes.
 
