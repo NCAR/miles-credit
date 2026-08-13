@@ -87,6 +87,7 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     """Convert a model to use domain-parallel layers.
 
     Walks the module tree and replaces:
+
     - CrossEmbedConvBranch (kernel>1 in H) -> DomainParallelCrossEmbedBranch,
       checked before the plain Conv2d rule so CrossEmbedLayer's per-branch
       ZeroPad2d isn't left running unconverted next to a wrapped inner Conv2d
