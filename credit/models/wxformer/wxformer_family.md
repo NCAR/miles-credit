@@ -198,6 +198,16 @@ through the sphere back to an SE-owned cell. That prevents the model from
 learning artifacts tied to scratch padding at cube vertices, where rollout
 errors otherwise accumulate.
 
+**Related work:** Feng et al. 2026, "Global-Regional AI Weather Forecasting on
+a Stretched Cubed Sphere," *Geophysical Research Letters*,
+[10.1029/2026GL124199](https://agupubs.onlinelibrary.wiley.com/doi/10.1029/2026GL124199).
+Uses a stretched cubed-sphere mesh to keep global coverage while refining
+resolution over a target region, specifically to avoid the external-boundary-
+forcing artifacts that limited-area regional models get from an imposed edge —
+the same class of problem true ghost halo exchange is solving here for
+rollout stability at face boundaries, approached from the mesh-design side
+rather than the boundary-condition side.
+
 ```yaml
 model:
   type: cubed_wxformer
