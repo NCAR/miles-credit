@@ -112,10 +112,12 @@ class ConcatToTensor(BasePreblock):
             if data_type == "metadata":
                 for source, meta_dict in sources.items():
                     if "input_datetime" in meta_dict:
-                        metadata["input"][source] = {"datetime": pd.DatetimeIndex(meta_dict["input_datetime"].numpy())}
+                        metadata["input"][source] = {
+                            "datetime": pd.DatetimeIndex(meta_dict["input_datetime"].cpu().numpy())
+                        }
                     if "target_datetime" in meta_dict:
                         metadata["target"][source] = {
-                            "datetime": pd.DatetimeIndex(meta_dict["target_datetime"].numpy())
+                            "datetime": pd.DatetimeIndex(meta_dict["target_datetime"].cpu().numpy())
                         }
             elif data_type == "input":
                 for source, variables in sources.items():

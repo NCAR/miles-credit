@@ -6,13 +6,15 @@ import sys
 
 import yaml
 
+from credit.datasets.gen_2.channel_utils import resolve_num_levels
+
 logger = logging.getLogger(__name__)
 
 
 def _build_channel_map(conf):
     """Return a dict mapping variable name -> list of channel indices in the output tensor."""
     src = conf["data"]["source"]["ERA5"]
-    n_levels = len(src.get("levels", []))
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -37,9 +39,9 @@ def _build_denorm_stats(conf):
     import xarray as xr
 
     src = conf["data"]["source"]["ERA5"]
-    levels = src["levels"]
+    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
     level_coord = src["level_coord"]
-    n_levels = len(levels)
+    n_levels = resolve_num_levels(src, conf)
     v = src["variables"]
     prog = v.get("prognostic") or {}
     diag = v.get("diagnostic") or {}
@@ -62,8 +64,11 @@ def _build_denorm_stats(conf):
             n = n_levels if is_3d else 1
             return np.zeros(n, dtype=np.float32), np.ones(n, dtype=np.float32)
         if is_3d:
-            m = mean_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
-            s = std_ds[varname].sel({level_coord: levels}).values.astype(np.float32)
+            # Explicit level subset -> select it; else take every level in file order.
+            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
+            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
+            m = m_da.values.astype(np.float32)
+            s = s_da.values.astype(np.float32)
         else:
             m = np.array([float(mean_ds[varname].values)], dtype=np.float32)
             s = np.array([float(std_ds[varname].values)], dtype=np.float32)

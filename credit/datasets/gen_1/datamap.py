@@ -185,10 +185,12 @@ class DataMap:
 
     rootpath: pathway to the files
     glob: filename glob of netcdf files (relative to rootpath)
-    dim: dimensions of the data:
+    dim: dimensions of the data::
+
         static: no time dimension; data is loaded on initialization
         3D: data has z-dimension; can subset levels using zstride
         2D: default: time-varying 2D data
+
     normalize: if dim=='static' & normalize == True, scale data to range [0,1]
     zstride: if dim=='3D', subset in Z dimension by ::zstride when reading
     boundary: list of variable names to use as (input-only) boundary conditions

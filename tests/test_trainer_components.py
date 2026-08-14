@@ -4,15 +4,18 @@ and the load_trainer() factory.
 All tests run on CPU with no data files required.
 """
 
-import pytest
-import torch
-import torch.nn as nn
-import torch.nn.utils as nnu
+import logging
+import sys
 import warnings
 
+import pytest
+import torch
+import torch.nn.utils as nnu
+from torch import nn
+
 try:
-    from credit.trainers.base_trainer import EMATracker, BaseTrainer
     from credit.scheduler import LinearWarmupCosineScheduler
+    from credit.trainers.base_trainer import BaseTrainer, EMATracker
 
     _TRAINER_GEN2_AVAILABLE = True
 except ImportError:
@@ -28,6 +31,48 @@ pytestmark = pytest.mark.skipif(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+# Fallback ``save_loc`` for confs that do not set their own.  The autouse
+# fixture below repoints it at a per-test pytest tmp dir: a fixed path under
+# /tmp is shared by every user and run on a login node, so files left there by
+# an earlier run (e.g. a channel_schema.yaml another user owns) get picked up
+# instead of the state the test set up.
+_DEFAULT_SAVE_LOC = "/tmp/credit_test_trainer"
+
+
+@pytest.fixture(autouse=True)
+def _tmp_save_loc(tmp_path, monkeypatch):
+    """Give every conf built by the helpers below a private, empty save_loc."""
+    save_loc = tmp_path / "save_loc"
+    save_loc.mkdir()
+    monkeypatch.setattr(sys.modules[__name__], "_DEFAULT_SAVE_LOC", str(save_loc))
+
+
+@pytest.fixture(autouse=True)
+def _pin_trainer_device(monkeypatch):
+    """Keep constructed trainers on the cuda-or-cpu device this module targets.
+
+    ``select_device()`` prefers MPS on Apple Silicon, but the toy models and
+    fake batches here live on CPU (see the module docstring). Left unpinned the
+    trainer would move batches to MPS while the model params stay on CPU, so
+    every train/validate step raises a device mismatch. Skipping MPS restores
+    the original CPU/CUDA behaviour without touching production code. The real
+    ``credit.distributed.select_device`` is untouched (see the device test).
+    """
+    if not _TRAINER_GEN2_AVAILABLE:
+        return
+    import credit.trainers.base_trainer as base_trainer
+
+    def _cuda_or_cpu(local_rank=0, device=None):
+        if device is not None:
+            return torch.device(device)
+        if torch.cuda.is_available():
+            idx = local_rank % torch.cuda.device_count()
+            torch.cuda.set_device(idx)
+            return torch.device(f"cuda:{idx}")
+        return torch.device("cpu")
+
+    monkeypatch.setattr(base_trainer, "select_device", _cuda_or_cpu)
 
 
 def _tiny_model():
@@ -64,7 +109,7 @@ def _minimal_conf(**trainer_overrides):
     trainer.update(trainer_overrides)
     return {
         "trainer": trainer,
-        "save_loc": "/tmp/credit_test_trainer",
+        "save_loc": _DEFAULT_SAVE_LOC,
     }
 
 
@@ -171,13 +216,136 @@ class TestBaseTrainerInit:
         assert trainer.distributed is False
         assert trainer.rank == 0
 
-    def test_device_is_cpu_when_no_cuda(self, tmp_path):
+    def test_select_device_without_cuda(self):
+        """Without CUDA, select_device falls back to MPS (Apple Silicon) or CPU.
+
+        Tests the real credit.distributed.select_device, not the trainer's
+        device — the module autouse fixture pins the trainer to cuda-or-cpu, so
+        trainer.device would not reflect the real fallback here.
+        """
+        from credit.distributed import select_device
+
+        if not torch.cuda.is_available():
+            assert select_device(0).type in ("cpu", "mps")
+
+    def test_default_display_metrics(self, tmp_path):
         conf = _minimal_conf()
         conf["save_loc"] = str(tmp_path)
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
-        # In a CPU-only test environment device should be cpu
-        if not torch.cuda.is_available():
-            assert trainer.device.type == "cpu"
+
+        assert trainer.display_metrics == ("rmse", "r2score", "bias")
+
+    def test_configured_display_metrics(self, tmp_path):
+        conf = _minimal_conf()
+        conf["save_loc"] = str(tmp_path)
+        conf["metrics"] = {
+            "type": "combined",
+            "args": {"metrics": {"rmse": {}, "mae": {}}},
+        }
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+        assert trainer.display_metrics == ("rmse", "mae")
+
+    def test_log_epoch_metrics_uses_epoch_means(self, tmp_path, caplog):
+        conf = _minimal_conf()
+        conf["save_loc"] = str(tmp_path)
+        trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+        with caplog.at_level(logging.INFO, logger="credit.trainers.base_trainer"):
+            trainer._log_epoch_metrics(
+                3,
+                {
+                    "valid_rmse": [1.0, 3.0],
+                    "valid_r2score": [0.2, 0.4],
+                    "valid_bias": [-1.0, 1.0],
+                },
+            )
+
+        assert any(
+            "Epoch 3 valid metrics" in message
+            and "valid_rmse: 2.000000" in message
+            and "valid_r2score: 0.300000" in message
+            and "valid_bias: 0.000000" in message
+            for message in caplog.messages
+        )
+
+    def test_computed_metrics_export_to_csv_and_tensorboard(self, tmp_path, monkeypatch):
+        import credit.trainers.base_trainer as base_trainer_module
+
+        class ExportTrainer(_ConcreteTrainer):
+            def train_one_epoch(self, *args, **kwargs):
+                return {
+                    "train_loss": [1.0],
+                    "train_rmse": [0.5],
+                    "train_r2score": [0.7],
+                    "train_bias": [-0.1],
+                }
+
+            def validate(self, *args, **kwargs):
+                return {
+                    "valid_loss": [0.8],
+                    "valid_rmse": [0.4],
+                    "valid_r2score": [0.8],
+                    "valid_bias": [-0.05],
+                }
+
+        class FakeWriter:
+            def __init__(self, log_dir):
+                self.log_dir = log_dir
+                self.scalars = []
+
+            def add_scalar(self, tag, value, step):
+                self.scalars.append((tag, value, step))
+
+            def flush(self):
+                pass
+
+            def close(self):
+                pass
+
+        writer = None
+
+        def make_writer(log_dir):
+            nonlocal writer
+            writer = FakeWriter(log_dir)
+            return writer
+
+        conf = _minimal_conf(
+            epochs=1,
+            num_epoch=1,
+            save_best_weights=False,
+            save_backup_weights=False,
+            use_tensorboard=True,
+        )
+        conf["save_loc"] = str(tmp_path)
+        monkeypatch.setattr(base_trainer_module, "_SummaryWriter", make_writer)
+        monkeypatch.setattr(base_trainer_module, "check_dataloader_startup", lambda *args, **kwargs: None)
+        monkeypatch.setattr(base_trainer_module, "check_model_gpu_memory", lambda *args, **kwargs: None)
+        trainer = ExportTrainer(_tiny_model(), rank=0, conf=conf)
+        monkeypatch.setattr(trainer, "_save_checkpoint", lambda *args, **kwargs: None)
+
+        from torch.utils.data import DataLoader, TensorDataset
+
+        loader = DataLoader(TensorDataset(torch.zeros(1)))
+        optimizer = torch.optim.SGD(trainer.model.parameters(), lr=1e-3)
+        trainer.fit(
+            conf,
+            train_loader=loader,
+            valid_loader=loader,
+            optimizer=optimizer,
+            train_criterion=nn.MSELoss(),
+            valid_criterion=nn.MSELoss(),
+            scaler=None,
+            scheduler=None,
+            metrics=None,
+        )
+
+        csv_text = (tmp_path / "training_log.csv").read_text()
+        for name in ("train_rmse", "valid_rmse", "train_r2score", "valid_r2score", "train_bias", "valid_bias"):
+            assert name in csv_text
+        assert writer is not None
+        tags = {tag for tag, _, _ in writer.scalars}
+        assert {"rmse/train", "rmse/valid", "r2score/train", "r2score/valid", "bias/train", "bias/valid"} <= tags
 
     def test_ema_none_when_disabled(self, tmp_path):
         conf = _minimal_conf(use_ema=False)
@@ -230,7 +398,7 @@ class TestLinearWarmupCosineScheduler:
         return optimizer, scheduler
 
     def test_lr_starts_near_zero(self):
-        optimizer, scheduler = self._make_scheduler(base_lr=1e-3, warmup_steps=100)
+        optimizer, _ = self._make_scheduler(base_lr=1e-3, warmup_steps=100)
         lr = optimizer.param_groups[0]["lr"]
         assert lr < 1e-4, f"Expected near-zero LR at step 0, got {lr}"
 
@@ -427,8 +595,6 @@ def _era5_gen2_multistep_conf(forecast_len, tmp_path):
 class _FakeDataset:
     """Stub dataset so the batches_per_epoch resolution logic doesn't crash."""
 
-    pass
-
 
 class _FakeLoader:
     """Minimal iterable loader that yields nested-format batches for trainer_gen2.
@@ -487,8 +653,8 @@ class TestERA5Gen2MultiStepTraining:
     def test_2step_train_one_epoch_runs(self, tmp_path):
         """2-step autoregressive loop completes with toy data."""
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2
@@ -529,8 +695,8 @@ class TestERA5Gen2MultiStepTraining:
     def test_2step_x_replaced_with_y_pred(self, tmp_path):
         """At t=2, x must equal y_pred from t=1 (all vars are prognostic)."""
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         B, C, H, W = 1, 4, 4, 4
         device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -585,8 +751,8 @@ class TestERA5Gen2MultiStepTraining:
         Channel order follows FIELD_TYPE_RANK: prognostic < static < dynamic_forcing.
         """
         import torch
-        import torch.nn as nn
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+        from torch import nn
 
         N_PROG, N_STATIC, N_DYNFRC = 3, 1, 2
         B, H, W = 1, 4, 4
@@ -1018,13 +1184,13 @@ class TestEMATrackerEdgeCases:
 
         ema = EMATracker(sn_model, decay=0.9999)
         # Confirm the filter already works during __init__
-        assert not any(k.endswith("_u") or k.endswith("_v") for k in ema.shadow)
+        assert not any(k.endswith(("_u", "_v")) for k in ema.shadow)
 
         # Simulate a pre-filter checkpoint: inject averaged (non-unit) u/v
         state = sn_model.state_dict()
         legacy_shadow = dict(ema.shadow)
         for k, v in state.items():
-            if k.endswith("_u") or k.endswith("_v"):
+            if k.endswith(("_u", "_v")):
                 fake = torch.randn_like(v)
                 legacy_shadow[k] = v.float() * 0.5 + fake * 0.3  # not a unit vector
 
@@ -1034,7 +1200,7 @@ class TestEMATrackerEdgeCases:
         ema2.load_state_dict(legacy_state)
 
         # After load, shadow must have no u/v keys
-        bad_keys = [k for k in ema2.shadow if k.endswith("_u") or k.endswith("_v")]
+        bad_keys = [k for k in ema2.shadow if k.endswith(("_u", "_v"))]
         assert bad_keys == [], f"load_state_dict left stale u/v keys in shadow: {bad_keys}"
 
         # swap + eval forward must produce a sane sigma (≈1.0, not tiny)
@@ -1044,8 +1210,8 @@ class TestEMATrackerEdgeCases:
             _ = sn_model(torch.randn(2, 8))
         for mod in sn_model.modules():
             if hasattr(mod, "weight_orig"):
-                u = getattr(mod, "weight_u")
-                v = getattr(mod, "weight_v")
+                u = mod.weight_u
+                v = mod.weight_v
                 w = mod.weight_orig.reshape(mod.weight_orig.size(0), -1)
                 sigma = (u @ w @ v).item()
                 assert sigma > 0.1, f"sigma={sigma:.4f} too small — u/v still corrupted after fix"
@@ -1087,7 +1253,7 @@ class TestEMATrackerEdgeCases:
         state = sn_model.state_dict()
         legacy_shadow = dict(ema.shadow)
         for k, v in state.items():
-            if k.endswith("_u") or k.endswith("_v"):
+            if k.endswith(("_u", "_v")):
                 fake = torch.randn_like(v)
                 legacy_shadow[k] = v.float() * 0.5 + fake * 0.3
         legacy_ema_state = {"shadow": legacy_shadow, "decay": 0.9999, "step": ema.step}
@@ -1241,6 +1407,72 @@ class TestBaseTrainerAdditionalInit:
         conf["save_loc"] = str(tmp_path)
         trainer = _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
         assert trainer.grad_max_norm == 1.0
+
+
+class TestSelectLogMetricNames:
+    """Column selection for training_log.csv (BaseTrainer._select_log_metric_names)."""
+
+    _train_results = {
+        "train_loss": [0.5],
+        "train_rmse": [1.0],
+        "train_rmse/ERA5/prognostic/3d/temperature": [1.8],
+        "train_rmse/ERA5/prognostic/2d/SP": [140.0],
+        "train_loss_var/ERA5/prognostic/3d/temperature": [0.2],
+        "train_forecast_len": [1],
+        "train_history_len": [1],
+    }
+    _valid_results = {
+        "valid_loss": [0.6],
+        "valid_rmse": [1.1],
+        "valid_rmse/ERA5/prognostic/3d/temperature": [1.9],
+        "valid_rmse/ERA5/prognostic/2d/SP": [150.0],
+        "valid_acc/ERA5/prognostic/3d/temperature": [0.9],  # validation-only key
+        "valid_forecast_len": [1],
+        "valid_history_len": [1],
+    }
+
+    def _trainer(self, tmp_path, **overrides):
+        conf = _minimal_conf(**overrides)
+        conf["save_loc"] = str(tmp_path)
+        return _ConcreteTrainer(_tiny_model(), rank=0, conf=conf)
+
+    def test_default_saves_per_variable_and_combined(self, tmp_path):
+        """Default (unset) writes per-variable columns alongside the aggregates."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" in names
+        assert "loss_var/ERA5/prognostic/3d/temperature" in names
+        # validation-only keys are not dropped
+        assert "acc/ERA5/prognostic/3d/temperature" in names
+
+    def test_list_filters_per_variable_keeps_combined(self, tmp_path):
+        """A variable list restricts per-variable columns but keeps the aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=["temperature"])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "rmse/ERA5/prognostic/3d/temperature" in names
+        assert "rmse/ERA5/prognostic/2d/SP" not in names
+        assert "loss" in names and "rmse" in names
+
+    def test_false_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: False writes only the combined aggregates."""
+        trainer = self._trainer(tmp_path, save_metric_vars=False)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert "loss" in names and "rmse" in names
+        assert not any("/" in name for name in names)
+
+    def test_empty_list_saves_aggregates_only(self, tmp_path):
+        """save_metric_vars: [] behaves like False (aggregates only)."""
+        trainer = self._trainer(tmp_path, save_metric_vars=[])
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert not any("/" in name for name in names)
+
+    def test_no_duplicate_columns(self, tmp_path):
+        """Aggregate names already in the results are not duplicated."""
+        trainer = self._trainer(tmp_path)
+        names = trainer._select_log_metric_names(self._train_results, self._valid_results)
+        assert len(names) == len(set(names))
 
 
 # ---------------------------------------------------------------------------
@@ -1502,6 +1734,7 @@ class TestTrainerERA5Gen2AdditionalCoverage:
     def test_scheduler_lambda_step_called(self, tmp_path):
         """lambda scheduler steps once per epoch at epoch start (lines 146-147)."""
         from unittest.mock import MagicMock
+
         from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
@@ -1544,8 +1777,9 @@ class TestTrainerERA5Gen2AdditionalCoverage:
         at the end of train_one_epoch (not inside the per-step loop).
         """
         from unittest.mock import patch
-        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+
         import credit.trainers.trainer_gen2 as trainer_module
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
 
         B, C, H, W = 1, 4, 4, 4
         forecast_len = 2

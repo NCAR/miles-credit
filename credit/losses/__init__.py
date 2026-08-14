@@ -1,5 +1,7 @@
 import importlib
+import inspect
 import logging
+
 import torch.nn as nn
 
 logger = logging.getLogger(__name__)
@@ -14,15 +16,16 @@ _LOSS_REGISTRY = {
     "mae": ("torch.nn", "L1Loss"),
     "msle": ("credit.losses.msle", "MSLELoss"),
     "huber": ("torch.nn", "HuberLoss"),
-    "logcosh": ("credit.losses.logcosh", "LogCoshLoss"),
-    "xtanh": ("credit.losses.xtanh", "XTanhLoss"),
-    "xsigmoid": ("credit.losses.xsigmoid", "XSigmoidLoss"),
-    "KCRPS": ("credit.losses.kcrps", "KCRPSLoss"),
-    "almost-fair-crps": ("credit.losses.almost_fair_crps", "AlmostFairKCRPSLoss"),
+    "logcosh": ("credit.losses.gen_1.logcosh", "LogCoshLoss"),
+    "xtanh": ("credit.losses.gen_1.xtanh", "XTanhLoss"),
+    "xsigmoid": ("credit.losses.gen_1.xsigmoid", "XSigmoidLoss"),
+    "KCRPS": ("credit.losses.gen_1.kcrps", "KCRPSLoss"),
+    "almost-fair-crps": ("credit.losses.gen_1.almost_fair_crps", "AlmostFairKCRPSLoss"),
     "ring-crps": ("credit.losses.crps", "RingCRPSLoss"),
-    "spectral": ("credit.losses.spectral", "SpectralLoss2D"),
-    "power": ("credit.losses.power", "PSDLoss"),
-    "covmse": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
+    "spectral": ("credit.losses.gen_1.spectral", "SpectralLoss2D"),
+    "power": ("credit.losses.gen_1.power", "PSDLoss"),
+    "covmse": ("credit.losses.gen_1.covariance", "CovarianceWeightedMSELoss"),
+    "base": ("credit.losses.base", "BaseLoss"),
 }
 
 # Names of registered losses that are CRPS-family (ensemble) losses, used by
@@ -34,18 +37,40 @@ def is_crps_loss(loss_type):
     return loss_type in CRPS_LOSSES
 
 
+def effective_loss_name(loss_conf):
+    """Resolve the registry loss name a config actually trains with.
+
+    For a new-style BaseLoss section (``type: base``) the univariate
+    ``args.training_loss`` is what drives ensemble semantics (e.g. ring-crps
+    needs shared batches and one member per dp rank), so it — not the literal
+    ``"base"`` — is returned. Any other section resolves to the flat
+    ``training_loss`` key or the new-style ``type``.
+
+    Args:
+        loss_conf: the config's ``loss:`` section (``conf["loss"]``).
+
+    Returns:
+        Registry loss name string, or None if the section is empty.
+    """
+    loss_conf = loss_conf or {}
+    if loss_conf.get("type") == "base":
+        # "mse" mirrors the BaseLoss constructor default for training_loss.
+        return (loss_conf.get("args") or {}).get("training_loss", "mse")
+    return loss_conf.get("training_loss") or loss_conf.get("type")
+
+
 # Direct-import table: maps Python class names → class for lazy module attribute access.
 # Enables ``from credit.losses import LogCoshLoss`` without eager imports; kept for backward compatibility.
 _CLASS_SOURCES = {
     "MSLELoss": ("credit.losses.msle", "MSLELoss"),
-    "LogCoshLoss": ("credit.losses.logcosh", "LogCoshLoss"),
-    "XTanhLoss": ("credit.losses.xtanh", "XTanhLoss"),
-    "XSigmoidLoss": ("credit.losses.xsigmoid", "XSigmoidLoss"),
-    "KCRPSLoss": ("credit.losses.kcrps", "KCRPSLoss"),
-    "AlmostFairKCRPSLoss": ("credit.losses.almost_fair_crps", "AlmostFairKCRPSLoss"),
-    "SpectralLoss2D": ("credit.losses.spectral", "SpectralLoss2D"),
-    "PSDLoss": ("credit.losses.power", "PSDLoss"),
-    "CovarianceWeightedMSELoss": ("credit.losses.covariance", "CovarianceWeightedMSELoss"),
+    "LogCoshLoss": ("credit.losses.gen_1.logcosh", "LogCoshLoss"),
+    "XTanhLoss": ("credit.losses.gen_1.xtanh", "XTanhLoss"),
+    "XSigmoidLoss": ("credit.losses.gen_1.xsigmoid", "XSigmoidLoss"),
+    "KCRPSLoss": ("credit.losses.gen_1.kcrps", "KCRPSLoss"),
+    "AlmostFairKCRPSLoss": ("credit.losses.gen_1.almost_fair_crps", "AlmostFairKCRPSLoss"),
+    "SpectralLoss2D": ("credit.losses.gen_1.spectral", "SpectralLoss2D"),
+    "PSDLoss": ("credit.losses.gen_1.power", "PSDLoss"),
+    "CovarianceWeightedMSELoss": ("credit.losses.gen_1.covariance", "CovarianceWeightedMSELoss"),
 }
 
 
@@ -53,14 +78,18 @@ _CLASS_SOURCES = {
 # Module __getattr__: called when a name is not found via normal attribute lookup.
 # Resolves names listed in _CLASS_SOURCES lazily so submodules are only imported on first access.
 # Example: ``from credit.losses import LogCoshLoss`` triggers __getattr__("LogCoshLoss"),
-#          which imports credit.losses.logcosh on the spot and returns the class.
+#          which imports credit.losses.gen_1.logcosh on the spot and returns the class.
 def __getattr__(name):
     if name == "VariableTotalLoss2D":
-        from credit.losses.weighted_loss import VariableTotalLoss2D
+        from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
 
         return VariableTotalLoss2D
+    if name == "BaseLoss":
+        from credit.losses.base import BaseLoss
+
+        return BaseLoss
     if name == "DownscalingLoss":
-        from credit.losses.downscaling_loss import DownscalingLoss
+        from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
         return DownscalingLoss
     if name in _CLASS_SOURCES:
@@ -184,7 +213,14 @@ def load_loss(conf, reduction="none", validation=False):
     config, that loss type will be used. Otherwise, the training loss is used.
 
     Args:
-        conf (dict): Configuration dictionary. Must contain a 'loss' section with keys like:
+        conf (dict): Configuration dictionary. Must contain a 'loss' section in one of two formats:
+
+                     New-style (Gen 2, mirrors preblocks/postblocks)::
+                         loss:
+                           type: base            # registry loss name
+                           args: {...}           # constructor kwargs
+
+                     Legacy flat keys:
                      - 'training_loss' (str): The primary loss function name.
                      - 'validation_loss' (optional, str): An alternate loss for validation.
                      - 'use_latitude_weights' (bool): Whether to use latitude-based weighting.
@@ -197,7 +233,8 @@ def load_loss(conf, reduction="none", validation=False):
         validation (bool, optional): Whether the loss is being used for validation. Defaults to False.
 
     Returns:
-        torch.nn.Module: A loss function instance: ``DownscalingLoss`` for downscaling configs,
+        torch.nn.Module: A loss function instance: ``BaseLoss`` (or another ``type``-dispatched
+                         loss) for new-style sections, ``DownscalingLoss`` for downscaling configs,
                          ``VariableTotalLoss2D`` when latitude/variable weights are enabled,
                          or a standard/custom loss from the registry otherwise.
 
@@ -207,18 +244,37 @@ def load_loss(conf, reduction="none", validation=False):
     from credit.registry import (
         load_custom_objects,
     )  # imported here so that importing credit.losses does not automatically load credit.registry
-    from credit.losses.weighted_loss import VariableTotalLoss2D
-    from credit.losses.downscaling_loss import DownscalingLoss
+    from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
+    from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
     load_custom_objects(conf)  # register any custom classes listed under custom_objects in the config
 
     loss_conf = conf["loss"]
 
+    mode = "validation" if validation else "train"
+
+    # New-style {type, args} loss section (Gen 2; mirrors the preblocks/
+    # postblocks structure). Self-contained: no latitude/variable-weight or
+    # downscaling wrapper dispatch applies.
+    if "type" in loss_conf:
+        loss_type = loss_conf["type"]
+        args = dict(loss_conf.get("args") or {})
+        if loss_type == "base":
+            from credit.datasets.gen_2.channel_utils import ChannelSchema
+            from credit.losses.base import BaseLoss
+
+            logger.info("Loaded BaseLoss (%s)", mode)
+            return BaseLoss(channel_schema=ChannelSchema.load_or_from_config(conf), validation=validation, **args)
+        cls = _load_loss_entry(loss_type)
+        if "reduction" in inspect.signature(cls.__init__).parameters:
+            args.setdefault("reduction", reduction)
+        logger.info(f"Loaded the {loss_type} loss function ({mode}) with parameters: {args}")
+        return cls(**args)
+
     is_downscaling = "datasets" in conf["data"]
     # downscaling could also use_variable_weights, so it needs to come first
-    mode = "validation" if validation else "train"
     if is_downscaling:
-        from credit.losses.downscaling_loss import DownscalingLoss
+        from credit.losses.gen_1.downscaling_loss import DownscalingLoss
 
         logger.info("Loaded DownscalingLoss (%s)", mode)
         return DownscalingLoss(conf, validation=validation)
@@ -233,7 +289,7 @@ def load_loss(conf, reduction="none", validation=False):
         )
 
     if use_weighted_loss:
-        from credit.losses.weighted_loss import VariableTotalLoss2D
+        from credit.losses.gen_1.weighted_loss import VariableTotalLoss2D
 
         logger.info("Loaded VariableTotalLoss2D (%s)", mode)
         return VariableTotalLoss2D(conf, validation=validation)

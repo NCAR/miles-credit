@@ -16,7 +16,7 @@ import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
 
-from credit.losses.crps import RingCRPSLoss, ring_crps_loss
+from credit.losses.crps import RingCRPSLoss, ring_crps_elementwise, ring_crps_loss
 
 
 def _members(K, shape=(2, 3, 8, 16), seed=0):
@@ -64,6 +64,76 @@ class TestSingleProcess:
         with pytest.raises(ValueError, match="ring-crps"):
             load_loss(conf)
 
+    def test_elementwise_no_dist(self):
+        members, y = _members(1)
+        pred = members[0]
+        elementwise = RingCRPSLoss(reduction="none")(y, pred)
+        assert elementwise.shape == pred.shape
+        assert torch.allclose(elementwise, (pred - y).abs())
+        assert torch.allclose(elementwise.mean(), RingCRPSLoss()(y, pred))
+        assert torch.allclose(ring_crps_elementwise(pred, y).mean(), ring_crps_loss(pred, y))
+
+    def test_invalid_reduction_rejected(self):
+        with pytest.raises(ValueError, match="reduction"):
+            RingCRPSLoss(reduction="sum")
+
+
+class TestEffectiveLossName:
+    def test_flat_and_type_sections(self):
+        from credit.losses import effective_loss_name
+
+        assert effective_loss_name({"training_loss": "ring-crps"}) == "ring-crps"
+        assert effective_loss_name({"type": "ring-crps"}) == "ring-crps"
+        assert effective_loss_name({"type": "base", "args": {"training_loss": "ring-crps"}}) == "ring-crps"
+        assert effective_loss_name({"type": "base", "args": {"training_loss": "mse"}}) == "mse"
+        assert effective_loss_name({"type": "base"}) == "mse"  # BaseLoss constructor default
+        assert effective_loss_name({}) is None
+        assert effective_loss_name(None) is None
+
+
+class TestBaseLossIntegration:
+    """ring-crps as the univariate loss inside BaseLoss (ensemble across dp ranks)."""
+
+    VAR = "ERA5/prognostic/2d/t2m"
+
+    def _state_dict(self, pred, y):
+        return {
+            "y_processed": {"ERA5": {self.VAR: pred}},
+            "y_target_processed": {"ERA5": {self.VAR: y}},
+        }
+
+    def _base_loss(self):
+        from credit.losses import BaseLoss
+
+        return BaseLoss(training_loss="ring-crps", var_weighting="none")
+
+    def test_accepted_and_reduces_to_mae_no_dist(self):
+        members, y = _members(1)
+        pred = members[0].clone().requires_grad_(True)
+        criterion = self._base_loss()
+        loss = criterion(self._state_dict(pred, y))
+        # Single variable, normalized weights -> plain elementwise mean == MAE.
+        assert torch.allclose(loss, (pred - y).abs().mean())
+        loss.backward()
+        assert torch.allclose(pred.grad, torch.sign(pred.detach() - y) / pred.numel())
+        assert self.VAR in criterion.last_var_losses
+
+    def test_other_crps_still_rejected(self):
+        from credit.losses import BaseLoss
+
+        with pytest.raises(ValueError, match="CRPS"):
+            BaseLoss(training_loss="KCRPS", var_weighting="none")
+
+    def test_crps_override_rejected(self):
+        from credit.losses import BaseLoss
+
+        with pytest.raises(ValueError, match="base_loss_overrides"):
+            BaseLoss(
+                training_loss="mse",
+                var_weighting="none",
+                base_loss_overrides={self.VAR: {"loss": "ring-crps"}},
+            )
+
 
 class TestGen1Equivalence:
     """The gen1 ensemble trainer computes Gather(all members) -> KCRPS
@@ -77,7 +147,7 @@ class TestGen1Equivalence:
     """
 
     def _gen1_loss(self, members, y):
-        from credit.losses.kcrps import KCRPSLoss
+        from credit.losses.gen_1.kcrps import KCRPSLoss
 
         criterion = KCRPSLoss(reduction="none")  # biased=False default
         gathered = torch.cat(members, dim=0)  # Gather concatenates on dim 0
@@ -193,6 +263,63 @@ def test_ring_crps_loss_lazy_group(tmp_path, K):
     grad_out = manager.dict()
 
     mp.spawn(_ring_crps_loss_worker, args=(K, init_file, value_out, grad_out), nprocs=K, join=True)
+
+    members, y = _members(K)
+
+    for r in range(K):
+        skill = (members[r] - y).abs()
+        spread = sum((members[r] - members[j]).abs() for j in range(K) if j != r)
+        expected = (skill - spread / (K - 1)).mean() / K
+        assert abs(value_out[r] - expected.item()) < 1e-6, f"rank {r} loss value"
+
+    ref_members = [m.clone().requires_grad_(True) for m in members]
+    _reference_fair_crps(ref_members, y).backward()
+    for r in range(K):
+        assert torch.allclose(torch.from_numpy(grad_out[r]), ref_members[r].grad, atol=1e-6), (
+            f"rank {r} gradient does not match fair-CRPS gradient"
+        )
+
+
+def _baseloss_ring_worker(rank, K, init_file, value_out, grad_out):
+    """BaseLoss(training_loss='ring-crps') end-to-end over gloo.
+
+    One variable with var_weighting='none' makes the combined BaseLoss equal
+    the flat ring scalar, so the same value/gradient contracts apply.
+    """
+    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=K)
+    try:
+        from credit.losses import BaseLoss
+        from credit.parallel.mesh import register_dp_group
+
+        register_dp_group(dist.group.WORLD)
+        members, y = _members(K)
+        pred = members[rank].clone().requires_grad_(True)
+        criterion = BaseLoss(training_loss="ring-crps", var_weighting="none")
+        var = "ERA5/prognostic/2d/t2m"
+        loss = criterion(
+            {
+                "y_processed": {"ERA5": {var: pred}},
+                "y_target_processed": {"ERA5": {var: y}},
+            }
+        )
+        loss.backward()
+        value_out[rank] = loss.item()
+        # Store as numpy: putting a torch.Tensor into a manager.dict moves it to
+        # shared memory and deadlocks the child at exit under mp.spawn on macOS.
+        grad_out[rank] = pred.grad.numpy()
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.parametrize("K", [2, 3])
+def test_baseloss_ring_matches_reference(tmp_path, K):
+    """BaseLoss-wrapped ring-crps keeps the flat loss's value and gradient contracts."""
+    init_file = str(tmp_path / "ring_base_init")
+    manager = mp.Manager()
+    value_out = manager.dict()
+    grad_out = manager.dict()
+
+    mp.spawn(_baseloss_ring_worker, args=(K, init_file, value_out, grad_out), nprocs=K, join=True)
 
     members, y = _members(K)
 

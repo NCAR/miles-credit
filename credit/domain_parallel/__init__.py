@@ -5,13 +5,15 @@ across multiple GPUs, enabling training on data too large for a single GPU.
 Inspired by PhysicsNeMo's ShardTensor framework.
 
 Key components:
+
 - DomainParallelManager: Process group creation and coordination
 - HaloExchange: Differentiable boundary communication for convolutions
 - Domain-parallel layers: Conv2d, Conv3d, ConvTranspose2d, GroupNorm wrappers
 - convert_to_domain_parallel: Automatic model conversion
 - shard_tensor / gather_tensor: Input/output distribution
 
-Usage:
+Usage::
+
     from credit.domain_parallel import (
         initialize_domain_parallel,
         get_domain_parallel_manager,

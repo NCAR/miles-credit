@@ -3,7 +3,7 @@ tisr.py
 -------------------------------------------------------
 TISRDataset: PyTorch Dataset for Total Incident Solar Radiation (TISR) at the top of the atmosphere (TOA).
 
-Sample structure returned by __getitem__:
+Sample structure returned by __getitem__::
 
     {
         "input":    {<user_provided_name>: {"<user_provided_name>/dynamic_forcing/2d/tisr": tensor}},
@@ -11,13 +11,16 @@ Sample structure returned by __getitem__:
         "metadata": {<user_provided_name>: {"input_datetime": int, "target_datetime": int}},
     }
 
-TISR only has a single variable and is 2D. Tensor shape (no batch dimension):
+TISR only has a single variable and is 2D. Tensor shape (no batch dimension)::
+
     (1, 1, lat, lon)   — singleton level dim, consistent with CREDIT Gen2 2D convention
 
-After DataLoader collation the batch dimension is prepended:
+After DataLoader collation the batch dimension is prepended::
+
     (batch, 1, 1, lat, lon)
 
 Note that Total Incident Solar Radiation (TISR) and Total Solar Irradiance (TSI) are different physical quantities.
+
 - TSI is the total solar power per unit area measured on a plane perpendicular (at a 90 degree angle) to the sun's rays.
   It is measured at TOA and at the mean Sun-Earth distance (1 AU), and it fluctuates slightly with the Sun's 11-year solar cycle.
 - TISR is the actual amount of solar energy that hits a specific surface with any orientation. It can be measured at TOA or surface
@@ -35,6 +38,7 @@ import torch
 import xarray as xr
 
 from credit.datasets.gen_2.base_dataset import BaseDataset
+from credit.metadata import get_meta_file_path
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,9 @@ _TORCH_DTYPE = torch.float32
 # ------------------------------------------------------------------
 def _era5_tsi_data(device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
     """ERA5-compatible Total Solar Irradiance (TSI) time series.
+
+    Kept for comparison against the GraphCast reference implementation. The
+    dataset itself reads :func:`_cmip6_tsi_data` instead.
 
     Sourced from
     `Graphcast <https://github.com/google-deepmind/graphcast/blob/main/graphcast/solar_radiation.py>`_.
@@ -159,6 +166,42 @@ def _era5_tsi_data(device: torch.device | str = "cpu") -> tuple[torch.Tensor, to
         dtype=_TORCH_DTYPE,
         device=device,
     )
+    return times, tsi_values
+
+
+# Annual-mean TSI table shipped with the package (see credit/metadata/).
+_TSI_FILE = "total_solar_irradiance_CMIP6_49r1.nc"
+
+
+def _cmip6_tsi_data(device: torch.device | str = "cpu") -> tuple[torch.Tensor, torch.Tensor]:
+    """CMIP6 annual-mean Total Solar Irradiance (TSI) time series.
+
+    Read from ``total_solar_irradiance_CMIP6_49r1.nc`` in ``credit/metadata``,
+    the table the ECMWF forecast model (IFS cycle 49r1) uses for solar forcing.
+    It holds observed values through 2014 and a reference scenario after that,
+    so it spans far more years than :func:`_era5_tsi_data` and already agrees
+    with modern observations without any rescaling.
+
+    This reads a file, so :class:`TISRDataset` calls it once in ``__init__``
+    and hands the result to :func:`_compute_tisr` for every sample.
+
+    Args:
+        device (torch.device | str): Device to place the returned tensors on.
+
+    Returns:
+        tuple[torch.Tensor, torch.Tensor]:
+            - **times** – 1-D tensor of fractional years, one entry per year
+              from 1850.5 to 2299.5 (mid-year sampling).
+            - **tsi_values** – 1-D tensor of TSI values (W m⁻²) at one
+              astronomical unit, corresponding to each entry in *times*.
+    """
+    # decode_times=False: the time axis is labelled "years since 0000-1-1",
+    # which xarray cannot turn into datetimes. The undecoded fractional years
+    # are what we want anyway, since _get_tsi interpolates against them directly.
+    ds = xr.open_dataset(get_meta_file_path(_TSI_FILE), decode_times=False)
+    times = torch.tensor(ds["time"].values, dtype=_TORCH_DTYPE, device=device)
+    tsi_values = torch.tensor(ds["tsi"].values, dtype=_TORCH_DTYPE, device=device)
+    ds.close()
     return times, tsi_values
 
 
@@ -709,6 +752,8 @@ def _compute_tisr(
     num_integration_steps: int,
     latitude: torch.Tensor,
     longitude: torch.Tensor,
+    tsi_times: torch.Tensor,
+    tsi_values: torch.Tensor,
 ) -> torch.Tensor:
     """Full pipeline for integrated top-of-atmosphere TISR at a target timestamp.
 
@@ -743,6 +788,10 @@ def _compute_tisr(
             Must be a positive integer.
         latitude (torch.Tensor): Latitude grid in degrees, shape ``(1, ny, nx)``.
         longitude (torch.Tensor): Longitude grid in degrees, shape ``(1, ny, nx)``.
+        tsi_times (torch.Tensor): 1-D tensor of fractional years, sorted ascending,
+            as returned by :func:`_cmip6_tsi_data`.
+        tsi_values (torch.Tensor): 1-D tensor of TSI values (W m⁻²) corresponding
+            element-wise to *tsi_times*.
 
     Returns:
         torch.Tensor: Integrated TOA TISR over the accumulation window, in J/m².
@@ -760,10 +809,9 @@ def _compute_tisr(
     # Reuse the cached grid's device so callers don't pass it separately.
     device = latitude.device
 
-    # Retrieve the total solar irradiance (TSI) time series and interpolate it
-    # onto ts. Unsqueeze to add singleton spatial dims for broadcasting: (time, 1, 1).
-    times, tsi_values = _era5_tsi_data(device=device)
-    tsi = _get_tsi(ts, times, tsi_values).unsqueeze(-1).unsqueeze(-1)
+    # Interpolate the total solar irradiance (TSI) series onto ts. Unsqueeze to
+    # add singleton spatial dims for broadcasting: (time, 1, 1).
+    tsi = _get_tsi(ts, tsi_times, tsi_values).unsqueeze(-1).unsqueeze(-1)
 
     # Compute orbital parameters (declination, equation of time, Earth-Sun distance,
     # etc.) for each timestep. J2000 days are unsqueezed to (time, 1, 1) so the
@@ -816,7 +864,7 @@ class TISRDataset(BaseDataset):
 
     While the default configuration targets ERA5 compatibility, both the integration period and bin
     count are configurable for other use cases. Input timestamps must fall within the TSI data
-    range (1951-2034).
+    range (1850-2299).
 
     Note that the TISR dataset is typically used as a dynamic forcing/input variable rather than a
     target, so the ``return_target`` parameter is set to False by default. TISR dataset is not loading
@@ -833,7 +881,7 @@ class TISRDataset(BaseDataset):
 
     See module docstring for full description of output format and file naming.
 
-    Example YAML configuration (grid read from file):
+    Example YAML configuration (grid read from file)::
 
         data:
             source:
@@ -850,9 +898,9 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
 
-    Example YAML configuration (grid built in-memory from specs):
+    Example YAML configuration (grid built in-memory from specs)::
 
         data:
             source:
@@ -870,7 +918,7 @@ class TISRDataset(BaseDataset):
             start_datetime: "2021-06-01"
             end_datetime: "2021-06-04"
             timestep: "6h"
-            forecast_len: 0
+            forecast_len: 1
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -947,6 +995,11 @@ class TISRDataset(BaseDataset):
             device=self.device,
         )
 
+        # Same reasoning for the TSI table: read the file once here rather than
+        # once per sample. Loading it before DataLoader workers start also means
+        # forked workers inherit these tensors instead of each re-reading the file.
+        self.tsi_times, self.tsi_values = _cmip6_tsi_data(device=self.device)
+
     def _get_file_source(self, field_config: dict[str, Any]) -> None:
         """Returns None since TISR dataset is not loading any data from local or remote files."""
         return None
@@ -985,6 +1038,14 @@ class TISRDataset(BaseDataset):
 
         # Compute the top-of-atmosphere solar radiation, expand to be (1, 1, lat, lon),
         # and store it in the sample dictionary
-        tisr = _compute_tisr(t, self.dt, self.num_integration_steps, self.latitude, self.longitude)
+        tisr = _compute_tisr(
+            t,
+            self.dt,
+            self.num_integration_steps,
+            self.latitude,
+            self.longitude,
+            self.tsi_times,
+            self.tsi_values,
+        )
         key = self._get_field_name(field_type, "2d", "tisr")
         sample[key] = tisr.unsqueeze(0).unsqueeze(0)

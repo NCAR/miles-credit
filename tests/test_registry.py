@@ -5,13 +5,11 @@ import sys
 
 import pytest
 import torch
-import torch.nn as nn
-
-from credit.models.base_model import BaseModel
-from credit.preblock.base import BasePreblock
-from credit.postblock.base import BasePostblock
 from credit.datasets.gen_2.base_dataset import BaseDataset
-
+from credit.models.base_model import BaseModel
+from credit.postblock.base import BasePostblock
+from credit.preblock.base import BasePreblock
+from torch import nn
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -50,8 +48,8 @@ class TestLoadCustomObjects:
             "    def __getitem__(self, i): return {}\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.datasets import _DATASET_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -75,8 +73,8 @@ class TestLoadCustomObjects:
             "    def forward(self, batch): return batch\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.preblock import _PREBLOCK_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -101,8 +99,8 @@ class TestLoadCustomObjects:
             "    def forward(self, x): return x\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.models import _MODEL_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -126,8 +124,8 @@ class TestLoadCustomObjects:
             "    def forward(self, batch): return batch\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.postblock import _POSTBLOCK_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -152,8 +150,8 @@ class TestLoadCustomObjects:
             "    def forward(self, x, y): return (x - y).abs().mean()\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.losses import _LOSS_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -166,6 +164,33 @@ class TestLoadCustomObjects:
         }
         load_custom_objects(conf)
         assert "RegTestLoss" in _LOSS_REGISTRY
+
+    def test_registers_metric(self, tmp_path):
+        """A metric entry is imported and registered in the metric registry."""
+        _make_installable_module(
+            tmp_path,
+            "reg_test_metric_pkg",
+            "import torch\n"
+            "from credit.metrics.base import BaseVariableMetric\n"
+            "class RegTestMetric(BaseVariableMetric):\n"
+            "    def compute_variable(self, pred, target):\n"
+            "        return (pred - target) ** 2\n",
+        )
+
+        from credit.metrics import _METRIC_REGISTRY
+        from credit.registry import load_custom_objects
+
+        conf = {
+            "custom_objects": {
+                "RegTestMetric": {
+                    "object_type": "metric",
+                    "module_path": "reg_test_metric_pkg",
+                    "module_name": "RegTestMetric",
+                }
+            }
+        }
+        load_custom_objects(conf)
+        assert "RegTestMetric" in _METRIC_REGISTRY
 
     def test_yaml_key_is_registry_key(self, tmp_path):
         """The YAML key, not the class name, is used as the registry key.
@@ -183,8 +208,8 @@ class TestLoadCustomObjects:
             "    def forward(self, x): return x\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.models import _MODEL_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -213,8 +238,8 @@ class TestLoadCustomObjects:
             "    def forward(self, x): return x\n",
         )
 
-        from credit.registry import load_custom_objects
         from credit.models import _MODEL_REGISTRY
+        from credit.registry import load_custom_objects
 
         conf = {
             "custom_objects": {
@@ -307,7 +332,7 @@ class TestLoadCustomObjects:
 
 class TestRegisterDataset:
     def test_decorator_adds_to_registry(self):
-        from credit.datasets import register_dataset, _DATASET_REGISTRY
+        from credit.datasets import _DATASET_REGISTRY, register_dataset
 
         @register_dataset("unit_test_dataset")
         class UnitTestDataset(BaseDataset):
@@ -345,7 +370,7 @@ class TestRegisterDataset:
 
 class TestRegisterPreblock:
     def test_decorator_adds_to_registry(self):
-        from credit.preblock import register_preblock, _PREBLOCK_REGISTRY
+        from credit.preblock import _PREBLOCK_REGISTRY, register_preblock
 
         @register_preblock("unit_test_preblock")
         class UnitTestPreBlock(BasePreblock):
@@ -368,7 +393,7 @@ class TestRegisterPreblock:
 
     def test_build_preblocks_with_custom(self):
         """build_preblocks loads custom objects from conf and uses the registry."""
-        from credit.preblock import register_preblock, build_preblocks
+        from credit.preblock import build_preblocks, register_preblock
 
         @register_preblock("unit_test_pb_build")
         class UTPBBuild(BasePreblock):
@@ -396,7 +421,7 @@ class TestRegisterPreblock:
 
 class TestRegisterModel:
     def test_decorator_registers_and_loads(self):
-        from credit.models import register_model, load_model
+        from credit.models import load_model, register_model
 
         @register_model("unit_test_model")
         class UnitTestModel(BaseModel):
@@ -446,7 +471,7 @@ class TestRegisterModel:
 
 class TestRegisterPostblock:
     def test_decorator_adds_to_registry(self):
-        from credit.postblock import register_postblock, _POSTBLOCK_REGISTRY
+        from credit.postblock import _POSTBLOCK_REGISTRY, register_postblock
 
         @register_postblock("unit_test_postblock")
         class UnitTestPostBlock(BasePostblock):
@@ -469,7 +494,7 @@ class TestRegisterPostblock:
 
     def test_build_postblocks_with_custom(self):
         """build_postblocks loads custom objects from conf and uses the registry."""
-        from credit.postblock import register_postblock, build_postblocks
+        from credit.postblock import build_postblocks, register_postblock
 
         @register_postblock("unit_test_postb_build")
         class UTPoBBuild(BasePostblock):
@@ -497,7 +522,7 @@ class TestRegisterPostblock:
 
 class TestRegisterLoss:
     def test_decorator_adds_to_registry(self):
-        from credit.losses import register_loss, _LOSS_REGISTRY
+        from credit.losses import _LOSS_REGISTRY, register_loss
 
         @register_loss("unit_test_loss")
         class UnitTestLoss(nn.Module):
@@ -512,7 +537,7 @@ class TestRegisterLoss:
 
     def test_custom_loss_loaded_by_instantiate_loss(self):
         """_instantiate_loss() can instantiate a registered custom loss."""
-        from credit.losses import register_loss, _instantiate_loss
+        from credit.losses import _instantiate_loss, register_loss
 
         @register_loss("unit_test_loss_load")
         class LoadableLoss(nn.MSELoss):
@@ -544,6 +569,68 @@ class TestRegisterLoss:
         conf = {"loss": {"training_loss": "this_loss_does_not_exist"}}
         with pytest.raises(ValueError, match="not supported"):
             _instantiate_loss(conf)
+
+
+# ---------------------------------------------------------------------------
+# register_metric
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterMetric:
+    def test_decorator_adds_to_registry(self):
+        from credit.metrics import _METRIC_REGISTRY, register_metric
+        from credit.metrics.base import BaseVariableMetric
+
+        @register_metric("unit_test_metric")
+        class UnitTestMetric(BaseVariableMetric):
+            def compute_variable(self, pred, target):
+                return (pred - target) ** 2
+
+        assert "unit_test_metric" in _METRIC_REGISTRY
+        assert _METRIC_REGISTRY["unit_test_metric"] is UnitTestMetric
+
+    def test_wrong_base_raises(self):
+        """register_metric raises TypeError when class does not inherit nn.Module."""
+        from credit.metrics import register_metric
+
+        with pytest.raises(TypeError, match="nn.Module"):
+
+            @register_metric("bad_metric_direct")
+            class BadMetric:
+                pass
+
+    def test_custom_metric_loaded_by_load_metric(self, tmp_path):
+        """load_metric() can instantiate a registered custom metric inside a combined metric."""
+        from credit.metrics import BaseCombinedMetric, load_metric, register_metric
+        from credit.metrics.base import BaseVariableMetric
+
+        @register_metric("unit_test_metric_load")
+        class LoadableMetric(BaseVariableMetric):
+            def compute_variable(self, pred, target):
+                return (pred - target) ** 2
+
+        conf = {
+            "save_loc": str(tmp_path),
+            "data": {
+                "source": {
+                    "ERA5": {
+                        "levels": [1],
+                        "variables": {"prognostic": {"vars_2D": ["SP"]}},
+                    }
+                }
+            },
+            "model": {"levels": 1},
+            "metrics": {
+                "type": "combined",
+                "args": {
+                    "metrics": {"unit_test_metric_load": {}},
+                    "var_weighting": "none",
+                },
+            },
+        }
+        metric = load_metric(conf)
+        assert isinstance(metric, BaseCombinedMetric)
+        assert "unit_test_metric_load" in metric.metric_modules
 
 
 # ---------------------------------------------------------------------------

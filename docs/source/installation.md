@@ -1,5 +1,9 @@
 # Installing CREDIT from source
 
+Most users do not need to build from source — follow the
+[Quickstart](quickstart.md) and install with `pip install miles-credit`
+instead. This page is for source builds and special HPC setups.
+
 If you want to take advantage of the full power of CREDIT,
 which includes scaling training across multiple nodes, you
 will need to build PyTorch from source. The instructions
@@ -44,7 +48,7 @@ interconnect. Ben Kirk has created a special [makefile](https://github.com/benki
 build PyTorch and Torchvision from source on Derecho with all appropriate environment variables and dependencies.
 Please follow instructions there if you wish to build your own version of PyTorch from source. Otherwise,
 Conda packages for PyTorch 2.5.1 and Torchvision 0.20.1 are available on Derecho
-at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_env_derecho.sh`.
+at `/glade/work/benkirk/consulting/conda-recipes/output/` and are used when running `create_derecho_env.sh`.
 
 ## PyTorch Python Dependencies
 1. Install a Python virtual environment manager. My preferred one for now is
@@ -107,4 +111,4 @@ cd miles-credit
 pytest .
 ```
 
-If all tests pass, run `credit_train config/example-v2026.1.0.yml` on a test case.
+If all tests pass, run `credit_train -c config/example-v2026.1.0.yml` on a test case.

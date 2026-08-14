@@ -32,10 +32,20 @@ _MODEL_REGISTRY = {
         "UnetDiffusion",
         "Loading A DDPM model with UNET Backbone ...",
     ),
+    # "wxformer" is kept only for config backward compatibility -- prefer
+    # "wxformer_base" in new configs. "wxformer" alone is ambiguous now that
+    # "nextgen_wxformer" also exists; "wxformer_base" names this as the
+    # original CrossFormer-backed architecture specifically, not the whole
+    # WXFormer family.
     "wxformer": (
         "credit.models.wxformer.crossformer",
         "CrossFormer",
         "Loading the WXFormer deterministic model ...",
+    ),
+    "wxformer_base": (
+        "credit.models.wxformer.crossformer",
+        "CrossFormer",
+        "Loading WXFormer base (CrossFormer U-Net backbone) ...",
     ),
     "crossformer-ensemble": (
         "credit.models.wxformer.crossformer_ensemble",

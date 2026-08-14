@@ -32,7 +32,9 @@ Each scalar is grouped so that train and validation curves appear on the same ch
 | `train/lr` | Learning rate |
 | `forecast_len/train` | Rollout forecast length (auto-regressive curriculum) |
 
-Additional per-variable metrics are logged if `save_metric_vars` is set in the config.
+Per-variable metrics are also logged by default. Set `save_metric_vars` in the trainer
+config to a list of variable names to restrict them, or to `False` to log only the
+combined aggregates.
 
 ## Viewing logs locally
 

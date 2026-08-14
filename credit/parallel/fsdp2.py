@@ -5,12 +5,14 @@ the legacy FullyShardedDataParallel (FSDP1). FSDP2 is composable with TP
 and does not require a module wrapper — parameters are sharded in-place as
 DTensors.
 
-Sharding granularity for WXFormer v2:
+Sharding granularity for WXFormer v2::
+
   - Each Transformer encoder block  (one per depth layer per level)
   - Each UpBlock / UpBlockPS decoder block
   - The full model (outermost shard)
 
-Checkpoint I/O:
+Checkpoint I/O::
+
   - Use torch.distributed.checkpoint.state_dict.get_model_state_dict /
     set_model_state_dict (DCP) rather than torch.save/load.
   - A helper is provided: fsdp2_state_dict / fsdp2_load_state_dict.

@@ -27,7 +27,8 @@ Sample structure returned by __getitem__::
         },
     }
 
-Output key format (flat, slash-delimited):
+Output key format (flat, slash-delimited)::
+
     "{source_name}/{field_type}/{dim}/{varname}"
 
     field_type: "prognostic" | "dynamic_forcing" | "static" | "diagnostic"
@@ -36,11 +37,13 @@ Output key format (flat, slash-delimited):
                        if levels is omitted all levels in the file are used)
     varname   : variable name as given in config (e.g. "T", "SP", "tsi")
 
-Tensor shapes (no batch dimension):
+Tensor shapes (no batch dimension)::
+
     3D variable : (n_levels, 1, lat, lon)   — n_levels = len(config levels)
     2D variable : (1,        1, lat, lon)   — singleton level dim
 
-After DataLoader collation the batch dimension is prepended:
+After DataLoader collation the batch dimension is prepended::
+
     (batch, n_levels, 1, lat, lon)
 
 File naming:

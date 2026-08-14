@@ -19,7 +19,7 @@ import torch
 # credit
 
 from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load_dataloader
-from credit.distributed import distributed_model_wrapper, get_rank_info, setup
+from credit.distributed import distributed_model_wrapper, get_rank_info, select_device, setup
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.output_downscaling import OutputWrangler
@@ -45,13 +45,7 @@ def predict(rank, world_size, conf, p):
     # data_config = setup_data_loading(conf)
 
     # infer device id from rank
-    if torch.cuda.is_available():
-        device = torch.device(f"cuda:{rank % torch.cuda.device_count()}")
-        torch.cuda.set_device(rank % torch.cuda.device_count())
-    elif torch.mps.is_available():
-        device = torch.device("mps")
-    else:
-        device = torch.device("cpu")
+    device = select_device(rank)
 
     # this should already have been called
     # # config settings

@@ -6,7 +6,7 @@ GOESDataset: PyTorch Dataset for GOES data with nested input/target structure.
 Sample structure returned by __getitem__ (GOESDataset does not override this method;
 see BaseDataset._load_sample for the implementation). Note this is the per-source
 structure — when wrapped by MultiSourceDataset, an additional layer keyed by
-<user_provided_name> is added around each of "input"/"target"/"metadata":
+<user_provided_name> is added around each of "input"/"target"/"metadata"::
 
     {
         "input":    {"<user_provided_name>/prognostic/2d/CMI_C04": tensor,
@@ -387,7 +387,7 @@ class GOESDataset(BaseDataset):
     GOES imager projection background (for deriving the ``latlon2d_dir`` grids):
     https://www.star.nesdis.noaa.gov/atmospheric-composition-training/satellite_data_goes_imager_projection.php
 
-    Example YAML configuration (remote/S3 mode):
+    Example YAML configuration (remote/S3 mode)::
 
         data:
             source:

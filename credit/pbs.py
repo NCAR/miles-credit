@@ -5,6 +5,8 @@ import shutil
 import logging
 import subprocess
 
+from credit.conda_env import torchrun_path
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,9 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     pbs_options = config["pbs"]
 
     num_gpus = pbs_options.get("ngpus", 1)
+    # Unset gpu_type => any NVIDIA GPGPU on Casper.
+    gpu_type = pbs_options.get("gpu_type")
+    gpu_type_select = f":gpu_type={gpu_type}" if gpu_type and str(gpu_type).lower() not in ("any", "none") else ""
 
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
@@ -33,7 +38,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     # Generate the PBS script
     script = f"""#!/bin/bash -l
     #PBS -N {pbs_options["job_name"]}
-    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}:gpu_type={pbs_options["gpu_type"]}
+    #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}{gpu_type_select}
     #PBS -l walltime={pbs_options["walltime"]}
     #PBS -A {pbs_options["project"]}
     #PBS -q {pbs_options["queue"]}
@@ -219,11 +224,7 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
         pass
 
     conda = pbs_options.get("conda", "credit")
-    # Resolve torchrun from the conda env's bin directory
-    if "/" in conda:
-        torchrun = f"{conda}/bin/torchrun"
-    else:
-        torchrun = f"$(conda info --base)/envs/{conda}/bin/torchrun"
+    torchrun = torchrun_path(conda)
 
     total_ranks = num_nodes * num_gpus
     cuda_devices = ",".join(str(i) for i in range(num_gpus))
@@ -313,7 +314,7 @@ PBSDSH_DERECHO_MODULES = (
 )
 
 
-def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_parent):
+def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_parent, app_args=""):
     r"""Return the bash block that launches *script_path* across all job nodes via pbsdsh.
 
     This is the launcher-specific tail of a PBS script; the caller supplies the ``#PBS``
@@ -369,6 +370,9 @@ def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_pa
         logdir_parent (str): Directory under which a ``pbsdsh_logs/`` dir is created for
             per-node logs, written to disk independently of the job's own stdout so a
             job killed abruptly still leaves diagnostics behind.
+        app_args (str): Extra command-line arguments appended after ``-c <config>``
+            (e.g. ``"--init-time 2024-01-15T00 --steps 40"`` for the realtime entrypoint).
+            Empty for entrypoints that take only a config.
 
     Returns:
         str: The bash launch block (no ``#PBS`` header, no ``module``/``conda`` lines).
@@ -422,7 +426,7 @@ export NCCL_DEBUG=INFO
     --rdzv-backend=static \
     --master-addr=${MASTER_ADDR} \
     --master-port=${MASTER_PORT} \
-    @@APP@@ -c @@CONFIG@@ > "${LOGDIR}/node_${i}.out" 2>&1
+    @@APP@@ -c @@CONFIG@@@@APPARGS@@ > "${LOGDIR}/node_${i}.out" 2>&1
 EOF
     chmod +x "${node_script}"
     # -v: pbsdsh reports each task's exit status to node_<i>.pbsdsh; torchrun's own output
@@ -454,6 +458,7 @@ exit $status
         .replace("@@TORCHRUN@@", str(torchrun))
         .replace("@@APP@@", str(script_path))
         .replace("@@CONFIG@@", str(config_path))
+        .replace("@@APPARGS@@", f" {app_args}" if app_args else "")
     )
 
 

@@ -16,11 +16,11 @@ import torch
 from torch.cuda.amp import GradScaler
 from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
-from credit.distributed import distributed_model_wrapper, setup, get_rank_info
+from credit.distributed import distributed_model_wrapper, get_rank_info, select_device, setup
 
 from credit.seed import seed_everything
 
-from credit.losses.les_loss import LESLoss2D
+from credit.losses.gen_1.les_loss import LESLoss2D
 from credit.datasets.gen_1.les_singlestep import LESDataset
 from credit.metrics import LatWeightedMetrics
 
@@ -256,10 +256,7 @@ def main(rank, world_size, conf, backend, trial=False):
 
     # infer device id from rank
 
-    device = (
-        torch.device(f"cuda:{rank % torch.cuda.device_count()}") if torch.cuda.is_available() else torch.device("cpu")
-    )
-    torch.cuda.set_device(rank % torch.cuda.device_count())
+    device = select_device(rank)
 
     # Config settings
     seed = conf["seed"]
