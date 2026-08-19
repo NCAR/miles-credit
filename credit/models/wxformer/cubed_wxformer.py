@@ -1,0 +1,856 @@
+"""
+cubed_wxformer.py
+------------------
+CubedWXFormer: weather transformer for a cubed-sphere SE grid.
+
+The grid resolution is not baked in. The face-edge length E (361 for ne120),
+the padded encoder size, and the crop offset are all derived at construction
+from the SE index and the stride/window configuration, so the same class runs
+on ne30, ne120, or any other cubed-sphere layout.
+
+Architecture
+~~~~~~~~~~~~
+Input SE tensors ``(B, C_in, 1, ncol)`` are reshaped to a 6-face cube
+``(B, 6, C_in, E, E)`` using the SE permutation index.  Optionally,
+a HaloExchange pass populates the border with real data from physically
+adjacent faces before padding up to the encoder size.  Each face is then
+encoded by a CrossFormer stage (strided conv + within-face transformer
++ cross-face attention).
+
+Each encoder stage (using CrossFormer building blocks from credit):
+
+    1. CrossEmbedLayer  — multi-scale strided conv, spatial downsampling
+    2. Transformer      — local + global windowed attention WITHIN each face
+    3. FaceAttention    — MHA ACROSS the 6 cube faces at each spatial position
+    4. FaceEdgeAttention (optional) — sparse MHA over physically adjacent
+                                      cross-face border nodes
+
+With the default strides (2,2,2,2) and a 361-edge face padded to 384, the
+four stages downsample 384 → 192 → 96 → 48 → 24. The padded size is the
+smallest multiple of ``prod(strides) · lcm(windows)`` at or above the
+(halo-expanded) face, so every stage stays divisible by its attention windows.
+
+Decoder mirrors the encoder: four ×2 UpBlockPS stages (sub-pixel conv +
+PixelShuffle, ICNR-initialized to avoid checkerboard artifacts) return to the
+padded size, a Conv2d head projects to the output channels, and the face is
+then CROPPED back to E (the exact inverse of the input pad — no interpolation).
+
+Cross-face attention design
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+After each encoder stage the feature map has shape (B*6, D, h, w).
+We reshape to (B*h*w, 6, D) and apply MHA over the 6 face tokens — every
+spatial position integrates context from all six faces before the next
+downsampling step.  This is the temporal-attention trick from video
+transformers, applied to cube faces.
+
+Face-boundary improvements (optional, requires adjacency file)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Two complementary approaches fix autoregressive rollout artifacts at the
+12 cube-sphere face edges:
+
+  Approach 1 — HaloExchange:
+    Before the encoder, build the full padded face tile by gathering true
+    cubed-sphere ghost cells from physically equivalent SE-owned cells. This
+    fills edge, corner, and vertex ghost regions, not just neighbor strips.
+
+  Approach 2 — FaceEdgeAttention:
+    After each encoder stage, run sparse MHA between the edge_width border
+    nodes of each face and the matching border nodes of the adjacent face.
+    This directly enforces boundary consistency in feature space.
+
+Both are controlled by ``adjacency_path``; if the file is missing or
+``adjacency_path=None``, both are silently skipped (original behavior).
+
+SE permutation index
+~~~~~~~~~~~~~~~~~~~~
+``se_index[k]`` = flat cube position = face*E² + row*E + col for SE node k.
+
+    SE → cube (scatter):  cube_flat[:,:,se_index] = se_tensor
+    Cube → SE (gather):   se_tensor = cube_flat[:,:,se_index]
+
+Padding cells (cube positions with no SE node) remain zero.
+
+Padding convention
+~~~~~~~~~~~~~~~~~~
+Without halo exchange the face is zero-padded on the bottom/right from E to
+``padded_size``; the native face sits at ``[0:E, 0:E]``.
+
+With halo exchange the native face is centered inside the padded encoder tile
+at ``[crop_top:crop_top+E, crop_left:crop_left+E]``. Every other padded
+coordinate is mapped through the cubed-sphere geometry back to a physically
+equivalent SE-owned cell. For ne120 with the default 384 tile, the crop offset
+is 11.
+
+After decoding we crop back to that window (``_crop_face``), which exactly
+inverts the pad — no interpolation, no resampling of real data.
+
+Usage
+-----
+    model = CubedWXFormer(
+        se_index_path        = "/path/to/se_index_ne120.npy",
+        channels             = 2,   # 3D prognostic vars (U, V)
+        levels               = 6,   # pressure levels
+        surface_channels     = 6,
+        input_only_channels  = 1,
+        output_only_channels = 5,
+        adjacency_path       = "/path/to/se_face_adjacency_ne120.npz",
+        halo_size            = 6,
+        edge_attn_heads      = 4,
+    )
+    y = model(x)   # x: (B, C_in, 1, ncol)  →  y: (B, C_out, 1, ncol)
+
+    # Opt-in column-attention additions (level embedding, vertical column
+    # attention, spectral GNN bottleneck — see "Column-attention additions"
+    # below): pass use_column_attn=True plus the col_attn_*/num_spectral_nodes
+    # kwargs to the same constructor.
+
+Static files (se_index_ne120.npy, se_face_adjacency_ne120.npz) live in the
+credit-mesaclip repo under mesaclip/static/ and can be generated by:
+    python mesaclip/preprocessing/build_se_index.py
+    python mesaclip/preprocessing/build_face_adjacency.py
+
+If __name__ == "__main__":
+    GPU smoke test — requires the static files; set MESACLIP_STATIC to the
+    directory containing se_index_ne120.npy:
+        export MESACLIP_STATIC=/glade/work/schreck/repos/credit-mesaclip/mesaclip/static
+        conda activate credit-main-casper
+        python credit/models/wxformer/cubed_wxformer.py
+"""
+
+from __future__ import annotations
+
+import logging
+import math
+import os
+import sys
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from einops import rearrange
+
+logger = logging.getLogger(__name__)
+
+# A cube always has 6 faces. Everything else (the face-edge length, the padded
+# encoder size, the crop offset) is derived per-model from the SE index and the
+# stride/window configuration, so the model is not tied to ne120 (361/384).
+NFACE = 6
+
+
+# ---------------------------------------------------------------------------
+# Cross-face attention
+# ---------------------------------------------------------------------------
+
+
+class FaceAttention(nn.Module):
+    """MHA across the 6 cube faces at every spatial position.
+
+    Parameters
+    ----------
+    dim : int   Feature channels at this encoder stage.
+    heads : int Number of attention heads (must divide dim).
+    """
+
+    def __init__(self, dim: int, heads: int = 4, dropout: float = 0.0) -> None:
+        super().__init__()
+        assert dim % heads == 0
+        self.norm = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(
+            embed_dim=dim,
+            num_heads=heads,
+            dropout=dropout,
+            batch_first=True,
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """(B*6, D, h, w) → (B*6, D, h, w) with cross-face residual."""
+        B6, D, h, w = x.shape
+        B = B6 // NFACE
+
+        # (B*6, D, h, w) → (B*h*w, 6, D): one set of 6 face tokens per location
+        faces = x.reshape(B, NFACE, D, h, w)
+        tokens = rearrange(faces, "b f d h w -> (b h w) f d")
+
+        normed = self.norm(tokens)
+        attn_out, _ = self.attn(normed, normed, normed)
+        tokens = tokens + attn_out  # residual
+
+        faces = rearrange(tokens, "(b h w) f d -> b f d h w", b=B, h=h, w=w)
+        return faces.reshape(B6, D, h, w)
+
+
+# ---------------------------------------------------------------------------
+# Encoder stage: CrossEmbedLayer + Transformer + FaceAttention
+# (wrapped as a single unit so FSDP2 shards the whole stage)
+# ---------------------------------------------------------------------------
+
+
+class FaceTransformerBlock(nn.Module):
+    """One encoder stage: downsample → per-face transformer → cross-face attention.
+
+    Wrapping as a single nn.Module is critical for FSDP2 — it shards this
+    block as one unit, placing its parameters on a single device.
+    """
+
+    def __init__(
+        self,
+        cross_embed: nn.Module,
+        transformer: nn.Module,
+        face_attn: FaceAttention,
+    ) -> None:
+        super().__init__()
+        self.cross_embed = cross_embed
+        self.transformer = transformer
+        self.face_attn = face_attn
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.cross_embed(x)
+        x = self.transformer(x)
+        x = self.face_attn(x)
+        return x
+
+
+# ---------------------------------------------------------------------------
+# Main model
+# ---------------------------------------------------------------------------
+
+
+class CubedWXFormer(nn.Module):
+    """Weather transformer on the ne120 cubed-sphere SE grid.
+
+    Parameters
+    ----------
+    se_index_path : str | Path
+        Path to ``se_index_ne120.npy`` (shape 777602, int32).
+    channels, levels, surface_channels,
+    input_only_channels, output_only_channels : int
+        Same semantics as CrossFormer / CREDIT V2 config.
+    frames : int
+        Input time frames (default 1).
+    dim : tuple[int, ...]  (length 4)
+        Hidden dim at each encoder stage.
+    depth : tuple[int, ...]  (length 4)
+        Transformer layers per stage.
+    dim_head : int
+        Dimension per attention head in per-face transformer.
+    face_attn_heads : int
+        Heads in FaceAttention (cross-face MHA).
+    global_window_size : tuple[int, ...]  (length 4)
+        Long-range window per stage.  Recommend 6 (divides 96,48,24,12).
+    local_window_size : int
+        Short-range window (same for all stages).  Recommend 12.
+    cross_embed_kernel_sizes, cross_embed_strides : tuple
+        Passed to CrossEmbedLayer at each stage.
+    attn_dropout, ff_dropout : float
+    adjacency_path : str | Path | None
+        Path to ``se_face_adjacency_ne120.npz``.  If None (default), the
+        script auto-detects a file named ``se_face_adjacency_ne120.npz`` in
+        the same directory as ``se_index_path``.  If the file does not exist,
+        both HaloExchange and FaceEdgeAttention are silently disabled.
+    halo_size : int
+        Number of neighbor rows/cols to copy into face-edge padding (default 6).
+        Used by HaloExchange (Approach 1).  Set to 0 to disable halo exchange
+        while keeping edge attention.
+    edge_attn_heads : int
+        Attention heads for FaceEdgeAttention (Approach 2).  Default 4.
+    edge_attn_width : int
+        Border strip width (in face pixels) for FaceEdgeAttention (default 2).
+    global_attn_heads : int
+        Attention heads for BottleneckGlobalAttention at stage 3.  Default 8.
+        Always enabled (no adjacency file required).
+    tile_attn_heads : int
+        Attention heads for CrossFaceTileAttention (Approach 3).  Default 4.
+        Requires adjacency file; silently disabled if absent.
+    use_cube_rope : bool
+        Opt-in equiangular-corrected rotary position embedding for within-face
+        attention (short + long window Attention), replacing the default
+        translation-invariant DynamicPositionBias's implicit assumption that a
+        given index offset means the same thing everywhere on the face. See
+        credit.models.wxformer.cube_rope.GnomonicRoPE. Default False (no change
+        to existing behavior).
+    use_column_attn : bool
+        Opt-in "column-attention" additions layered on top of the cubed-sphere
+        backbone (same modules as WXFormerColumn, adapted to per-face tensors):
+
+          1. **LevelEmbedding** — learned per-level bias broadcast onto
+             atmospheric channels, applied before the encoder.
+          2. **ColumnAttention** — multi-head attention across pressure levels
+             at each face pixel before the encoder, for explicit vertical
+             coupling.
+          3. **SpectralGNNBottleneck** — grid-agnostic global spectral mixing
+             at the encoder bottleneck (per-face, at ``padded_size /
+             total_stride`` spatial resolution) via learned virtual spectral
+             nodes.
+          4. **Decoder ColumnAttention** (optional, ``decoder_col_attn``) —
+             re-applies vertical coupling to the atmospheric output channels
+             before the residual add.
+
+        When False (default), none of the above modules are constructed and
+        ``forward`` runs the original backbone-only computation. Default False
+        (no change to existing behavior).
+    col_attn_heads : int
+        Heads in ColumnAttention.  Must divide ``channels`` (embed_dim =
+        channels).  Only used when ``use_column_attn=True``.  Default 3.
+    col_attn_stride : int
+        Spatial pooling stride before ColumnAttention.  For 361×361 faces use
+        ≥4 in production to keep attention memory reasonable.  Only used when
+        ``use_column_attn=True``.  Default 1.
+    decoder_col_attn : bool
+        Apply ColumnAttention to atmospheric output channels before the
+        residual add.  Only used when ``use_column_attn=True``.  Default False.
+    num_spectral_nodes : int
+        Virtual spectral nodes K in the GNN bottleneck (per face).  Only used
+        when ``use_column_attn=True``.  Default 64.
+    use_spectral_norm : bool
+        Apply spectral norm to the Conv/Linear layers of the column-attention
+        additions (LevelEmbedding, SpectralGNNBottleneck, decoder
+        ColumnAttention).  Only used when ``use_column_attn=True``.  Default
+        True.
+    """
+
+    def __init__(
+        self,
+        se_index_path: str | Path,
+        channels: int = 2,
+        levels: int = 6,
+        surface_channels: int = 6,
+        input_only_channels: int = 1,
+        output_only_channels: int = 5,
+        frames: int = 1,
+        dim: tuple = (64, 128, 256, 512),
+        depth: tuple = (2, 2, 8, 2),
+        dim_head: int = 32,
+        face_attn_heads: int = 4,
+        global_window_size: tuple = (6, 6, 6, 6),
+        local_window_size: int = 12,
+        cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
+        cross_embed_strides: tuple = (2, 2, 2, 2),
+        attn_dropout: float = 0.0,
+        ff_dropout: float = 0.0,
+        # Face-boundary improvements
+        adjacency_path: Optional[str | Path] = None,
+        halo_size: int = 6,
+        edge_attn_heads: int = 4,
+        edge_attn_width: int = 2,
+        global_attn_heads: int = 8,
+        tile_attn_heads: int = 4,
+        use_global_attn: bool = False,
+        use_cube_rope: bool = False,
+        # Column-attention additions (see class docstring)
+        use_column_attn: bool = False,
+        col_attn_heads: int = 3,
+        col_attn_stride: int = 1,
+        decoder_col_attn: bool = False,
+        num_spectral_nodes: int = 64,
+        use_spectral_norm: bool = True,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+
+        # Drop loader-injected keys this constructor doesn't accept.
+        kwargs.pop("channel_layout", None)
+
+        # ── SE permutation index ─────────────────────────────────────────
+        se_idx = np.load(se_index_path).astype(np.int64)
+        self.register_buffer("se_index", torch.from_numpy(se_idx))
+
+        # Infer cube geometry from the index. se_index[k] = face*E² + row*E + col,
+        # so the cube holds NFACE·E² cells; E is the smallest edge length whose
+        # cube contains every index. Works for any resolution (ne30, ne120, …).
+        self.nface_edge = math.ceil(math.sqrt((int(se_idx.max()) + 1) / NFACE))
+        self.cube_flat = NFACE * self.nface_edge**2
+
+        # ── Channel arithmetic ───────────────────────────────────────────
+        self.input_channels = (channels * levels + surface_channels + input_only_channels) * frames
+        self.output_channels = channels * levels + surface_channels + output_only_channels
+        self.frames = frames
+        self.halo_size = halo_size
+
+        # ── Resolve adjacency file ────────────────────────────────────────
+        if adjacency_path is None:
+            # Auto-detect next to the SE index file
+            adj_candidate = Path(se_index_path).parent / "se_face_adjacency_ne120.npz"
+            adjacency_path = adj_candidate if adj_candidate.exists() else None
+        elif not Path(adjacency_path).exists():
+            logger.warning(
+                "adjacency_path %s not found; disabling halo exchange and edge attention",
+                adjacency_path,
+            )
+            adjacency_path = None
+
+        self._has_adjacency = adjacency_path is not None
+        if self._has_adjacency:
+            logger.info("Face-boundary improvements enabled from %s", adjacency_path)
+
+        # Import CrossFormer building blocks
+        from credit.models.wxformer.crossformer import (
+            CrossEmbedLayer,
+            Transformer,
+            UpBlockPS,
+        )
+
+        self._use_global_attn = use_global_attn
+        self._use_cube_rope = use_cube_rope
+
+        # ── Encoder ──────────────────────────────────────────────────────
+        # With patch_height=patch_width=1 CrossFormer skips CubeEmbedding;
+        # the first CrossEmbedLayer does input_channels → dim[0] directly.
+        # We replicate that: dim_in_and_out[0] = (input_channels, dim[0]).
+        assert len(dim) == 4 == len(depth) == len(global_window_size), (
+            "dim, depth, global_window_size must each have exactly 4 elements"
+        )
+
+        dims_ext = [self.input_channels, *dim]  # [C_in, d0, d1, d2, d3]
+        dim_in_out = list(zip(dims_ext[:-1], dims_ext[1:]))  # 4 pairs
+
+        local_wsizes = [local_window_size] * 4
+
+        # Cumulative stride at each stage (e.g. strides (2,2,2,2) → 2,4,8,16).
+        cum_strides = []
+        s = 1
+        for stride in cross_embed_strides:
+            s *= stride
+            cum_strides.append(s)
+        self.total_stride = s  # overall encoder downsampling factor
+
+        self.encoder_stages = nn.ModuleList()
+        for i, ((din, dout), ndepth, gw, lw, ksz, stride) in enumerate(
+            zip(
+                dim_in_out,
+                depth,
+                global_window_size,
+                local_wsizes,
+                cross_embed_kernel_sizes,
+                cross_embed_strides,
+            )
+        ):
+            cel = CrossEmbedLayer(
+                dim_in=din,
+                dim_out=dout,
+                kernel_sizes=ksz,
+                stride=stride,
+            )
+            tfm = Transformer(
+                dim=dout,
+                local_window_size=lw,
+                global_window_size=gw,
+                depth=ndepth,
+                dim_head=dim_head,
+                attn_dropout=attn_dropout,
+                ff_dropout=ff_dropout,
+                use_rope=use_cube_rope,
+            )
+            # Stage 3 (bottleneck): optionally replace FaceAttention with global
+            # attention over all 6*h*w tokens.  Only when use_global_attn=True;
+            # otherwise all stages use FaceAttention (backward-compatible default).
+            if i == 3 and use_global_attn:
+                from credit.models.wxformer.global_attn import BottleneckGlobalAttention
+
+                fa = BottleneckGlobalAttention(
+                    dim=dout,
+                    heads=global_attn_heads,
+                    dropout=attn_dropout,
+                )
+            else:
+                fa = FaceAttention(dim=dout, heads=face_attn_heads)
+            self.encoder_stages.append(FaceTransformerBlock(cel, tfm, fa))
+
+        # ── Padded face size + crop offset ────────────────────────────────
+        # Each face is padded up to a size that (a) downsamples cleanly through
+        # every stage and (b) leaves each stage divisible by its attention
+        # windows. The smallest such size is the next multiple of
+        # total_stride · lcm(windows) at or above the native face. With
+        # adjacency enabled, HaloExchange fills the entire padded face with
+        # true cubed-sphere ghost cells; otherwise we fall back to scratch
+        # zero-padding on the bottom/right.
+        win_lcm = math.lcm(local_window_size, *global_window_size)
+        unit = self.total_stride * win_lcm
+        self.padded_size = math.ceil(self.nface_edge / unit) * unit
+        pad_total = self.padded_size - self.nface_edge
+        self.crop_top = pad_total // 2 if self._has_adjacency and halo_size > 0 else 0
+        self.crop_left = pad_total // 2 if self._has_adjacency and halo_size > 0 else 0
+        self.crop_off = self.crop_top
+
+        # ── Halo exchange (Approach 1) ────────────────────────────────────
+        if self._has_adjacency and halo_size > 0:
+            from credit.models.wxformer.halo import HaloExchange
+
+            self.halo_exchange: Optional[nn.Module] = HaloExchange(
+                adjacency_path=adjacency_path,
+                se_index_path=se_index_path,
+                padded_size=self.padded_size,
+                crop_top=self.crop_top,
+                crop_left=self.crop_left,
+                halo_size=halo_size,
+            )
+        else:
+            self.halo_exchange = None
+
+        # ── Face edge attention (Approach 2) ─────────────────────────────
+        if self._has_adjacency:
+            from credit.models.wxformer.edge_attn import FaceEdgeAttention
+
+            self.face_edge_attn: Optional[nn.Module] = FaceEdgeAttention(
+                dims=dim,
+                num_heads=edge_attn_heads,
+                edge_width=edge_attn_width,
+                halo_size=self.crop_top,
+                strides=tuple(cum_strides),
+                padded_size=self.padded_size,
+                dropout=attn_dropout,
+            )
+        else:
+            self.face_edge_attn = None
+
+        # ── Cross-face tile attention (Approach 3) ────────────────────────
+        if self._has_adjacency:
+            from credit.models.wxformer.global_attn import CrossFaceTileAttention
+
+            self.cross_face_tile_attn: Optional[nn.Module] = CrossFaceTileAttention(
+                dims=dim,
+                tile_size=global_window_size[0],
+                num_heads=tile_attn_heads,
+                halo_size=self.crop_top,
+                strides=tuple(cum_strides),
+                padded_size=self.padded_size,
+                dropout=attn_dropout,
+            )
+        else:
+            self.cross_face_tile_attn = None
+
+        # ── Decoder ──────────────────────────────────────────────────────
+        # Four UpBlockPS (sub-pixel conv + PixelShuffle, ICNR init) mirror the
+        # four encoder stages in reverse, each undoing its matching stage's own
+        # cross_embed_stride -- NOT hardcoded to x2. With a non-uniform stride
+        # tuple (e.g. (1, 2, 2, 2), entering the first stage at native
+        # resolution) a fixed x2-per-stage decoder would upsample by a
+        # different total factor than the encoder downsampled by, and since
+        # this decoder deliberately has no interpolate-to-match step (the
+        # design requires an exact pad/crop, not a resample), that mismatch
+        # would surface as a shape error or a silent wrong-region crop rather
+        # than a visible failure. UpBlockPS replaces the plain ConvTranspose2d
+        # UpBlock, which produces checkerboard/blob artifacts at initialization
+        # that compound over long autoregressive rollouts.
+        d0, d1, d2, d3 = dim[0], dim[1], dim[2], dim[3]
+        s0, s1, s2, s3 = cross_embed_strides
+        # num_groups for GroupNorm: d0 divides d3//2, d3//4, d3//8 for geometric dims
+        _ng = max(1, d0)
+        self.up1 = UpBlockPS(d3, d3 // 2, _ng, scale=s3)  # cat: d3 → d3//2, undoes stage 3
+        self.up2 = UpBlockPS(d3 // 2 + d2, d3 // 4, _ng, scale=s2)  # cat(d3//2, d2) → d3//4, undoes stage 2
+        self.up3 = UpBlockPS(d3 // 4 + d1, d3 // 8, _ng, scale=s1)  # cat(d3//4, d1) → d3//8, undoes stage 1
+        self.up4 = UpBlockPS(d3 // 8 + d0, d0, _ng, scale=s0)  # cat(d3//8, d0) → d0, undoes stage 0
+        self.head = nn.Conv2d(d0, self.output_channels, 3, padding=1)
+        # Zero-init the head: delta ≈ 0 at init, so the model starts from
+        # persistence (output ≈ x_res from the residual connection), which
+        # yields high positive ACC from the very first batch.
+        nn.init.zeros_(self.head.weight)
+        nn.init.zeros_(self.head.bias)
+
+        # ── Column-attention additions (optional) ──────────────────────────
+        # LevelEmbedding + ColumnAttention on the input, a SpectralGNNBottleneck
+        # at the encoder bottleneck, and an optional decoder ColumnAttention.
+        # Only constructed when use_column_attn=True; forward() gates every
+        # extra step behind self.use_column_attn / self.dec_col_attn is not None,
+        # so with the default False these modules don't exist and the forward
+        # pass is exactly the backbone-only computation.
+        self.use_column_attn = use_column_attn
+        self._atmos_channels = channels * levels
+        self.level_embedding: Optional[nn.Module] = None
+        self.col_attn: Optional[nn.Module] = None
+        self.spectral_bottleneck: Optional[nn.Module] = None
+        self.dec_col_attn: Optional[nn.Module] = None
+
+        if use_column_attn:
+            from credit.models.wxformer.wxformer_column import (
+                ColumnAttention,
+                LevelEmbedding,
+                SpectralGNNBottleneck,
+            )
+            from credit.models.wxformer.crossformer import apply_spectral_norm as _apply_sn
+
+            self.level_embedding = LevelEmbedding(channels, levels)
+            self.col_attn = ColumnAttention(channels, levels, num_heads=col_attn_heads, spatial_stride=col_attn_stride)
+
+            # Deepest encoder stage resolution per face = padded_size / total_stride.
+            deepest = self.padded_size // self.total_stride
+            self.spectral_bottleneck = SpectralGNNBottleneck(
+                dim=dim[-1],
+                nlat=deepest,
+                nlon=deepest,
+                num_spectral_nodes=num_spectral_nodes,
+            )
+
+            if decoder_col_attn:
+                self.dec_col_attn = ColumnAttention(
+                    channels, levels, num_heads=col_attn_heads, spatial_stride=col_attn_stride
+                )
+
+            if use_spectral_norm:
+                _apply_sn(self.spectral_bottleneck)
+                if self.dec_col_attn is not None:
+                    _apply_sn(self.dec_col_attn)
+
+    # ------------------------------------------------------------------
+    # SE ↔ cube helpers
+    # ------------------------------------------------------------------
+
+    def se_to_cube(self, x: torch.Tensor) -> torch.Tensor:
+        """(B, C, ncol) → (B, C, 6, E, E) where E = nface_edge."""
+        B, C, _ = x.shape
+        cube = x.new_zeros(B, C, self.cube_flat)
+        cube[:, :, self.se_index] = x
+        return cube.reshape(B, C, NFACE, self.nface_edge, self.nface_edge)
+
+    def cube_to_se(self, cube: torch.Tensor) -> torch.Tensor:
+        """(B, C, 6, E, E) → (B, C, ncol)."""
+        return cube.reshape(cube.shape[0], cube.shape[1], self.cube_flat)[:, :, self.se_index]
+
+    def _pad_face(self, x6: torch.Tensor) -> torch.Tensor:
+        """Widen each face to ``padded_size``.
+
+        With adjacency enabled, HaloExchange returns a fully ghost-filled
+        padded face. Otherwise this falls back to scratch zero-padding on the
+        bottom/right.
+        """
+        if self.halo_exchange is not None:
+            return self.halo_exchange(x6)
+        pad = self.padded_size - x6.shape[-1]
+        return F.pad(x6, (0, pad, 0, pad))
+
+    def _crop_face(self, z: torch.Tensor) -> torch.Tensor:
+        """Crop a ``padded_size`` face back to the native ``nface_edge`` face,
+        mirroring the offset introduced by :meth:`_pad_face`."""
+        e = self.nface_edge
+        return z[..., self.crop_top : self.crop_top + e, self.crop_left : self.crop_left + e]
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        x : (B, C_in, T, ncol)  — CREDIT format, T = frames.
+
+        Returns
+        -------
+        (B, C_out, 1, ncol)
+
+        Notes
+        -----
+        When ``use_column_attn=False`` (default) this runs exactly the
+        backbone-only computation. When ``use_column_attn=True`` it also runs,
+        in order: LevelEmbedding + ColumnAttention on the atmospheric input
+        channels (before padding/encoding), a SpectralGNNBottleneck at the
+        deepest encoder stage (before the decoder), and, if
+        ``decoder_col_attn=True``, a second ColumnAttention on the atmospheric
+        output channels (after cropping, before the residual add). No other
+        step changes between the two modes.
+        """
+        B, C, T, ncol = x.shape
+
+        # Residual base: prognostic channels of the last input frame.
+        # Model predicts a delta; the residual gives persistence at random init,
+        # which yields non-zero positive ACC from the first batch.
+        x_res = x[:, : self.output_channels, T - 1, :]  # (B, C_out, ncol)
+
+        # Merge time into channels: (B, C*T, ncol)
+        x_flat = x.reshape(B, C * T, ncol)
+
+        # SE → cube: (B, C*T, 6, E, E)
+        cube = self.se_to_cube(x_flat)
+
+        # Flatten faces into batch dim: (B*6, C*T, E, E)
+        x6 = cube.permute(0, 2, 1, 3, 4).reshape(B * NFACE, C * T, self.nface_edge, self.nface_edge)
+
+        # ── Column-attention additions (Approach: level embed + column attn) ──
+        # Level embedding + column attention on atmospheric input channels
+        # (frames=1). Only runs when use_column_attn=True.
+        if self.use_column_attn:
+            atmos = self.level_embedding(x6[:, : self._atmos_channels])
+            atmos = self.col_attn(atmos)
+            x6 = torch.cat([atmos, x6[:, self._atmos_channels :]], dim=1)
+
+        # ── Build each padded face tile. With halo exchange this is a full
+        # cubed-sphere ghost gather into the padded tile. Without halo exchange
+        # this is ordinary scratch padding on the bottom/right. The native face
+        # is recovered by _crop_face after decoding.
+        x6 = self._pad_face(x6)
+
+        # Encoder: 4 stages, each downsampling + per-face transformer + face attention
+        # followed optionally by FaceEdgeAttention and CrossFaceTileAttention
+        encodings = []
+        z = x6
+        for i, stage in enumerate(self.encoder_stages):
+            z = stage(z)
+            # ── FaceEdgeAttention (Approach 2): sparse MHA at face boundaries
+            if self.face_edge_attn is not None:
+                z = self.face_edge_attn(z, stage=i)
+            # ── CrossFaceTileAttention (Approach 3): tile-level cross-face MHA
+            if self.cross_face_tile_attn is not None:
+                z = self.cross_face_tile_attn(z, stage=i)
+            encodings.append(z)
+
+        # Spectral GNN bottleneck at the deepest encoder stage (per-face).
+        # Only runs when use_column_attn=True.
+        if self.use_column_attn:
+            encodings[-1] = self.spectral_bottleneck(encodings[-1])
+
+        # Decoder with skip connections — four ×2 UpBlocks mirror the encoder
+        # back to padded_size, then the head projects to the output channels.
+        z = self.up1(encodings[-1])
+        z = self.up2(torch.cat([z, encodings[-2]], dim=1))
+        z = self.up3(torch.cat([z, encodings[-3]], dim=1))
+        z = self.up4(torch.cat([z, encodings[-4]], dim=1))
+        z = self.head(z)
+
+        # Unpad: crop the padded face back to the native cube face. This is the
+        # exact inverse of _pad_face — no interpolation.
+        z = self._crop_face(z)
+
+        # Decoder column attention: atmospheric output channels only.
+        # Only runs when use_column_attn=True and decoder_col_attn=True.
+        if self.dec_col_attn is not None:
+            atmos_out = self.dec_col_attn(z[:, : self._atmos_channels])
+            z = torch.cat([atmos_out, z[:, self._atmos_channels :]], dim=1)
+
+        # Reshape: (B, 6, C_out, E, E) → (B, C_out, 6, E, E)
+        out_cube = z.reshape(B, NFACE, self.output_channels, self.nface_edge, self.nface_edge)
+        out_cube = out_cube.permute(0, 2, 1, 3, 4)
+
+        # Cube → SE: (B, C_out, ncol)
+        out = self.cube_to_se(out_cube)  # (B, C_out, ncol)
+
+        # Add residual: output = delta + last-frame state
+        out = out + x_res
+
+        return out.unsqueeze(2)  # (B, C_out, 1, ncol)
+
+
+# ---------------------------------------------------------------------------
+# __main__: forward-pass smoke test
+#
+# Requires static files (se_index_ne120.npy, se_face_adjacency_ne120.npz).
+# Set MESACLIP_STATIC to their directory:
+#   export MESACLIP_STATIC=/glade/work/schreck/repos/credit-mesaclip/mesaclip/static
+#   conda activate credit-main-casper
+#   python credit/models/wxformer/cubed_wxformer.py
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
+
+    # Ensure credit (miles-credit-main) is on sys.path when run directly
+    repo_root = Path(__file__).parents[3]
+    if str(repo_root) not in sys.path:
+        sys.path.insert(0, str(repo_root.resolve()))
+
+    # Static files: check MESACLIP_STATIC env var first, then default mesaclip location
+    static_dir = Path(
+        os.environ.get(
+            "MESACLIP_STATIC",
+            str(repo_root.parent / "credit-mesaclip" / "mesaclip" / "static"),
+        )
+    )
+
+    se_index_path = static_dir / "se_index_ne120.npy"
+    if not se_index_path.exists():
+        logger.error("SE index not found at %s", se_index_path)
+        logger.error("Set MESACLIP_STATIC=/path/to/mesaclip/static or run:")
+        logger.error("  python mesaclip/preprocessing/build_se_index.py")
+        sys.exit(1)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Device: %s  (%s)", device, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU")
+
+    adj_path = static_dir / "se_face_adjacency_ne120.npz"
+
+    def run_test(
+        label: str,
+        use_adj: bool,
+        global_attn_heads: int = 2,
+        tile_attn_heads: int = 2,
+        use_column_attn: bool = False,
+    ) -> None:
+        logger.info("")
+        logger.info("=== %s ===", label)
+        model = CubedWXFormer(
+            se_index_path=se_index_path,
+            channels=2,  # U, V
+            levels=6,
+            surface_channels=6,  # PS, PSL, TS, TREFHT, U10, PRECT
+            input_only_channels=1,  # SOLSD
+            output_only_channels=5,  # FLUT, TMQ, IVT, uIVT, vIVT
+            frames=1,
+            dim=(32, 64, 128, 256),
+            depth=(1, 1, 2, 1),
+            dim_head=16,
+            face_attn_heads=2,
+            global_window_size=(6, 6, 6, 6),
+            local_window_size=12,
+            cross_embed_kernel_sizes=((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
+            cross_embed_strides=(2, 2, 2, 2),
+            adjacency_path=adj_path if use_adj else None,
+            halo_size=6,
+            edge_attn_heads=2,
+            edge_attn_width=2,
+            global_attn_heads=global_attn_heads,
+            tile_attn_heads=tile_attn_heads,
+            use_column_attn=use_column_attn,
+            col_attn_heads=2,
+        ).to(device)
+
+        n_params = sum(p.numel() for p in model.parameters()) / 1e6
+        logger.info("Parameters: %.2f M", n_params)
+        logger.info("halo_exchange:         %s", "enabled" if model.halo_exchange is not None else "disabled")
+        logger.info("face_edge_attn:        %s", "enabled" if model.face_edge_attn is not None else "disabled")
+        logger.info("cross_face_tile_attn:  %s", "enabled" if model.cross_face_tile_attn is not None else "disabled")
+        logger.info("use_column_attn:       %s", model.use_column_attn)
+
+        B = 2
+        C_in = 2 * 6 + 6 + 1  # 19
+        ncol = model.se_index.numel()
+        x = torch.randn(B, C_in, 1, ncol, device=device)
+        logger.info("Input  shape: %s  (B=%d, C=%d, T=1, ncol=%d)", tuple(x.shape), B, C_in, ncol)
+
+        with torch.no_grad():
+            y = model(x)
+
+        logger.info("Output shape: %s", tuple(y.shape))
+
+        C_out = 2 * 6 + 6 + 5  # 23
+        expected = (B, C_out, 1, ncol)
+        assert tuple(y.shape) == expected, f"Shape mismatch — expected {expected}, got {tuple(y.shape)}"
+        logger.info("Shape check PASSED.")
+
+    # Test 1: baseline (no adjacency file)
+    run_test("Baseline (no face-boundary improvements)", use_adj=False)
+
+    # Test 2: with halo exchange + edge attention + tile attention
+    if adj_path.exists():
+        run_test(
+            "With HaloExchange + FaceEdgeAttention + CrossFaceTileAttn",
+            use_adj=True,
+            global_attn_heads=2,
+            tile_attn_heads=2,
+        )
+    else:
+        logger.warning("Adjacency file not found at %s — skipping boundary test", adj_path)
+        logger.warning("Run: python mesaclip/preprocessing/build_face_adjacency.py")
+
+    # Test 3: column-attention additions (level embed + column attn + spectral bottleneck)
+    run_test(
+        "With use_column_attn=True (level embed + column attn + spectral bottleneck)",
+        use_adj=False,
+        use_column_attn=True,
+    )
+
+    logger.info("")
+    logger.info("All checks passed. CubedWXFormer smoke test OK.")

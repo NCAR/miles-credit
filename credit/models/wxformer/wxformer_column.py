@@ -1,5 +1,5 @@
 """
-NextGen WXFormer: CrossFormer U-Net + spectral GNN bottleneck + column attention + level embeddings.
+WXFormerColumn: CrossFormer U-Net + spectral GNN bottleneck + column attention + level embeddings.
 
 Design additions over WXFormer:
   - Learned pressure-level embeddings at input (Pangu/Aurora style)
@@ -292,7 +292,7 @@ class Transformer(nn.Module):
 
 
 def remap_conv_state_dict(state_dict: dict) -> dict:
-    """Convert a pre-Linear-refactor NextGenWXFormer state dict to the new format.
+    """Convert a pre-Linear-refactor WXFormerColumn state dict to the new format.
 
     Old checkpoints store the transformer projections as 1x1 Conv2d weights:
 
@@ -493,7 +493,7 @@ class SpectralGNNBottleneck(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-class NextGenWXFormer(BaseModel):
+class WXFormerColumn(BaseModel):
     """CrossFormer U-Net with spectral GNN bottleneck, column attention,
     and pressure-level embeddings.
 
@@ -614,13 +614,23 @@ class NextGenWXFormer(BaseModel):
         self.spectral_bottleneck = SpectralGNNBottleneck(last_dim, bn_h, bn_w, num_spectral_nodes=num_spectral_nodes)
 
         # ── Decoder ──────────────────────────────────────────────────────
-        scale = 2
-        self.up_block1 = UpBlockPS(last_dim, last_dim // 2, dim[0])
-        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        # Each up-block undoes its matching encoder stage's own stride (reverse
+        # order: up_block1 undoes stage 3, ..., up_block4 undoes stage 0) rather
+        # than a hardcoded x2, so a non-uniform cross_embed_strides (e.g.
+        # entering stage 0 at native resolution with stride 1) produces the
+        # correct total upsample. The F.interpolate calls in forward() still
+        # run after each block -- they exist to hit the exact target grid shape
+        # (e.g. ERA5's 721x1440-ish, not a clean power of 2), not to correct
+        # for a stride mismatch here; getting the scales right keeps them doing
+        # only that small, intended correction instead of silently absorbing a
+        # much larger, unvalidated one.
+        s0, s1, s2, s3 = cross_embed_strides
+        self.up_block1 = UpBlockPS(last_dim, last_dim // 2, dim[0], scale=s3)
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0], scale=s2)
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0], scale=s1)
         self.up_block4 = nn.Sequential(
-            nn.Conv2d(2 * (last_dim // 8), self.output_channels * scale**2, 3, padding=1),
-            nn.PixelShuffle(scale),
+            nn.Conv2d(2 * (last_dim // 8), self.output_channels * s0**2, 3, padding=1),
+            nn.PixelShuffle(s0),
             nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
         )
 
@@ -748,7 +758,7 @@ if __name__ == "__main__":
     C_in = channels * levels + surface_channels + input_only_channels
     C_out = channels * levels + surface_channels + output_only_channels
 
-    model = NextGenWXFormer(
+    model = WXFormerColumn(
         image_height=H,
         image_width=W,
         frames=T,

@@ -22,6 +22,7 @@ _PREBLOCK_REGISTRY = {
     "bridgescaler_transform": ("credit.preblock.scaler", "BridgeScalerTransform"),
     "hybrid_level_interp": ("credit.preblock.hybrid_interp", "HybridLevelInterpPre"),
     "semilagrangian_advection": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
+    "tripole_to_se": ("credit.preblock.latlon_to_se", "TripoleToSEPreBlock"),
     "to_device": ("credit.preblock.device", "ToDevice"),
 }
 
@@ -38,6 +39,7 @@ _CLASS_SOURCES = {
     "BridgeScalerTransform": ("credit.preblock.scaler", "BridgeScalerTransform"),
     "HybridLevelInterpPre": ("credit.preblock.hybrid_interp", "HybridLevelInterpPre"),
     "SemiLagrangianAdvectionPre": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
+    "TripoleToSEPreBlock": ("credit.preblock.latlon_to_se", "TripoleToSEPreBlock"),
     "ToDevice": ("credit.preblock.device", "ToDevice"),
 }
 
