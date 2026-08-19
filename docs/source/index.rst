@@ -63,6 +63,7 @@ If you encounter problems or have suggestions, please open an issue on our GitHu
    Evaluation and Metrics <Evaluation.md>
    Ensemble Training <Ensembles.md>
    Ensemble Inference <EnsemblesInference.md>
+   SDL Ensemble Model <SDL_ensemble.md>
 
 
 .. toctree::
