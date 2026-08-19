@@ -746,6 +746,70 @@ def _get_integrated_toa_tisr(
     return integrated_toa_tisr
 
 
+def _get_instantaneous_toa_tisr_for_times(
+    ts: pd.DatetimeIndex,
+    latitude: torch.Tensor,
+    longitude: torch.Tensor,
+    tsi_times: torch.Tensor,
+    tsi_values: torch.Tensor,
+) -> torch.Tensor:
+    """Compute instantaneous TOA TISR (W/m²) on the full grid at each timestamp.
+
+    Vectorized over both space and time: retrieves total solar irradiance and
+    orbital parameters for every timestamp, computes per-grid-point cosine
+    zenith angles, and combines them into instantaneous TOA TISR. Peak memory
+    is several temporaries of shape ``(len(ts), ny, nx)``, so callers
+    integrating over long windows should invoke this on blocks of timestamps
+    (see :func:`_compute_tisr`) rather than the whole window at once.
+
+    Args:
+        ts (pd.DatetimeIndex): Timestamps to evaluate.
+        latitude (torch.Tensor): Latitude grid in degrees, shape ``(1, ny, nx)``.
+        longitude (torch.Tensor): Longitude grid in degrees, shape ``(1, ny, nx)``.
+        tsi_times (torch.Tensor): 1-D tensor of fractional years, sorted ascending,
+            as returned by :func:`_cmip6_tsi_data`.
+        tsi_values (torch.Tensor): 1-D tensor of TSI values (W m⁻²) corresponding
+            element-wise to *tsi_times*.
+
+    Returns:
+        torch.Tensor: Instantaneous TOA TISR in W/m², shape ``(len(ts), ny, nx)``.
+    """
+    # Reuse the cached grid's device so callers don't pass it separately.
+    device = latitude.device
+
+    # Interpolate the total solar irradiance (TSI) series onto ts. Unsqueeze to
+    # add singleton spatial dims for broadcasting: (time, 1, 1).
+    tsi = _get_tsi(ts, tsi_times, tsi_values).unsqueeze(-1).unsqueeze(-1)
+
+    # Compute orbital parameters (declination, equation of time, Earth-Sun distance,
+    # etc.) for each timestep. J2000 days are unsqueezed to (time, 1, 1) so the
+    # result broadcasts cleanly against the spatial grid.
+    orbital = _get_orbital_parameters(_get_j2000_days(ts, device=device).unsqueeze(-1).unsqueeze(-1))
+
+    # Derive the cosine of the solar zenith angle at every grid point and timestep.
+    cos_zenith = _get_cosine_zenith_angle(
+        cos_declination=orbital["cos_declination"],
+        sin_declination=orbital["sin_declination"],
+        latitude=latitude,
+        hour_angle=_get_hour_angle(
+            solar_time=_get_solar_time(
+                orbital["rotational_phase"],
+                orbital["eq_of_time_seconds"],
+            ),
+            longitude=longitude,
+        ),
+    )
+
+    # Combine TSI, the inverse-square Earth-Sun distance correction (eccentricity
+    # factor), and cos_zenith to get instantaneous TOA TISR at every grid point
+    # and timestep. Shape: (len(ts), lat, lon).
+    return _get_instantaneous_toa_tisr(
+        tsi=tsi,
+        solar_factor=1.0 / orbital["solar_distance_au"] ** 2,
+        cos_zenith=cos_zenith,
+    )
+
+
 def _compute_tisr(
     t: pd.Timestamp,
     integration_period: pd.Timedelta,
@@ -754,15 +818,24 @@ def _compute_tisr(
     longitude: torch.Tensor,
     tsi_times: torch.Tensor,
     tsi_values: torch.Tensor,
+    integration_chunk_size: int = 90,
 ) -> torch.Tensor:
     """Full pipeline for integrated top-of-atmosphere TISR at a target timestamp.
 
-    Vectorized over both space and time — all grid points and timesteps are
-    processed in a single pass without any Python-level loops: builds a
-    time grid covering the accumulation window, loads the lat/lon grid, retrieves
-    total solar irradiance and orbital parameters, computes per-grid-point cosine
-    zenith angles, and finally integrates instantaneous TOA TISR over the
-    accumulation window using the trapezoidal rule.
+    Builds a time grid covering the accumulation window, computes instantaneous
+    TOA TISR on the full spatial grid (see
+    :func:`_get_instantaneous_toa_tisr_for_times`), and integrates it over the
+    window using the trapezoidal rule.
+
+    The integration runs in blocks of ``integration_chunk_size`` sub-intervals
+    that share their boundary timestamps, over which the trapezoidal rule is
+    exactly additive — so the result is independent of the chunk size. Chunking
+    bounds peak memory at a few temporaries of shape
+    ``(integration_chunk_size + 1, ny, nx)`` instead of
+    ``(num_integration_steps + 1, ny, nx)``: on a 721×1440 grid with
+    ``num_integration_steps=2160``, the unchunked temporaries are ~9 GB *each*
+    (tens of GB peak per call, inside every DataLoader worker), versus well
+    under 2 GB peak with the default chunk size.
 
     Following ERA5 convention, the accumulation window is the half-open interval
     ``(t - integration_period, t]``. For example, with the default 1-hour period,
@@ -792,62 +865,53 @@ def _compute_tisr(
             as returned by :func:`_cmip6_tsi_data`.
         tsi_values (torch.Tensor): 1-D tensor of TSI values (W m⁻²) corresponding
             element-wise to *tsi_times*.
+        integration_chunk_size (int, optional): Maximum number of sub-intervals
+            evaluated per block. Bounds peak memory without changing the result.
+            Must be a positive integer. Defaults to 90.
+
+    Raises:
+        ValueError: If ``integration_chunk_size`` is not a positive integer.
 
     Returns:
         torch.Tensor: Integrated TOA TISR over the accumulation window, in J/m².
             Shape: ``(lat, lon)``.
     """
+    if not isinstance(integration_chunk_size, int) or integration_chunk_size <= 0:
+        raise ValueError(f"integration_chunk_size must be a positive integer, but got {integration_chunk_size}")
+
     # Build a uniform time grid of (num_integration_steps + 1) timestamps ending
     # at t, spanning exactly one integration_period. Both endpoints are included
     # because the trapezoidal rule requires values at every interval boundary.
+    step = integration_period / num_integration_steps
     ts = pd.date_range(
         end=t,
         periods=num_integration_steps + 1,
-        freq=integration_period / num_integration_steps,
+        freq=step,
     )
 
-    # Reuse the cached grid's device so callers don't pass it separately.
-    device = latitude.device
-
-    # Interpolate the total solar irradiance (TSI) series onto ts. Unsqueeze to
-    # add singleton spatial dims for broadcasting: (time, 1, 1).
-    tsi = _get_tsi(ts, tsi_times, tsi_values).unsqueeze(-1).unsqueeze(-1)
-
-    # Compute orbital parameters (declination, equation of time, Earth-Sun distance,
-    # etc.) for each timestep. J2000 days are unsqueezed to (time, 1, 1) so the
-    # result broadcasts cleanly against the spatial grid.
-    orbital = _get_orbital_parameters(_get_j2000_days(ts, device=device).unsqueeze(-1).unsqueeze(-1))
-
-    # Derive the cosine of the solar zenith angle at every grid point and timestep.
-    cos_zenith = _get_cosine_zenith_angle(
-        cos_declination=orbital["cos_declination"],
-        sin_declination=orbital["sin_declination"],
-        latitude=latitude,
-        hour_angle=_get_hour_angle(
-            solar_time=_get_solar_time(
-                orbital["rotational_phase"],
-                orbital["eq_of_time_seconds"],
-            ),
+    # Integrate block by block. Adjacent blocks share their boundary timestamp
+    # (ts[stop] is both the last point of one block and the first of the next),
+    # which is what makes the per-block trapezoidal sums add up exactly to the
+    # full-window integral. Each block passes its own sub-interval count and
+    # duration so _get_integrated_toa_tisr sees the same dt as the full window.
+    integrated_toa_tisr: torch.Tensor | None = None
+    for start in range(0, num_integration_steps, integration_chunk_size):
+        stop = min(start + integration_chunk_size, num_integration_steps)
+        instantaneous_block = _get_instantaneous_toa_tisr_for_times(
+            ts[start : stop + 1],
+            latitude=latitude,
             longitude=longitude,
-        ),
-    )
+            tsi_times=tsi_times,
+            tsi_values=tsi_values,
+        )
+        partial = _get_integrated_toa_tisr(
+            instantaneous_toa_tisr=instantaneous_block,
+            integration_period=step * (stop - start),
+            num_integration_steps=stop - start,
+        )
+        integrated_toa_tisr = partial if integrated_toa_tisr is None else integrated_toa_tisr + partial
 
-    # Combine TSI, the inverse-square Earth-Sun distance correction (eccentricity
-    # factor), and cos_zenith to get instantaneous TOA TISR at every grid point
-    # and timestep. Shape: (num_integration_steps + 1, lat, lon).
-    instantaneous_toa_tisr = _get_instantaneous_toa_tisr(
-        tsi=tsi,
-        solar_factor=1.0 / orbital["solar_distance_au"] ** 2,
-        cos_zenith=cos_zenith,
-    )
-
-    # Integrate over the time dimension using the trapezoidal rule and return the
-    # accumulated TISR in J/m² for each grid point. Shape: (lat, lon).
-    return _get_integrated_toa_tisr(
-        instantaneous_toa_tisr=instantaneous_toa_tisr,
-        integration_period=integration_period,
-        num_integration_steps=num_integration_steps,
-    )
+    return integrated_toa_tisr
 
 
 # ------------------------------------------------------------------
@@ -893,6 +957,7 @@ class TISRDataset(BaseDataset):
                         dynamic_forcing:
                             var_2d: ['tisr']  # only accept 'tisr'
                     num_integration_steps: 2160  # 360 steps per hour → 6h integration with 1h accumulation windows
+                    integration_chunk_size: 90   # optional; caps peak memory of the integration (default 90)
                     latlon_grid_path: "/glade/derecho/scratch/cbecker/test_CREDIT_data/era5_local_testing_data_onedeg_2021.nc"
 
             start_datetime: "2021-06-01"
@@ -939,6 +1004,14 @@ class TISRDataset(BaseDataset):
         self.dataset_type = "tisr"
         self.static_metadata: dict[str, Any] = {"datetime_fmt": "unix_ns"}
         self.num_integration_steps: int = self.curr_source_cfg.get("num_integration_steps", 360)
+        # Cap on sub-intervals evaluated at once during the trapezoidal
+        # integration; bounds per-sample peak memory in DataLoader workers
+        # without changing the result (see _compute_tisr).
+        self.integration_chunk_size: int = self.curr_source_cfg.get("integration_chunk_size", 90)
+        if not isinstance(self.integration_chunk_size, int) or self.integration_chunk_size <= 0:
+            raise ValueError(
+                f"TISR config: 'integration_chunk_size' must be a positive integer, got {self.integration_chunk_size!r}"
+            )
 
         # Initialize the field registration based on the provided config
         self.init_register_all_fields()
@@ -1046,6 +1119,7 @@ class TISRDataset(BaseDataset):
             self.longitude,
             self.tsi_times,
             self.tsi_values,
+            integration_chunk_size=self.integration_chunk_size,
         )
         key = self._get_field_name(field_type, "2d", "tisr")
         sample[key] = tisr.unsqueeze(0).unsqueeze(0)

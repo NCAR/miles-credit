@@ -609,6 +609,51 @@ class TestComputeTISR:
         assert result_6h.sum() > result_1h.sum(), "6-hour integrated TISR should exceed 1-hour integrated TISR"
 
 
+class TestComputeTISRChunking:
+    """Chunked integration must be a pure memory optimization: same result, any chunk size."""
+
+    def _reference_kwargs(self, rectangular_nc):
+        lat, lon = _get_latlon_grid(path=rectangular_nc)
+        tsi_t, tsi_v = _cmip6_tsi_data()
+        return dict(
+            t=pd.Timestamp("2020-06-21 12:00:00"),
+            integration_period=pd.Timedelta(hours=6),
+            num_integration_steps=360,
+            latitude=lat,
+            longitude=lon,
+            tsi_times=tsi_t,
+            tsi_values=tsi_v,
+        )
+
+    @pytest.mark.parametrize("chunk_size", [1, 7, 90, 359, 360])
+    def test_chunked_matches_single_block(self, rectangular_nc, chunk_size):
+        """Any chunk size must reproduce the single-block (unchunked) integral."""
+        kwargs = self._reference_kwargs(rectangular_nc)
+        # chunk >= num_integration_steps runs the whole window in one block,
+        # i.e. the original unchunked computation.
+        reference = _compute_tisr(integration_chunk_size=10_000, **kwargs)
+        chunked = _compute_tisr(integration_chunk_size=chunk_size, **kwargs)
+        assert torch.allclose(chunked, reference, rtol=1e-4, atol=1e-2), (
+            f"chunk_size={chunk_size}: max abs diff {(chunked - reference).abs().max().item()}"
+        )
+
+    def test_chunked_across_timestamps(self, rectangular_nc):
+        """Chunking must be result-neutral across diverse solar geometries."""
+        kwargs = self._reference_kwargs(rectangular_nc)
+        for ts in TIMESTAMPS:
+            kwargs["t"] = pd.Timestamp(ts)
+            reference = _compute_tisr(integration_chunk_size=10_000, **kwargs)
+            chunked = _compute_tisr(integration_chunk_size=90, **kwargs)
+            assert torch.allclose(chunked, reference, rtol=1e-4, atol=1e-2), f"mismatch at t={ts}"
+
+    @pytest.mark.parametrize("bad_chunk", [0, -1, 1.5, "90"])
+    def test_invalid_chunk_size_raises(self, rectangular_nc, bad_chunk):
+        """Non-positive or non-integer integration_chunk_size must raise ValueError."""
+        kwargs = self._reference_kwargs(rectangular_nc)
+        with pytest.raises(ValueError, match="integration_chunk_size"):
+            _compute_tisr(integration_chunk_size=bad_chunk, **kwargs)
+
+
 # =============================================================================
 # 11. TISRDataset
 # =============================================================================
@@ -667,6 +712,25 @@ class TestTISRDataset:
         data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc}, num_integration_steps=None)
         ds = TISRDataset(data_config, return_target=False)
         assert ds.num_integration_steps == 360
+
+    def test_init_sets_integration_chunk_size(self, rectangular_nc):
+        """__init__ must read integration_chunk_size from config."""
+        data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc})
+        data_config["source"]["TISR"]["integration_chunk_size"] = 45
+        ds = TISRDataset(data_config, return_target=False)
+        assert ds.integration_chunk_size == 45
+
+    def test_init_default_integration_chunk_size(self, tisr_dataset):
+        """__init__ must default integration_chunk_size to 90 when not in config."""
+        assert tisr_dataset.integration_chunk_size == 90
+
+    @pytest.mark.parametrize("bad_chunk", [0, -3, 2.5, "90"])
+    def test_init_invalid_integration_chunk_size_raises(self, rectangular_nc, bad_chunk):
+        """__init__ must reject a non-positive or non-integer integration_chunk_size."""
+        data_config = _make_tisr_data_config({"latlon_grid_path": rectangular_nc})
+        data_config["source"]["TISR"]["integration_chunk_size"] = bad_chunk
+        with pytest.raises(ValueError, match="integration_chunk_size"):
+            TISRDataset(data_config, return_target=False)
 
     def test_init_sets_latlon_grid_path(self, tisr_dataset, rectangular_nc):
         """__init__ must store latlon_grid_path from config."""

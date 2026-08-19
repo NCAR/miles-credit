@@ -187,6 +187,10 @@ data:
 
 This dataset calculates total integrated top of atmosphere solar irradiance entirely in Pytorch based on lat-lon and 
 time information. It follows the design patterns and calculations of the [Graphcast solar radiation module](https://github.com/google-deepmind/weathernext/blob/08cf73625c9d12bd9aaa038868bcb2fe488f2a22/graphcast/solar_radiation.py).
+`num_integration_steps` sets how many trapezoidal sub-intervals span the accumulation window (the data `timestep`);
+the integration is evaluated in blocks of `integration_chunk_size` sub-intervals (default 90) so peak memory stays
+bounded at a few `(integration_chunk_size + 1, ny, nx)` temporaries per DataLoader worker regardless of
+`num_integration_steps`, without changing the result.
 
 ### GOESDataset
 *API reference: {py:class}`credit.datasets.gen_2.goes.GOESDataset`* · `dataset_type: goes`

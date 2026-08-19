@@ -1,4 +1,4 @@
-save_loc: "/glade/derecho/scratch/$USER/credit_models/arcoera5_wxformer/"
+save_loc: "/glade/derecho/scratch/dgagne/credit_models/arcoera5_wxformer/"
 seed: 2525
 
 data:
@@ -60,7 +60,7 @@ data:
                    ]
     SOLAR:
       dataset_type: "tisr"
-      num_integration_steps: 2160
+      num_integration_steps: 360
       lat_spec: [ 90, -90, 721 ]          # [start, end, num_points], inclusive
       lon_spec: [ 0, 359.75, 1440 ]
       variables:
@@ -94,7 +94,7 @@ trainer:
   type: gen2
 
   parallelism:
-    data: fsdp2
+    data: ddp
     tensor: 1
     domain: 1
 
@@ -118,8 +118,11 @@ trainer:
   train_batch_size: 1
   valid_batch_size: 4
 
-  batches_per_epoch: 10
-  valid_batches_per_epoch: 10
+  # Also caps the scaler-fitting pass in `credit preprocess`: each rank fits on
+  # batches_per_epoch samples instead of a full 40-year sweep (7305 batches per
+  # rank at 8 ranks), which would blow the 6h walltime for little statistical gain.
+  batches_per_epoch: 600
+  valid_batches_per_epoch: 100
   stopping_patience: 999
 
   start_epoch: 0
@@ -141,8 +144,12 @@ trainer:
   grad_accum_every: 1
   grad_max_norm: 'dynamic'
 
-  thread_workers: 2
-  valid_thread_workers: 2
+  # Keep the dataloader footprint small: each sample is ~6 GB (711 channels of
+  # 721x1440 float32, input + target), and with 4 ranks per Derecho node the
+  # worker processes multiply — 4 workers x prefetch 2 x 4 ranks overran the
+  # node's 512 GB cgroup limit (OOM-killed pt_data_worker) during preprocess.
+  thread_workers: 4
+  valid_thread_workers: 1
   prefetch_factor: 2
 
 preblocks:
@@ -163,7 +170,7 @@ preblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: &scaler_path "/glade/derecho/scratch/$USER/credit_models/arcoera5_wxformer/standard_scaler.json"
+        scaler_path: &scaler_path "/glade/derecho/scratch/dgagne/credit_models/arcoera5_wxformer/standard_scaler.json"
         data_types: ["input", "target"]
         variables: []
         scaler_type: "standard"
@@ -298,8 +305,8 @@ pbs: #derecho
   conda: "credit-derecho"
   project: "NAML0001"
   job_name: "arco_wxformer_gen2"
-  walltime: "01:00:00"
-  nodes: 1
+  walltime: "12:00:00"
+  nodes: 4
   ncpus: 64
   ngpus: 4
   queue: 'main'        
