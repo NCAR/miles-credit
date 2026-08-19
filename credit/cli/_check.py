@@ -480,6 +480,7 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
     _check_scaler_paths_unique(conf, rep)
+    _check_spectral_chain(conf, rep)
 
 
 def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
@@ -510,6 +511,35 @@ def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
                 )
             else:
                 seen[resolved] = where
+
+
+def _check_spectral_chain(conf: dict, rep: _Report) -> None:
+    """A spectral_to_grid preblock targeting the reduced Gaussian grid leaves
+    variables on an unstructured point vector — a regrid preblock must follow
+    it in the same phase, or the model receives flat N320 points."""
+    for section, blocks in (conf.get("preblocks") or {}).items():
+        if not isinstance(blocks, dict):
+            continue
+        names = list(blocks)
+        for i, name in enumerate(names):
+            block = blocks[name]
+            if not isinstance(block, dict) or block.get("type") != "spectral_to_grid":
+                continue
+            args = block.get("args") or {}
+            if args.get("target_grid", "reduced_gaussian") != "reduced_gaussian":
+                continue
+            follows = any(
+                isinstance(blocks[later], dict) and blocks[later].get("type") == "regrid" for later in names[i + 1 :]
+            )
+            if not follows:
+                rep.error(
+                    f"preblocks.{section}.{name}",
+                    "spectral_to_grid with target_grid: reduced_gaussian must be followed by a "
+                    "regrid preblock in the same section (its output is a flat reduced-Gaussian "
+                    "point vector, not a lat/lon grid).",
+                    fix="Add a regrid block after it (see credit.reduced_gaussian for building "
+                    "the bilinear weight file), or use target_grid: equiangular.",
+                )
 
 
 def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
@@ -968,7 +998,7 @@ def _iter_config_paths(conf: dict):
             for name, block in (blocks or {}).items():
                 if not isinstance(block, dict):
                     continue
-                for key in ("scaler_path", "latitude_weights"):
+                for key in ("scaler_path", "latitude_weights", "weight_file", "grid_file"):
                     value = (block.get("args") or {}).get(key)
                     if isinstance(value, str) and value:
                         yield f"{section}.{phase}.{name}.{key}", value

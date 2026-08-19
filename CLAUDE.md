@@ -125,7 +125,7 @@ elsewhere.
 `credit/preblock/` and `credit/postblock/` are composable `nn.Module` stages (`base.py` in each dir) with
 `forward(batch: dict) -> dict` and a `from_config` classmethod, configured under `preblocks.ic_only` /
 `preblocks.per_step` and `postblocks.per_step` / `postblocks.post_rollout` in the YAML. Preblocks assemble
-and normalize model inputs (`norm.py`, `scaler.py`, `log.py`, `regrid.py`, `concat.py`); postblocks
+and normalize model inputs (`norm.py`, `scaler.py`, `log.py`, `regrid.py`, `spectral.py`, `concat.py`); postblocks
 denormalize and enforce physical constraints (`conservation.py`, `mslp.py`, `pressure_interp.py`,
 `wind_filter.py`). Every gen2 preblock chain must end with `concat`; every gen2 postblock chain starts
 with `reconstruct` (its inverse).

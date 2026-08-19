@@ -1,0 +1,315 @@
+# WXFormer trained from the ARCO ERA5 *cloud-optimized* (co/) stores — ERA5 in
+# its native IFS representation, converted to a 0.25° lat/lon grid on the fly:
+#
+#   - temperature / vorticity / divergence / vertical velocity live as T639
+#     spherical-harmonic coefficients (co/model-level-wind.zarr-v2);
+#   - u/v winds DO NOT EXIST in the stores — the spectral_to_grid preblock
+#     derives them from vorticity + divergence (streamfunction / velocity
+#     potential relations) during synthesis;
+#   - moisture (3D) and all 2D reanalysis fields live on the native N320
+#     reduced Gaussian grid (542,080 points, flat);
+#   - the spectral_to_grid preblock synthesizes the spectral fields onto the
+#     N320 reduced Gaussian columns, then the regrid preblock maps everything
+#     to the 721x1440 0.25° equiangular grid with bilinear weights.
+#
+# ONE-TIME SETUP — the preblocks need two small NetCDF files at build time:
+#
+#   python -c "
+#   import numpy as np
+#   from credit.reduced_gaussian import fetch_arco_n320_grid, reduced_gaussian_to_latlon_bilinear_weights
+#   g = fetch_arco_n320_grid('$SCRATCH/N320_grid.nc')
+#   reduced_gaussian_to_latlon_bilinear_weights(
+#       g, 90.0 - 0.25 * np.arange(721), 0.25 * np.arange(1440),
+#       '$SCRATCH/n320_to_0p25_bilinear.nc')
+#   "
+#
+# Notes vs the analysis-ready arco_era5_wxformer.yml config:
+#   - accumulated/diagnostic fields (total_precipitation, fluxes, ...) come
+#     from the co/ *forecast* store, which this source does not read — the
+#     diagnostic block is omitted here;
+#   - land_sea_mask & vegetation statics are not in the co/ stores; the only
+#     static available is geopotential_at_surface (from the reanalysis store).
+#   - Put to_device first: the T639 synthesis is ~0.2 TFLOP per sample and the
+#     Legendre table is ~1 GB — it belongs on the GPU.
+
+save_loc: "/glade/derecho/scratch/$USER/credit_models/arcoera5_co_wxformer/"
+seed: 2525
+
+data:
+  source: &data_sources
+    ERA5:
+      dataset_type: "arco_era5_co"
+      # Only hybrid model levels exist in the co/ stores (the native L137 grid).
+      level_coord: "hybrid"
+      levels: [
+        1,   2,   3,   4,   5,   6,   7,   8,   9,  10,  11,  12,  13,  14,  15,  16,
+        17,  18,  19,  20,  21,  22,  23,  24,  25,  26,  27,  28,  29,  30,  31,  32,
+        33,  34,  35,  36,  37,  38,  39,  40,  41,  42,  43,  44,  45,  46,  47,  48,
+        49,  50,  51,  52,  53,  54,  55,  56,  57,  58,  59,  60,  61,  62,  63,  64,
+        65,  66,  67,  68,  69,  70,  71,  72,  73,  74,  75,  76,  77,  78,  79,  80,
+        81,  82,  83,  84,  85,  86,  87,  88,  89,  90,  91,  92,  93,  94,  95,  96,
+        97,  98,  99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112,
+       113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128,
+       129, 130, 131, 132, 133, 134, 135, 136, 137
+      ]
+      variables:
+        prognostic:
+          # Requesting u/v makes the dataset emit spectral vorticity +
+          # divergence instead; spectral_to_grid turns them into u/v.
+          vars_3D: ["temperature",
+                    "specific_humidity",
+                    "fraction_of_cloud_cover",
+                    "u_component_of_wind",
+                    "v_component_of_wind"]
+          vars_2D: ["surface_pressure",
+                    "2m_temperature",
+                    "2m_dewpoint_temperature",
+                    "10m_u_component_of_wind",
+                    "10m_v_component_of_wind",
+                    "skin_temperature"]
+        dynamic_forcing: null
+        static:
+          vars_2D: ["geopotential_at_surface",
+                    "sea_ice_cover"]
+    SOLAR:
+      dataset_type: "tisr"
+      num_integration_steps: 2160
+      lat_spec: [ 90, -90, 721 ]          # [start, end, num_points], inclusive
+      lon_spec: [ 0, 359.75, 1440 ]
+      variables:
+        prognostic: null
+        diagnostic: null
+        dynamic_forcing:
+          vars_2D: ['tisr']
+        static: null
+  start_datetime: "1979-01-01"
+  end_datetime: "2018-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+validation_data:
+  source: *data_sources
+
+  start_datetime: "2019-01-01"
+  end_datetime: "2020-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+trainer:
+  type: gen2
+
+  parallelism:
+    data: fsdp2
+    tensor: 1
+    domain: 1
+
+  activation_checkpoint: True
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: True
+
+  save_backup_weights: True
+  save_best_weights: True
+
+  learning_rate: 1.0e-3
+  weight_decay: 0
+
+  train_batch_size: 1
+  valid_batch_size: 4
+  batches_per_epoch: 10
+  valid_batches_per_epoch: 10
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 2
+  epochs: &epochs 2
+
+  use_tensorboard: True
+  use_ema: True
+  ema_decay: 0.9999
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 1000
+    total_steps: 500000  # ~ batches/epoch × total epochs
+    min_lr: 1.0e-5
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 4
+
+preblocks:
+  per_step:
+    # Move the raw batch (spectral coefficients + N320 point vectors — smaller
+    # than the final 0.25° tensors) to the GPU first so synthesis and the sparse
+    # regrid both run there.
+    to_device:
+      type: to_device
+      args:
+        device: cuda
+    spectral:
+      type: "spectral_to_grid"
+      args:
+        truncation: 639
+        target_grid: "reduced_gaussian"
+        grid_file: "$SCRATCH/N320_grid.nc"
+        scalar_vars:
+          "ERA5/prognostic/3d/temperature": "ERA5/prognostic/3d/temperature"
+        vector_vars:
+          - vorticity: "ERA5/prognostic/3d/vorticity"
+            divergence: "ERA5/prognostic/3d/divergence"
+            u: "ERA5/prognostic/3d/u_component_of_wind"
+            v: "ERA5/prognostic/3d/v_component_of_wind"
+    fill_vals:
+      # sea_ice_cover is NaN over land; fill BEFORE regridding or the sparse
+      # matmul spreads NaN into coastal ocean points.
+      type: "fill_values"
+      args:
+        rules:
+          - search: nan        # NaN       → 0.0
+            fill: 0.0
+        variables: ["ERA5/static/2d/sea_ice_cover"]
+    regrid:
+      # N320 reduced Gaussian -> 0.25° equiangular (721x1440), bilinear.
+      type: "regrid"
+      args:
+        weight_file: "$SCRATCH/n320_to_0p25_bilinear.nc"
+        variables: ["ERA5/prognostic/3d/temperature",
+                    "ERA5/prognostic/3d/specific_humidity",
+                    "ERA5/prognostic/3d/fraction_of_cloud_cover",
+                    "ERA5/prognostic/3d/u_component_of_wind",
+                    "ERA5/prognostic/3d/v_component_of_wind",
+                    "ERA5/prognostic/2d/surface_pressure",
+                    "ERA5/prognostic/2d/2m_temperature",
+                    "ERA5/prognostic/2d/2m_dewpoint_temperature",
+                    "ERA5/prognostic/2d/10m_u_component_of_wind",
+                    "ERA5/prognostic/2d/10m_v_component_of_wind",
+                    "ERA5/prognostic/2d/skin_temperature",
+                    "ERA5/static/2d/geopotential_at_surface",
+                    "ERA5/static/2d/sea_ice_cover"]
+    log_trans:
+      type: "log_transform"
+      args:
+        variables: &log_vars ["ERA5/prognostic/3d/specific_humidity",
+                    "ERA5/prognostic/2d/surface_pressure",
+                    ]
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: &scaler_path "/glade/derecho/scratch/$USER/credit_models/arcoera5_co_wxformer/standard_scaler.json"
+        data_types: ["input", "target"]
+        variables: []
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+        method: transform
+    concat:
+      type: concat
+
+postblocks:
+  per_step:
+    # ---- Prediction chain: y_pred -> y_processed, in physical units ---- #
+    # detach: false is REQUIRED — BaseLoss scores y_processed, so gradients must
+    # flow back through the postblocks into y_pred.
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: false
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: *scaler_path
+        variables: []
+        method: inverse_transform
+    log_trans:
+      type: "exp_transform"
+      args:
+        variables: *log_vars
+
+    # ---- Target twin: y -> y_target_processed ---- #
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: "y"
+        out_key: "y_target_processed"
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: *scaler_path
+        variables: []
+        method: inverse_transform
+        key: "y_target_processed"
+    log_trans_target:
+      type: "exp_transform"
+      args:
+        variables: *log_vars
+        key: "y_target_processed"
+
+model:
+  type: "wxformer"
+  frames: 1
+  image_height: 721
+  image_width: 1440
+  levels: 137
+  channels: 5              # 3D prognostics: t, q, cc, u, v
+  surface_channels: 6      # 2D prognostics
+  input_only_channels: 3   # geopotential_at_surface, sea_ice_cover, tisr
+  output_only_channels: 0
+
+  dim: [128, 256, 512, 1024]
+  depth: [2, 2, 2, 2]
+
+  global_window_size: [8, 4, 2, 1]
+  local_window_size: 4
+
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32 ]
+    - [4, 4]
+    - [4, 4]
+    - [4, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  interp: False
+  use_spectral_norm: True
+  upsample_with_ps: True
+
+  #   padded H = 721 + 23 + 24 = 768  (= 64 * 12)
+  #   padded W = 1440 + 16 + 16 = 1472 (= 64 * 23)
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [ 23, 24 ]
+    pad_lon: [ 16, 16 ]
+
+loss:
+  type: base
+  args:
+    training_loss: "mse"
+    var_weighting: "inverse_variance"
+    base_loss_parameters: {}
+    scaler_path: *scaler_path
+    normalize_weights: true
+    include_computed_diagnostics: false
+    use_latitude_weights: false
+
+pbs: #derecho
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "wxformer_arco_co_6hr_gen2"

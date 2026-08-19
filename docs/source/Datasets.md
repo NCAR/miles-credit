@@ -83,6 +83,7 @@ its `dataset_type` registry key (defined in
 |---|---|---|
 | `local` | `LocalDataset` | Locally hosted netCDF/zarr file collections |
 | `arco_era5` | `ARCOERA5Dataset` | Google Cloud Analysis-Ready Cloud-Optimized ERA5 |
+| `arco_era5_co` | `ARCOERA5CODataset` | ARCO ERA5 cloud-optimized (native spectral / reduced Gaussian) stores |
 | `weatherbench2_era5` | `WeatherBench2ERA5Dataset` | WeatherBench 2 copies of ERA5 at several resolutions |
 | `tisr` | `TISRDataset` | Top-of-atmosphere solar irradiance computed on the fly |
 | `goes` | `GOESDataset` | GOES geostationary satellite data streamed from AWS |
@@ -147,6 +148,55 @@ data:
         prognostic: 
           vars_3D: ["temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"]
           vars_2D: ["surface_pressure"]
+```
+
+### ARCOERA5CODataset
+*API reference: {py:class}`credit.datasets.gen_2.era5_co.ARCOERA5CODataset`* · `dataset_type: arco_era5_co`
+
+Streams the ARCO ERA5 **cloud-optimized** (`co/`) zarr stores — ERA5 in its *native*
+IFS representation rather than the pre-interpolated 0.25° analysis-ready product:
+
+| store | variables | representation |
+|---|---|---|
+| `model-level-wind` | temperature, vorticity, divergence, vertical velocity (137 hybrid levels) | T639 spherical-harmonic coefficients (410,240 values) |
+| `single-level-surface` | log surface pressure, surface geopotential | T639 spherical-harmonic coefficients |
+| `model-level-moisture` | specific humidity, cloud species, ozone (137 hybrid levels) | N320 reduced Gaussian grid (542,080 points) |
+| `single-level-reanalysis` | 2m/10m/100m fields, SST, skin/soil temperatures, column totals | N320 reduced Gaussian grid |
+
+Because u/v winds only exist as spectral vorticity + divergence, requesting
+`u_component_of_wind` / `v_component_of_wind` makes the dataset emit the spectral
+`vorticity` and `divergence` keys instead; this source therefore **requires** the
+[`spectral_to_grid`](Preblocks.md) preblock (which derives u/v and synthesizes the
+other spectral variables to grid points) followed by a `regrid` preblock (reduced
+Gaussian → lat/lon). `credit check` enforces the chain. Tensors are returned flat —
+`(n_levels, T, 410240)` spectral or `(n_levels, T, 542080)` reduced Gaussian — until
+those two preblocks have run.
+
+Variables are requested by the same long names as `arco_era5` (or GRIB short names
+like `t2m`); see `_CO_VARIABLES` in `credit/datasets/gen_2/era5_co.py` for the full
+table. Accumulated diagnostics (precipitation, fluxes) live in the co/ *forecast*
+store and are not available through this source. Only hybrid model levels exist.
+On first read the dataset writes `{source}_reduced_gaussian_grid.nc` to `save_loc`
+(the ring description used to build regrid weights — see
+{py:mod}`credit.reduced_gaussian`).
+
+See `config/gen_2/examples/arco_era5_co_wxformer.yml` for a complete config,
+including the one-time weight-file setup snippet.
+
+```yaml
+data:
+  source:
+    ERA5:
+      dataset_type: arco_era5_co
+      level_coord: hybrid          # the co/ stores only have hybrid model levels
+      levels: [50, 70, 90, 110, 120, 130, 137]
+      variables:
+        prognostic:
+          vars_3D: ["temperature", "specific_humidity",
+                    "u_component_of_wind", "v_component_of_wind"]
+          vars_2D: ["surface_pressure", "2m_temperature"]
+        static:
+          vars_2D: ["geopotential_at_surface"]
 ```
 
 ### WeatherBench2ERA5Dataset

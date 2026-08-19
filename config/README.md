@@ -19,6 +19,7 @@ config/
       wxformer_era5_025deg_6hr.yml  WXFormer, 0.25° ERA5 pressure-level, 6h
       wxformer_npj_era5_028deg.yml  WXFormer, model-level ERA5, 0.28°
       multi_source_data.yaml        Multi-source data configuration example
+      arco_era5_co_wxformer.yml     WXFormer from native (spectral/reduced-Gaussian) ARCO ERA5 co/ stores
     smoke/                  CI smoke-test configs (not for production use)
 
   gen_1/                    Previous generation configs (kept for reference)

@@ -113,6 +113,51 @@ args:
   reshape_to_xy: true
 ```
 
+### `spectral_to_grid` (SpectralToGrid)
+
+**AutoAPI:** {py:obj}`credit.preblock.spectral.SpectralToGrid`
+
+Synthesizes variables stored as ECMWF spherical-harmonic coefficient vectors
+(e.g. the ARCO ERA5 cloud-optimized `co/` stores at T639) into grid-point
+fields, on the fly. Scalar fields (temperature, vertical velocity, log surface
+pressure) are transformed directly; **u/v winds are derived** from spectral
+vorticity and divergence via the streamfunction / velocity-potential relations
+(ERA5 never stores model-level u/v spectrally). `exp_vars` applies `exp()`
+after synthesis (log surface pressure → surface pressure).
+
+Two targets: `target_grid: reduced_gaussian` (default) evaluates on the native
+reduced Gaussian rings — matching the layout of the grid-point `co/` variables,
+so one `regrid` preblock (which **must follow** in the same section; `credit
+check` enforces this) then maps *all* variables to a lat/lon grid.
+`target_grid: equiangular` synthesizes directly onto an `nlat × nlon` lat/lon
+grid with no intermediate interpolation (derived winds copy the two pole rows
+from their neighbors). The `grid_file` ring description and the `regrid` weight
+file are built once with {py:mod}`credit.reduced_gaussian`
+(`fetch_arco_n320_grid`, `reduced_gaussian_to_latlon_bilinear_weights`).
+
+At T639 the cached associated-Legendre table is ~1 GB and synthesis costs
+~0.2 TFLOP per 137-level variable — place a `to_device` preblock before this
+block so it runs on the GPU. Variables absent from a data type are skipped
+silently, so at rollout steps `t > 1` (prognostics re-fed from the model are
+already grid-point fields) the block is a no-op.
+
+```yaml
+type: "spectral_to_grid"
+args:
+  truncation: 639
+  target_grid: "reduced_gaussian"
+  grid_file: "$SCRATCH/N320_grid.nc"
+  scalar_vars:
+    "ERA5/prognostic/3d/temperature": "ERA5/prognostic/3d/temperature"
+    "ERA5/prognostic/2d/log_surface_pressure": "ERA5/prognostic/2d/surface_pressure"
+  exp_vars: ["ERA5/prognostic/2d/surface_pressure"]
+  vector_vars:
+    - vorticity: "ERA5/prognostic/3d/vorticity"
+      divergence: "ERA5/prognostic/3d/divergence"
+      u: "ERA5/prognostic/3d/u_component_of_wind"
+      v: "ERA5/prognostic/3d/v_component_of_wind"
+```
+
 ### `era5_normalizer` (ERA5Normalizer)
 
 **AutoAPI:** {py:obj}`credit.preblock.norm.ERA5Normalizer`
