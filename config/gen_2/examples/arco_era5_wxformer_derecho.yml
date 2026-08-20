@@ -161,6 +161,18 @@ preblocks:
           - search: nan        # NaN       → 0.0
             fill: 0.0
         variables: ["ERA5/static/2d/sea_ice_cover"]
+    clamp_q:
+      # ERA5's semi-Lagrangian moisture advection leaves small negative specific
+      # humidity (order -1e-6 kg/kg) at scattered upper-tropospheric points.
+      # log_transform maps anything below -eps to NaN, which silently poisons the
+      # fitted scaler statistics for that entire level, so clamp to zero first.
+      type: "fill_values"
+      args:
+        rules:
+          - search: 0.0      # < 0.0 -> 0.0
+            op: "<"
+            fill: 0.0
+        variables: ["ERA5/prognostic/3d/specific_humidity"]
     log_trans:
       type: "log_transform"
       args:

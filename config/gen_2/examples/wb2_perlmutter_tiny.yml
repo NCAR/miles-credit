@@ -32,6 +32,21 @@ data:
 
 preblocks:
   per_step:
+    clamp_nonneg:
+      # ERA5 leaves small negative values in fields that are physically
+      # non-negative: specific humidity (semi-Lagrangian moisture advection,
+      # order -1e-6 kg/kg aloft) and 6-hourly total precipitation (order -1e-8 m,
+      # at ~20% of grid points on some steps). log_transform maps anything below
+      # -eps to NaN, which silently poisons the fitted scaler statistics for that
+      # variable, so clamp to zero first.
+      type: "fill_values"
+      args:
+        rules:
+          - search: 0.0      # < 0.0 -> 0.0
+            op: "<"
+            fill: 0.0
+        variables: ["WBERA5/prognostic/3d/specific_humidity",
+                    "WBERA5/diagnostic/2d/total_precipitation_6hr"]
     log_transform:
       type: "log_transform"
       args:
