@@ -348,7 +348,23 @@ class GridSchema:
                 (e.g. ``"unstructured"``) isn't directly resolvable and no active
                 Regridder preblock provides a rectilinear/curvilinear destination.
         """
+        # Resolved first so its cross-source disagreement check still runs, but the
+        # result is only *required* below when no regridder is active.
         native = _native_grid(dataset, save_loc)
+        regridder = _find_regridder(ic_preblocks, step_preblocks)
+
+        if regridder is not None:
+            # An active Regridder fully determines the output grid and the native
+            # grid is never consulted in this branch, so don't require one. A source
+            # whose native grid is unstructured is only resolvable this way: such a
+            # grid is not a valid GridSchema type, so it is never persisted as a
+            # {source}_grid_schema.nc, and static_metadata is empty in the main
+            # process whenever the reads happened in DataLoader workers. That is
+            # exactly the ARCO ERA5 co/ case — a reduced Gaussian grid regridded to
+            # 0.25 degrees — which previously raised here and silently skipped
+            # writing output_grid_schema.nc.
+            return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")
+
         if native is None:
             raise ValueError(
                 "GridSchema.resolve: no native grid available from dataset.static_metadata "
@@ -356,17 +372,13 @@ class GridSchema:
                 "Ensure at least one source populates static_metadata['grid']."
             )
 
-        regridder = _find_regridder(ic_preblocks, step_preblocks)
-        if regridder is None:
-            if native["grid_type"] not in _VALID_GRID_TYPES:
-                raise ValueError(
-                    f"GridSchema.resolve: source's native grid_type={native['grid_type']!r} is not "
-                    f"directly resolvable as an output grid (supported: {_VALID_GRID_TYPES}). Add an "
-                    "active Regridder preblock targeting a rectilinear/curvilinear destination grid."
-                )
-            return cls(native["grid_type"], native["lat"], native["lon"], origin="native")
-
-        return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")
+        if native["grid_type"] not in _VALID_GRID_TYPES:
+            raise ValueError(
+                f"GridSchema.resolve: source's native grid_type={native['grid_type']!r} is not "
+                f"directly resolvable as an output grid (supported: {_VALID_GRID_TYPES}). Add an "
+                "active Regridder preblock targeting a rectilinear/curvilinear destination grid."
+            )
+        return cls(native["grid_type"], native["lat"], native["lon"], origin="native")
 
     # ------------------------------------------------------------------
     # Persistence

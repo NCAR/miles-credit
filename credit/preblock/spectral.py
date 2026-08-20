@@ -416,12 +416,32 @@ class SpectralToGrid(BasePreblock):
                 self._check_spectral_shape(spec["vorticity"], vo)
                 self._check_spectral_shape(spec["divergence"], div)
                 u, v = self._synthesize_vector(vo, div)
-                src_dict[spec["u"]] = u
-                src_dict[spec["v"]] = v
-                if self.delete_inputs:
-                    for consumed in (spec["vorticity"], spec["divergence"]):
-                        if consumed not in self.scalar_vars and consumed not in scalar_outputs:
-                            del src_dict[consumed]
+                # Seat the derived winds in the dict slots their spectral inputs
+                # vacated. The dataset emits vorticity/divergence where u/v were
+                # declared, and ChannelSchema is built from that declared order, so
+                # appending the winds instead would reorder the channel layout and
+                # trip the concat preblock's schema validation.
+                substitutions = {}
+                for consumed, out_key, field in (
+                    (spec["vorticity"], spec["u"], u),
+                    (spec["divergence"], spec["v"], v),
+                ):
+                    keep = consumed in self.scalar_vars or consumed in scalar_outputs
+                    if self.delete_inputs and not keep:
+                        substitutions[consumed] = (out_key, field)
+                    else:
+                        src_dict[out_key] = field  # input is kept, so the wind is appended
+
+                if substitutions:
+                    rebuilt = {}
+                    for key, field in src_dict.items():
+                        if key in substitutions:
+                            out_key, wind = substitutions[key]
+                            rebuilt[out_key] = wind
+                        else:
+                            rebuilt[key] = field
+                    src_dict.clear()
+                    src_dict.update(rebuilt)
 
             for raw_key, out_key in self.scalar_vars.items():
                 source = raw_key.split("/")[0]

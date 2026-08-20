@@ -1,3 +1,6 @@
+import logging
+
+import numpy as np
 import torch
 from bridgescaler import load_scaler_dict, scale_var_dict
 from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScalerTensor, DMinMaxScalerTensor
@@ -6,11 +9,51 @@ from os.path import exists, expandvars
 from os import makedirs
 from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
 
+logger = logging.getLogger(__name__)
+
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,
     "quantile": DQuantileScalerTensor,
     "minmax": DMinMaxScalerTensor,
 }
+
+
+def _floor_degenerate_variance(scaler_dict: dict) -> None:
+    """Give constant channels unit variance so ``transform`` cannot divide by zero.
+
+    A channel that never varies over the fitted samples gets ``var_x_ == 0`` — for
+    example ``fraction_of_cloud_cover`` on stratospheric model levels, which ERA5
+    reports as exactly 0. The standard transform then evaluates ``(x - mean) / 0``
+    and every value in that channel becomes NaN, which propagates through the model
+    to a NaN loss on the first batch. Setting the scale to 1 maps such a channel to
+    0 instead, matching how scikit-learn's ``StandardScaler`` treats zero-variance
+    features.
+    """
+    for split, sources in scaler_dict.items():
+        for source, scalers in sources.items():
+            for var_key, scaler in scalers.items():
+                variance = getattr(scaler, "var_x_", None)
+                if variance is None:
+                    continue
+                is_tensor = torch.is_tensor(variance)
+                values = variance.detach().cpu().numpy() if is_tensor else np.asarray(variance)
+                degenerate = values == 0
+                if not degenerate.any():
+                    continue
+                patched = values.copy()
+                patched[degenerate] = 1.0
+                scaler.var_x_ = (
+                    torch.as_tensor(patched, dtype=variance.dtype, device=variance.device) if is_tensor else patched
+                )
+                logger.warning(
+                    "BridgeScalerTransform: %s/%s/%s has %d constant channel(s) (variance 0); "
+                    "scaling them by 1 so they map to 0 instead of NaN. Fit the scaler on more "
+                    "samples, or drop the variable, if this is unexpected.",
+                    split,
+                    source,
+                    var_key,
+                    int(degenerate.sum()),
+                )
 
 
 def _move_leaf_scaler_to_cpu(scaler):
@@ -163,6 +206,7 @@ class BridgeScalerTransform(BasePreblock):
         # ``scaler_template`` is the single unfitted prototype used to fit new data.
         if exists(self.scaler_path):
             self.scaler = load_scaler_dict(self.scaler_path)
+            _floor_degenerate_variance(self.scaler)
             self.scaler_template = None
         else:
             full_scaler_path = self.scaler_path

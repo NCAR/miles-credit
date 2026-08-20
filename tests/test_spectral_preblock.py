@@ -532,7 +532,16 @@ def test_co_dataset_remote_sample_and_synthesis(tmp_path):
         tmp_path,
         {
             "prognostic": {
-                "vars_3D": ["temperature", "u_component_of_wind", "v_component_of_wind"],
+                # specific_humidity sits between the spectral vars on purpose: it comes
+                # from the moisture store while t/u/v come from the wind store, so a
+                # store-grouped read order would reshuffle the channels (see the
+                # emission-order assertion below).
+                "vars_3D": [
+                    "temperature",
+                    "specific_humidity",
+                    "u_component_of_wind",
+                    "v_component_of_wind",
+                ],
                 "vars_2D": ["surface_pressure"],
             }
         },
@@ -540,6 +549,17 @@ def test_co_dataset_remote_sample_and_synthesis(tmp_path):
     ds = ARCOERA5CODataset(cfg)
     t0 = pd.Timestamp("2010-07-01T00:00")
     sample = ds[(t0, 0)]
+
+    # ChannelSchema.from_config builds the expected layout from the declared order and
+    # the concat preblock rejects a batch that disagrees, so the dataset must emit
+    # variables in declared order even though it reads one zarr store at a time.
+    assert [k for k in sample["input"] if k.startswith("ERA5/prognostic/3d/")] == [
+        "ERA5/prognostic/3d/temperature",
+        "ERA5/prognostic/3d/specific_humidity",
+        "ERA5/prognostic/3d/vorticity",
+        "ERA5/prognostic/3d/divergence",
+    ]
+
     x_t = sample["input"]["ERA5/prognostic/3d/temperature"]
     x_vo = sample["input"]["ERA5/prognostic/3d/vorticity"]
     x_d = sample["input"]["ERA5/prognostic/3d/divergence"]

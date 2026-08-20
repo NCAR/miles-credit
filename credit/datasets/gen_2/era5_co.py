@@ -279,6 +279,12 @@ class ARCOERA5CODataset(BaseDataset):
 
         plans = self._fetch_plans[field_type]
         needed_stores = {store for dim in ("3d", "2d") for (_, store, _, _) in plans[dim]}
+        # Read loop is grouped by store (each zarr opened once), which is not the
+        # order the variables were declared in. Stage the tensors here and insert
+        # them into `sample` in fetch-plan order below: ChannelSchema.from_config
+        # builds the expected channel layout from the declared order, and the
+        # concat preblock rejects a batch whose assembled layout disagrees.
+        staged: dict[str, Any] = {}
         for store_name in sorted(needed_stores):
             with xr.open_zarr(self._stores[store_name], chunks=None) as ds:
                 if "grid" not in self.static_metadata and store_name in ("moisture", "reanalysis"):
@@ -297,14 +303,20 @@ class ARCOERA5CODataset(BaseDataset):
                         continue
                     arr = ds_t[short].sel({self.level_coord: self.levels}).values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)  # (n_levels, 1, values)
-                    sample[self._get_field_name(field_type, "3d", varname)] = tensor
+                    staged[self._get_field_name(field_type, "3d", varname)] = tensor
 
                 for varname, store, short, _repr in plans["2d"]:
                     if store != store_name:
                         continue
                     arr = ds_t[short].values
                     tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)  # (1, 1, values)
-                    sample[self._get_field_name(field_type, "2d", varname)] = tensor
+                    staged[self._get_field_name(field_type, "2d", varname)] = tensor
+
+        for dim in ("3d", "2d"):
+            for varname, *_ in plans[dim]:
+                key = self._get_field_name(field_type, dim, varname)
+                if key in staged:
+                    sample[key] = staged[key]
 
         # The reduced-Gaussian grid description is also needed when only spectral
         # variables were requested (the spectral_to_grid preblock synthesizes onto

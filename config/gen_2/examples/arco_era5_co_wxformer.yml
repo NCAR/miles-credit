@@ -184,6 +184,18 @@ preblocks:
           - search: nan        # NaN       → 0.0
             fill: 0.0
         variables: ["ERA5/static/2d/sea_ice_cover"]
+    clamp_q:
+      # ERA5's semi-Lagrangian moisture advection leaves small negative
+      # specific humidity (order -1e-6 kg/kg) at scattered upper-tropospheric
+      # points. log_transform maps anything below -eps to NaN, which poisons
+      # the fitted scaler for that whole level, so clamp to zero first.
+      type: "fill_values"
+      args:
+        rules:
+          - search: 0.0      # < 0.0 → 0.0
+            op: "<"
+            fill: 0.0
+        variables: ["ERA5/prognostic/3d/specific_humidity"]
     regrid:
       # N320 reduced Gaussian -> 0.25° equiangular (721x1440), bilinear.
       type: "regrid"
@@ -223,9 +235,24 @@ preblocks:
 
 postblocks:
   per_step:
-    # ---- Prediction chain: y_pred -> y_processed, in physical units ---- #
+    # ---- Prediction chain: y_pred -> y_processed ---- #
     # detach: false is REQUIRED — BaseLoss scores y_processed, so gradients must
     # flow back through the postblocks into y_pred.
+    #
+    # NOTE: the exp_transform that would return specific_humidity / surface_pressure
+    # to physical units is deliberately NOT in this chain. BaseLoss takes its
+    # inverse_variance weights from the fitted scaler, whose statistics are in
+    # LOG space for these two variables (the scaler is fitted after the preblock
+    # log_transform). Exponentiating first would score Pa^2 errors with a weight
+    # derived from log-Pa variance — surface_pressure ends up ~9e8x overweighted
+    # and the loss diverges on the first optimizer step. Leaving the pair in log
+    # space keeps the weights and the scored quantity in the same units.
+    #
+    # This pairs with forecast_len: 1 (single step). For multi-step rollout or
+    # `credit rollout` inference, y_processed feeds back through the preblock
+    # log_transform and is what gets written out, so it must be physical there —
+    # restore the exp_transform (and expect the weighting problem above) or give
+    # BaseLoss configurable pred/target keys so a log-space twin can be scored.
     reconstruct:
       type: reconstruct
       args:
@@ -236,10 +263,6 @@ postblocks:
         scaler_path: *scaler_path
         variables: []
         method: inverse_transform
-    log_trans:
-      type: "exp_transform"
-      args:
-        variables: *log_vars
 
     # ---- Target twin: y -> y_target_processed ---- #
     reconstruct_target:
@@ -253,11 +276,6 @@ postblocks:
         scaler_path: *scaler_path
         variables: []
         method: inverse_transform
-        key: "y_target_processed"
-    log_trans_target:
-      type: "exp_transform"
-      args:
-        variables: *log_vars
         key: "y_target_processed"
 
 model:

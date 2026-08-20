@@ -102,7 +102,12 @@ on `trainer.batches_per_epoch` = **10** IC batches and fits the standard scaler 
 0.25° physical fields, saving `$EXP/standard_scaler.json`.
 
 ```bash
-credit preprocess -c config/gen_2/examples/arco_era5_co_wxformer.yml
+# NOTE: preprocess has no single-process fallback — it calls get_rank_info()
+# unconditionally and exits with "Can't find the environment variables for
+# local rank" under a plain `credit preprocess`. Launch it under torchrun:
+torchrun --standalone --nnodes=1 --nproc_per_node=1 \
+    "$(python -c 'import credit.applications.preprocess as m; print(m.__file__)')" \
+    -c config/gen_2/examples/arco_era5_co_wxformer.yml
 ```
 
 What to expect / verify:
@@ -111,11 +116,19 @@ What to expect / verify:
   wind store alone), so wall time is network-bound: expect a few minutes per batch, tens of
   minutes total. Log lines: `Processing batch i of 10`.
 - On completion the log prints fitted per-variable means/stds. **Sanity-check them in physical
-  units**: temperature mean ≈ 220–290 K per level band; u/v means near 0 with std ~5–30 m/s;
-  `surface_pressure` is fitted *after* the log transform, so mean ≈ 11.4–11.5 (log-Pa);
-  specific_humidity likewise post-log (negative mean). Vorticity/divergence should NOT appear —
-  they were consumed by the wind derivation. If u/v stds are wildly wrong (e.g. hundreds of m/s)
-  the wind derivation is broken: stop and report.
+  units**: temperature mean ≈ 220–290 K per level band; u/v means near 0 with std ~5–30 m/s.
+  Vorticity/divergence should NOT appear — they were consumed by the wind derivation. If u/v stds
+  are wildly wrong (e.g. hundreds of m/s) the wind derivation is broken: stop and report.
+- The log-transformed variables are **not** bare `log(x)`: `LogTransform` applies
+  `y = log(x + eps) - log(eps)` with `eps=1e-8`, i.e. every value carries a `+18.42` offset so
+  that `y=0` at `x=0`. So expect `surface_pressure` mean ≈ **29.9** (= ln(101325) + 18.42), and
+  `specific_humidity` **positive**, ≈ 5 at the model top rising to ≈ 13 near the surface. To
+  recover physical units subtract 18.42 and exponentiate.
+- **Check for `mean=nan` in the fitted table** (`grep -c 'mean=nan'` on the log — expect 0). ERA5's
+  semi-Lagrangian moisture advection leaves small negative specific humidity (order -1e-6 kg/kg) at
+  scattered upper-tropospheric points; `log_transform` maps anything below `-eps` to NaN and poisons
+  that entire level's statistics. The config's `clamp_q` preblock clamps negatives to zero before the
+  log — if it is missing or ordered after `log_trans`, expect ~10 NaN levels between 60 and 95.
 - `$EXP/ERA5_reduced_gaussian_grid.nc` should appear (written by the dataset on first read).
 - 10 batches is statistically thin but fine for a smoke test. (For a production scaler, raise
   `trainer.batches_per_epoch` temporarily — preprocess uses that count — then restore it.)
@@ -157,6 +170,9 @@ Pass = all of:
 Report: peak GPU memory, seconds/batch (train + preprocess), the fitted mean/std table for
 temperature / u / v / surface_pressure, and any warnings that looked new. If anything fails,
 include the full traceback and the batch index it failed on.
+
+## 8. Visual confirmation
+After completing training, perform some visualization checks for manual verification of correct structures in the data. Make matplotlib plots of u, v, t, and q at lowest model level on a global map with cartopy plotting coastlines. Compare against the Analysis ready arco data to make sure the plots are consistent. 
 
 ## Troubleshooting
 

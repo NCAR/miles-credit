@@ -605,7 +605,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
             # FSDP2 with dp=1 is a no-op for gradient sync and converts params to
             # DTensors, which breaks sync_domain_gradients when domain > 1.
             logger.warning(
-                f"[V2] FSDP2 requested but dp_size={dp_size} (world={dist.get_world_size()}, "
+                f"[V2] FSDP2 requested but dp_size={dp_size} (world={_world_size}, "
                 f"tensor={tp_size}, domain={domain_size}). Skipping FSDP2 — use data=none or "
                 "increase GPUs so dp_size > 1. Mixed precision falls back to plain autocast "
                 "(trainer.amp); fsdp2_mp_policy does not apply."
