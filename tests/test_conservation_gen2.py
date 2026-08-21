@@ -22,6 +22,7 @@ from credit.postblock.conservation import (
     TracerFixer,
     GlobalMassFixer,
     GlobalWaterFixer,
+    GlobalNetEnergyFixer,
     GlobalEnergyFixerUpDown,
 )
 
@@ -42,6 +43,11 @@ VARS_2D_DIAG = [
     "SHFLX",
     "LHFLX",
     "TS",
+    # net-flux variables for GlobalNetEnergyFixer (ERA5 sign convention: positive downward)
+    "FSNT",
+    "FLNT",
+    "FSNS",
+    "FLNS",
 ]
 
 
@@ -335,6 +341,119 @@ def test_energy_fixer_updown_runs_and_grad(statics_file):
     assert torch.isfinite(out).all()
     out.sum().backward()
     assert t_in.grad is not None
+
+
+# --------------------------------------------------------------------------- #
+# Energy fixer (net flux)
+# --------------------------------------------------------------------------- #
+def _net_energy_kwargs(statics_file, **overrides):
+    kw = dict(
+        T_var=key("prognostic", "3d", "T"),
+        q_var=key("prognostic", "3d", "Qtot"),
+        U_var=key("prognostic", "3d", "U"),
+        V_var=key("prognostic", "3d", "V"),
+        sp_var=key("prognostic", "2d", "PS"),
+        surface_geopotential_name="PHIS",
+        toa_net_solar_var=key("diagnostic", "2d", "FSNT"),
+        toa_net_thermal_var=key("diagnostic", "2d", "FLNT"),
+        surf_net_solar_var=key("diagnostic", "2d", "FSNS"),
+        surf_net_thermal_var=key("diagnostic", "2d", "FLNS"),
+        surf_sh_var=key("diagnostic", "2d", "SHFLX"),
+        surf_lh_var=key("diagnostic", "2d", "LHFLX"),
+        lead_time_periods=6,
+        **_physics_args(statics_file),
+    )
+    kw.update(overrides)
+    return kw
+
+
+def _global_energy_budget(fixer, batch):
+    """Return (global_TE_t0, global_TE_t1, N_seconds * (R_T_sum - F_S_sum)) in the fixer's own units."""
+    core = fixer.core
+    src = batch["y_processed"][SRC]
+    inp = batch["x_physical"][SRC]
+
+    def lvl(d, k, t):
+        return d[k][:, :, t, ...].detach()
+
+    def sfc(d, k, t):
+        return d[k][:, 0, t, ...].detach()
+
+    T0, q0, U0, V0 = (lvl(inp, key("prognostic", "3d", n), -1) for n in ("T", "Qtot", "U", "V"))
+    T1, q1, U1, V1 = (lvl(src, key("prognostic", "3d", n), 0) for n in ("T", "Qtot", "U", "V"))
+    sp0 = sfc(inp, key("prognostic", "2d", "PS"), -1)
+    sp1 = sfc(src, key("prognostic", "2d", "PS"), 0)
+    from credit.physics_constants import GRAVITY, LH_WATER, CP_DRY, CP_VAPOR
+
+    E0 = ((1 - q0) * CP_DRY + q0 * CP_VAPOR) * T0 + LH_WATER * q0 + fixer.GPH_surf + 0.5 * (U0**2 + V0**2)
+    E1 = ((1 - q1) * CP_DRY + q1 * CP_VAPOR) * T1 + LH_WATER * q1 + fixer.GPH_surf + 0.5 * (U1**2 + V1**2)
+    TE0 = core.weighted_sum(core.integral(E0, sp0) / GRAVITY, axis=(-2, -1))
+    TE1 = core.weighted_sum(core.integral(E1, sp1) / GRAVITY, axis=(-2, -1))
+
+    R_T = (sfc(src, fixer.toa_net_solar_var, 0) + sfc(src, fixer.toa_net_thermal_var, 0)) * fixer.flux_scale
+    F_S = (
+        sfc(src, fixer.surf_net_solar_var, 0)
+        + sfc(src, fixer.surf_net_thermal_var, 0)
+        + sfc(src, fixer.surf_sh_var, 0)
+        + sfc(src, fixer.surf_lh_var, 0)
+    ) * fixer.flux_scale
+    forcing = fixer.N_seconds * (core.weighted_sum(R_T, axis=(-2, -1)) - core.weighted_sum(F_S, axis=(-2, -1)))
+    return TE0, TE1, forcing
+
+
+def test_energy_fixer_net_runs_and_grad(statics_file):
+    batch, cmap, _ = build_super_dict(requires_grad=True)
+    tk = key("prognostic", "3d", "T")
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file))
+    t_in = batch["y_processed"][SRC][tk]
+    batch = fixer(batch)
+    out = batch["y_processed"][SRC][tk]
+    assert out.shape == (B, L, 1, H, W)
+    assert torch.isfinite(out).all()
+    out.sum().backward()
+    assert t_in.grad is not None
+
+
+def test_energy_fixer_net_closes_budget(statics_file):
+    batch, cmap, _ = build_super_dict(requires_grad=False)
+    tk = key("prognostic", "3d", "T")
+    # perturb the predicted temperature so the budget is initially open
+    batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file))
+
+    TE0, TE1_before, forcing = _global_energy_budget(fixer, batch)
+    resid_before = (TE1_before - TE0 - forcing).abs()
+
+    batch = fixer(batch)
+    TE0, TE1_after, forcing = _global_energy_budget(fixer, batch)
+    resid_after = (TE1_after - TE0 - forcing).abs()
+
+    assert (resid_after < resid_before).all()
+    assert torch.allclose(TE1_after, TE0 + forcing, rtol=1e-4)
+
+
+def test_energy_fixer_net_flux_units_equivalent(statics_file):
+    tk = key("prognostic", "3d", "T")
+    flux_keys = [key("diagnostic", "2d", n) for n in ("FSNT", "FLNT", "FSNS", "FLNS", "SHFLX", "LHFLX")]
+
+    batch_j, _, _ = build_super_dict(requires_grad=False)
+    fixer_j = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, flux_units="J m-2"))
+    out_j = fixer_j(batch_j)["y_processed"][SRC][tk]
+
+    batch_w, _, _ = build_super_dict(requires_grad=False)
+    for k in flux_keys:
+        batch_w["y_processed"][SRC][k] = batch_w["y_processed"][SRC][k] / fixer_j.N_seconds
+    fixer_w = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, flux_units="W m-2"))
+    out_w = fixer_w(batch_w)["y_processed"][SRC][tk]
+
+    assert torch.allclose(out_j, out_w, rtol=1e-6, atol=1e-4)
+
+
+def test_energy_fixer_net_rejects_bad_args(statics_file):
+    with pytest.raises(ValueError, match="flux_units"):
+        GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, flux_units="kJ"))
+    with pytest.raises(ValueError, match="sp_var"):
+        GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, sp_var=None))
 
 
 # --------------------------------------------------------------------------- #

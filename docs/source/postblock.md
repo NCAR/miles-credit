@@ -62,6 +62,10 @@ global_water_fixer:
 
 #### Global Energy Fixer
 
+The gen1 energy fixer takes **net** TOA/surface fluxes. The gen2 equivalents are
+`global_energy_fixer_net` (net fluxes) and `global_energy_fixer_updown` (separate
+up/down components) on the [Gen 2 postblocks page](postblocks_gen2.md).
+
 ```yaml
 global_energy_fixer:
     activate: True
