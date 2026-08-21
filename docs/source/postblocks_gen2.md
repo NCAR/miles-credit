@@ -347,7 +347,52 @@ args:
   midpoint: false
 ```
 
-### `global_energy_fixer` / `global_energy_fixer_updown` (GlobalEnergyFixerUpDown)
+There are two energy fixers; pick the one that matches how your dataset stores
+radiation: `global_energy_fixer_net` for **net** fluxes (the ERA5 default:
+`top_net_*`, `surface_net_*`, `surface_*_heat_flux`), or
+`global_energy_fixer_updown` for separate **up/down** components (CAMulator).
+`global_energy_fixer` is kept as an alias of the up/down class.
+
+### `global_energy_fixer_net` (GlobalNetEnergyFixer)
+
+**AutoAPI:** {py:obj}`credit.postblock.conservation.GlobalNetEnergyFixer`
+
+Gen2 port of the gen1 `GlobalEnergyFixer`: the column total-energy tendency is
+forced to match the net TOA + surface energy fluxes, with temperature carrying
+the correction. All six fluxes are read from the prediction by name and follow
+the ERA5 sign convention (**positive downward**):
+`R_T = toa_net_solar + toa_net_thermal` and
+`F_S = surf_net_solar + surf_net_thermal + surf_sh + surf_lh`; the atmosphere
+gains `R_T - F_S`. Datasets with upward-positive fluxes (e.g. CESM `FLNT`,
+`FLNS`, `SHFLX`, `LHFLX`) must be sign-flipped first. `flux_units` is
+`"J m-2"` (default — energy accumulated over the step, divided by
+`lead_time_periods` internally) or `"W m-2"` (mean rate over the step).
+`sp_var` is required for `grid_type: "sigma"` and ignored for `"pressure"`.
+
+```yaml
+type: "global_energy_fixer_net"
+args:
+  T_var: "ERA5/prognostic/3d/T"
+  q_var: "ERA5/prognostic/3d/specific_total_water"
+  U_var: "ERA5/prognostic/3d/U"
+  V_var: "ERA5/prognostic/3d/V"
+  sp_var: "ERA5/prognostic/2d/SP"
+  surface_geopotential_name: "geopotential_at_surface"
+  toa_net_solar_var: "ERA5/diagnostic/2d/top_net_solar_radiation"
+  toa_net_thermal_var: "ERA5/diagnostic/2d/top_net_thermal_radiation"
+  surf_net_solar_var: "ERA5/diagnostic/2d/surface_net_solar_radiation"
+  surf_net_thermal_var: "ERA5/diagnostic/2d/surface_net_thermal_radiation"
+  surf_sh_var: "ERA5/diagnostic/2d/surface_sensible_heat_flux"
+  surf_lh_var: "ERA5/diagnostic/2d/surface_latent_heat_flux"
+  lead_time_periods: 6
+  flux_units: "J m-2"            # or "W m-2"
+  save_loc_physics: "$SCRATCH/physics/ERA5_physics_grid.nc"
+  lon_lat_level_name: ["lon2d", "lat2d", "a_half", "b_half"]
+  grid_type: "sigma"
+  midpoint: false
+```
+
+### `global_energy_fixer_updown` / `global_energy_fixer` (GlobalEnergyFixerUpDown)
 
 **AutoAPI:** {py:obj}`credit.postblock.conservation.GlobalEnergyFixerUpDown`
 
@@ -355,7 +400,8 @@ Conserves global total energy using an explicit up/down flux decomposition: the
 column total-energy tendency is forced to match the net TOA + surface energy
 fluxes, with temperature carrying the correction. The TOA downwelling shortwave
 (SOLIN) is an input-only forcing absent from the prediction, so it is read from
-the input dict by name. Both registry keys map to the same class.
+the input dict by name. Both registry keys map to the same class; use
+`global_energy_fixer_net` above if your dataset provides net fluxes.
 
 ```yaml
 type: "global_energy_fixer_updown"
