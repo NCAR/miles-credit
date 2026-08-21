@@ -821,6 +821,15 @@ class TestBuildPostblocks:
 
         assert _POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is _POSTBLOCK_REGISTRY["global_energy_fixer"]
 
+    def test_global_energy_fixer_net_registered(self):
+        """global_energy_fixer_net resolves to the net-flux class, distinct from the up/down one."""
+        from credit.postblock import _load_postblock_entry
+        from credit.postblock.conservation import GlobalNetEnergyFixer, GlobalEnergyFixerUpDown
+
+        assert _load_postblock_entry("global_energy_fixer_net") is GlobalNetEnergyFixer
+        assert _load_postblock_entry("global_energy_fixer_updown") is GlobalEnergyFixerUpDown
+        assert GlobalNetEnergyFixer is not GlobalEnergyFixerUpDown
+
 
 # ---------------------------------------------------------------------------
 # ConcatToTensor — channel ordering and channel map correctness

@@ -236,6 +236,180 @@ class GlobalWaterFixer(nn.Module):
         return batch_dict
 
 
+class GlobalNetEnergyFixer(nn.Module):
+    """Conserve global total energy using **net** TOA and surface energy fluxes.
+
+    Gen2 (name-based) port of ``gen1.GlobalEnergyFixer``.  The column
+    total-energy tendency is forced to match the net top-of-atmosphere (TOA)
+    and surface energy fluxes, and air temperature carries the correction.
+    Use this block when the dataset provides net fluxes (ERA5
+    ``top_net_*`` / ``surface_net_*`` / ``surface_*_heat_flux``, CESM
+    ``FSNT/FLNT/FSNS/FLNS/SHFLX/LHFLX``); use
+    :class:`GlobalEnergyFixerUpDown` when it provides separate upwelling and
+    downwelling components.
+
+    Sign convention (ERA5): every flux is **positive downward**, so
+
+    .. code-block:: text
+
+        R_T = toa_net_solar  + toa_net_thermal                              # net energy into the atmosphere at TOA
+        F_S = surf_net_solar + surf_net_thermal + surf_sh + surf_lh        # net energy out of the atmosphere at the surface
+
+    and the atmosphere gains ``R_T - F_S`` per unit area.  Datasets that store
+    upward-positive fluxes (e.g. CESM ``FLNT``/``FLNS``/``SHFLX``/``LHFLX``)
+    must be sign-flipped before this block sees them.
+
+    Units: with ``flux_units="J m-2"`` (default, gen1 behavior) every flux is
+    the energy accumulated over the forecast step and is divided by
+    ``N_seconds`` internally; with ``flux_units="W m-2"`` every flux is the
+    mean rate over the step and is used as-is.
+
+    Args:
+        T_var, q_var, U_var, V_var: 3d atmosphere state keys.
+        surface_geopotential_name: variable name of surface geopotential in the
+            statics file (a one-element list is accepted for gen1 parity).
+        toa_net_solar_var, toa_net_thermal_var: TOA net flux keys in ``y_processed``.
+        surf_net_solar_var, surf_net_thermal_var: surface net radiation keys.
+        surf_sh_var, surf_lh_var: surface sensible / latent heat flux keys.
+        lead_time_periods: forecast step length in hours (sets ``N_seconds``).
+        sp_var: surface pressure key; required for ``grid_type="sigma"``,
+            ignored for ``grid_type="pressure"``.
+        flux_units: ``"J m-2"`` or ``"W m-2"`` (see above).
+        input_source_key: batch-dict key holding the t0 physical input state.
+        **physics: physics-core setup keys (see ``GlobalMassFixer``).
+    """
+
+    _FLUX_UNITS = ("J m-2", "W m-2")
+
+    def __init__(
+        self,
+        T_var,
+        q_var,
+        U_var,
+        V_var,
+        surface_geopotential_name,
+        toa_net_solar_var,
+        toa_net_thermal_var,
+        surf_net_solar_var,
+        surf_net_thermal_var,
+        surf_sh_var,
+        surf_lh_var,
+        lead_time_periods,
+        sp_var=None,
+        flux_units="J m-2",
+        input_source_key="x_physical",
+        **physics,
+    ):
+        super().__init__()
+        self.T_var = T_var
+        self.q_var = q_var
+        self.U_var = U_var
+        self.V_var = V_var
+        self.sp_var = sp_var
+        self.toa_net_solar_var = toa_net_solar_var
+        self.toa_net_thermal_var = toa_net_thermal_var
+        self.surf_net_solar_var = surf_net_solar_var
+        self.surf_net_thermal_var = surf_net_thermal_var
+        self.surf_sh_var = surf_sh_var
+        self.surf_lh_var = surf_lh_var
+        self.N_seconds = int(lead_time_periods) * 3600
+        self.input_source_key = input_source_key
+
+        if flux_units not in self._FLUX_UNITS:
+            raise ValueError(f"GlobalNetEnergyFixer: flux_units must be one of {self._FLUX_UNITS}, got {flux_units!r}.")
+        self.flux_units = flux_units
+        # factor that turns the configured flux units into W m-2 (a rate)
+        self.flux_scale = 1.0 / self.N_seconds if flux_units == "J m-2" else 1.0
+
+        self.core, self.flag_sigma, self.midpoint, self.N_levels, self.coef_a, self.coef_b = _setup_physics_core(
+            physics
+        )
+        if self.flag_sigma and self.sp_var is None:
+            raise ValueError("GlobalNetEnergyFixer: sp_var is required when grid_type is 'sigma'.")
+
+        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
+        gph_name = (
+            surface_geopotential_name[0]
+            if isinstance(surface_geopotential_name, (list, tuple))
+            else surface_geopotential_name
+        )
+        self.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+
+    def _input(self, batch_dict, var_key):
+        return batch_dict[self.input_source_key][_src(var_key)][var_key]
+
+    def forward(self, batch_dict: dict) -> dict:
+        # prediction (t1): (B, L, T, H, W) -> (B, L, H, W); 2d vars squeeze level too
+        T_pred = _pred(batch_dict, self.T_var)[:, :, 0, ...]
+        q_pred = _pred(batch_dict, self.q_var)[:, :, 0, ...]
+        U_pred = _pred(batch_dict, self.U_var)[:, :, 0, ...]
+        V_pred = _pred(batch_dict, self.V_var)[:, :, 0, ...]
+        device = T_pred.device
+
+        # input (t0): pick last input frame
+        T_input = self._input(batch_dict, self.T_var)[:, :, -1, ...].to(device)
+        q_input = self._input(batch_dict, self.q_var)[:, :, -1, ...].to(device)
+        U_input = self._input(batch_dict, self.U_var)[:, :, -1, ...].to(device)
+        V_input = self._input(batch_dict, self.V_var)[:, :, -1, ...].to(device)
+
+        GPH_surf = self.GPH_surf.to(device)
+
+        # heat capacity at constant pressure
+        CP_t0 = (1 - q_input) * CP_DRY + q_input * CP_VAPOR
+        CP_t1 = (1 - q_pred) * CP_DRY + q_pred * CP_VAPOR
+
+        # kinetic energy
+        ken_t0 = 0.5 * (U_input**2 + V_input**2)
+        ken_t1 = 0.5 * (U_pred**2 + V_pred**2)
+
+        # latent heat + potential energy + kinetic energy
+        E_qgk_t0 = LH_WATER * q_input + GPH_surf + ken_t0
+        E_qgk_t1 = LH_WATER * q_pred + GPH_surf + ken_t1
+
+        # net TOA energy flux (W m-2, positive = into the atmosphere)
+        toa_net_solar = _pred(batch_dict, self.toa_net_solar_var)[:, 0, 0, ...]
+        toa_net_thermal = _pred(batch_dict, self.toa_net_thermal_var)[:, 0, 0, ...]
+        R_T = (toa_net_solar + toa_net_thermal) * self.flux_scale
+        R_T_sum = self.core.weighted_sum(R_T, axis=(-2, -1))
+
+        # net surface energy flux (W m-2, positive = out of the atmosphere into the surface)
+        surf_net_solar = _pred(batch_dict, self.surf_net_solar_var)[:, 0, 0, ...]
+        surf_net_thermal = _pred(batch_dict, self.surf_net_thermal_var)[:, 0, 0, ...]
+        surf_SH = _pred(batch_dict, self.surf_sh_var)[:, 0, 0, ...]
+        surf_LH = _pred(batch_dict, self.surf_lh_var)[:, 0, 0, ...]
+        F_S = (surf_net_solar + surf_net_thermal + surf_SH + surf_LH) * self.flux_scale
+        F_S_sum = self.core.weighted_sum(F_S, axis=(-2, -1))
+
+        # total energy per level
+        E_level_t0 = CP_t0 * T_input + E_qgk_t0
+        E_level_t1 = CP_t1 * T_pred + E_qgk_t1
+
+        # column-integrated total energy
+        if self.flag_sigma:
+            sp_pred = _pred(batch_dict, self.sp_var)[:, 0, 0, ...]
+            sp_input = self._input(batch_dict, self.sp_var)[:, 0, -1, ...].to(device)
+            TE_t0 = self.core.integral(E_level_t0, sp_input) / GRAVITY
+            TE_t1 = self.core.integral(E_level_t1, sp_pred) / GRAVITY
+        else:
+            TE_t0 = self.core.integral(E_level_t0) / GRAVITY
+            TE_t1 = self.core.integral(E_level_t1) / GRAVITY
+
+        global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
+        global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
+
+        # total energy correction ratio; broadcast to (B, 1, 1, 1)
+        E_correct_ratio = (self.N_seconds * (R_T_sum - F_S_sum) + global_TE_t0) / global_TE_t1
+        E_correct_ratio = E_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+        # let thermal energy carry the corrected total energy amount
+        E_t1_correct = E_level_t1 * E_correct_ratio
+        T_pred = (E_t1_correct - E_qgk_t1) / CP_t1
+
+        # back to (B, L, 1, H, W)
+        _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
+        return batch_dict
+
+
 class GlobalEnergyFixerUpDown(nn.Module):
     """Conserve global total energy using explicit up/down flux decomposition.
 
