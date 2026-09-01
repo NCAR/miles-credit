@@ -420,11 +420,24 @@ class ForecastWriter:
         coordinates. Curvilinear grids use generic ``y``/``x`` dims (the
         convention this codebase already uses for HRRR, see
         ``credit/datasets/gen_2/hrrr.py``) with ``latitude``/``longitude`` as
-        2D non-dimension coordinates, per CF conventions.
+        2D non-dimension coordinates, per CF conventions. Unstructured grids use
+        a single ``ncol`` dim with per-cell ``latitude``/``longitude`` as 1D
+        non-dimension coordinates — the same CF pattern as curvilinear, one
+        dimension lower.
         """
         coords = self._coords
-        curvilinear = coords["grid_type"] == "curvilinear"
-        xy_dims = ["y", "x"] if curvilinear else ["latitude", "longitude"]
+        grid_type = coords["grid_type"]
+        curvilinear = grid_type == "curvilinear"
+        unstructured = grid_type == "unstructured"
+        # Only a rectilinear grid can carry lat/lon as its dimension coordinates;
+        # the other two attach them as non-dimension coords after the fact.
+        latlon_are_dims = not (curvilinear or unstructured)
+        if curvilinear:
+            xy_dims = ["y", "x"]
+        elif unstructured:
+            xy_dims = ["ncol"]
+        else:
+            xy_dims = ["latitude", "longitude"]
         data_vars = {}
 
         for source_name, source_dict in y_processed.items():
@@ -434,8 +447,14 @@ class ForecastWriter:
                 if self._var_filter is not None and var_key not in self._var_filter:
                     continue
 
-                # tensor: (B, n_levels, n_time, H, W) → slice batch=0, time=0
-                t = tensor[0, :, 0, :, :] if tensor.ndim == 5 else tensor[0]
+                # tensor: (B, n_levels, n_time, *spatial) → slice batch=0, time=0,
+                # leaving (n_levels, *spatial). The spatial rank is 2 for
+                # rectilinear/curvilinear and 1 for unstructured, so the full
+                # rank is derived from xy_dims rather than hardcoded — a
+                # tensor that already lacks the batch/time axes falls through
+                # to the plain batch slice, as before.
+                full_ndim = 3 + len(xy_dims)
+                t = tensor[0, :, 0] if tensor.ndim == full_ndim else tensor[0]
                 arr = t.cpu().numpy() if hasattr(t, "cpu") else np.asarray(t)
 
                 parts = var_key.split("/")
@@ -452,7 +471,7 @@ class ForecastWriter:
                         level_coord = source_levels if len(source_levels) else np.arange(arr.shape[0])
 
                     da_coords = {"time": [valid_time], "level": level_coord}
-                    if not curvilinear:
+                    if latlon_are_dims:
                         da_coords["latitude"] = coords["latitude"]
                         da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
@@ -463,7 +482,7 @@ class ForecastWriter:
 
                 else:  # 2D — arr shape (1, H, W); squeeze the level dim
                     da_coords = {"time": [valid_time]}
-                    if not curvilinear:
+                    if latlon_are_dims:
                         da_coords["latitude"] = coords["latitude"]
                         da_coords["longitude"] = coords["longitude"]
                     data_vars[var_name] = xr.DataArray(
@@ -480,6 +499,24 @@ class ForecastWriter:
                 latitude=(("y", "x"), coords["latitude"]),
                 longitude=(("y", "x"), coords["longitude"]),
             )
+            # Native projection axes, when the source carried them: these are the
+            # grid's real horizontal coordinates (metres, typically), so writing
+            # them keeps the output usable by tools that work in projection space.
+            # Attributes are whatever the source file had — never fabricated.
+            if coords.get("y") is not None and coords.get("x") is not None:
+                ds = ds.assign_coords(y=("y", coords["y"]), x=("x", coords["x"]))
+                for axis, attrs in (coords.get("xy_attrs") or {}).items():
+                    if axis in ds.coords and attrs:
+                        ds[axis].attrs.update(attrs)
+        elif unstructured:
+            # Per-cell lat/lon on the single mesh dimension: the same CF
+            # auxiliary-coordinate pattern as curvilinear, one dimension lower.
+            ds = ds.assign_coords(
+                latitude=("ncol", coords["latitude"]),
+                longitude=("ncol", coords["longitude"]),
+            )
+
+        if not latlon_are_dims:
             for var in ds.data_vars:
                 ds[var].attrs["coordinates"] = "latitude longitude"
 
@@ -517,13 +554,21 @@ class ForecastWriter:
             raise ValueError(
                 "ForecastWriter: could not determine output coordinates. No grid_schema was "
                 "given, no saved grid schema was found in save_loc, and the given dataset "
-                "could not resolve one live (see credit.datasets.gen_2.grid_utils.GridSchema)."
+                "could not resolve one live (see credit.datasets.gen_2.grid_utils.GridSchema). "
+                "The usual cause is source data that carries no lat/lon coordinates of its own: "
+                "add `coordinate_file: <file with lat/lon>` to that source's config block "
+                "(or lat_name/lon_name if the coordinates are there under other names). "
+                "`credit check -c <config>` reports this before a job starts."
             )
 
         return {
             "grid_type": self._grid_schema.grid_type,
             "latitude": self._grid_schema.lat,
             "longitude": self._grid_schema.lon,
+            # Projection axes, when the source had them (curvilinear only; None otherwise).
+            "y": self._grid_schema.y,
+            "x": self._grid_schema.x,
+            "xy_attrs": self._grid_schema.xy_attrs,
             "levels": source_levels,
         }
 

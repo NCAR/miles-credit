@@ -376,7 +376,20 @@ class TrainerERA5Gen2(BaseTrainer):
                             # be pure duplication.
                             grid_schema.save(os.path.join(save_loc, OUTPUT_GRID_SCHEMA_FILENAME))
                     except (ValueError, AttributeError) as e:
-                        logger.warning("TrainerERA5Gen2: could not resolve grid schema (%s).", e)
+                        # Deliberately not fatal: nothing in the training path reads
+                        # lat/lon, and the grid is not stored in the checkpoint, so
+                        # this run stays fully usable once the config is fixed. But
+                        # rollout *will* die on its first step, so say so plainly
+                        # here rather than leaving a cryptic one-liner in the log.
+                        logger.warning(
+                            "TrainerERA5Gen2: no horizontal grid could be resolved for this run (%s). "
+                            "Training continues normally — nothing here uses lat/lon — but `credit rollout` "
+                            "WILL fail when ForecastWriter writes output coordinates. Fix: add "
+                            "`coordinate_file: <file with lat/lon>` to the source config (the grid is not "
+                            "stored in the checkpoint, so this run remains usable). `credit check -c <config>` "
+                            "reports this before a job starts.",
+                            e,
+                        )
 
                 if t == 1:
                     full_data_dict["ic_raw"] = batch["input"]

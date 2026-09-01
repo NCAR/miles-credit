@@ -49,7 +49,7 @@ import zarr
 
 from credit.datasets.gen_2._utils import _to_cftime  # pyright: ignore[reportPrivateUsage]
 from credit.datasets.gen_2.base_dataset import BaseDataset, VALID_FIELD_TYPES
-from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type, write_source_grid_schema_if_missing
+from credit.datasets.gen_2.grid_utils import resolve_source_grid, write_source_grid_schema_if_missing
 
 logger = logging.getLogger(__name__)
 
@@ -169,8 +169,7 @@ class ARCOERA5Dataset(BaseDataset):
         ``credit.datasets.gen_2.grid_utils.GridSchema``.
         """
         try:
-            lon, lat, _, _ = find_coord_pair(ds)
-            grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+            grid = resolve_source_grid(ds, self.curr_source_cfg, allow_unstructured=False)
             self.static_metadata["grid"] = grid
             write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
         except Exception as exc:
@@ -439,8 +438,9 @@ class WeatherBench2ERA5Dataset(BaseDataset):
         ``credit.datasets.gen_2.grid_utils.GridSchema``.
         """
         try:
-            lon, lat, _, _ = find_coord_pair(ds)
-            grid = {"grid_type": infer_grid_type(lat, lon), "lat": lat, "lon": lon}
+            # allow_unstructured=False: these are known-rectilinear global stores,
+            # so the same-length heuristic could only ever be a false positive here.
+            grid = resolve_source_grid(ds, self.curr_source_cfg, allow_unstructured=False)
             self.static_metadata["grid"] = grid
             write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
         except Exception as exc:

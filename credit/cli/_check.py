@@ -341,6 +341,17 @@ def _check_data_sources(conf: dict, rep: _Report) -> None:
                 fix="Remove the key to take the dataset default, or list the levels explicitly.",
             )
 
+        # find_coord_pair requires both names or neither — one alone raises at
+        # dataset init, which is a slow way to learn about a typo.
+        has_lat_name, has_lon_name = "lat_name" in src, "lon_name" in src
+        if has_lat_name != has_lon_name:
+            given, missing = ("lat_name", "lon_name") if has_lat_name else ("lon_name", "lat_name")
+            rep.error(
+                f"{base}.{missing}",
+                f"'{given}' is set but '{missing}' is not; coordinate names must be given as a pair.",
+                fix=f"Add {missing}, or remove {given} to use automatic coordinate detection.",
+            )
+
         variables = src.get("variables") or {}
         if not variables:
             rep.error(f"{base}.variables", "Source defines no variables.")
@@ -977,6 +988,64 @@ def _iter_config_paths(conf: dict):
             value = _get(conf, top, "args", key)
             if isinstance(value, str) and value:
                 yield f"{top}.args.{key}", value
+    # A source's coordinate_file is read at dataset init and raises there when
+    # missing, so catching a typo statically saves a full job launch.
+    for block in ("data", "validation_data"):
+        for name, src in (_get(conf, block, "source", default={}) or {}).items():
+            value = (src or {}).get("coordinate_file")
+            if isinstance(value, str) and value:
+                yield f"{block}.source.{name}.coordinate_file", value
+
+
+def _check_source_grids(conf: dict, rep: _Report) -> None:
+    """Error when a local source can supply no horizontal grid.
+
+    Nothing in the training path reads lat/lon, so a coordinate-less source
+    trains happily to completion and only fails at rollout — inside
+    ForecastWriter, after the model has already run — which is the most
+    expensive possible way to learn about a one-line config omission. Catching
+    it here costs one file open per source.
+
+    Only ``dataset_type: local`` is inspected: every other gen2 source resolves
+    its grid lazily during the first read (see ``era5.py``, ``hrrr.py``,
+    ``goes.py``), so there is nothing to look at while checking a config.
+
+    Anything that goes wrong *other than* a genuinely missing grid (unreadable
+    file, exotic backend, permissions) is left alone — this check exists to
+    catch a config mistake, not to second-guess the data.
+    """
+    from credit.datasets.gen_2.grid_utils import resolve_source_grid
+    from credit.datasets.gen_2.local import first_data_file
+
+    for block in ("data", "validation_data"):
+        for name, src in (_get(conf, block, "source", default={}) or {}).items():
+            src = src or {}
+            if src.get("dataset_type") != "local":
+                continue
+            if src.get("coordinate_file"):
+                continue  # authoritative, and existence-checked in _check_paths
+
+            probe = first_data_file(src)
+            if probe is None:
+                continue  # missing/unglobbable data is reported elsewhere
+            path, _field_cfg = probe
+            try:
+                import xarray as xr
+
+                with xr.open_dataset(path, engine=src.get("engine")) as ds:
+                    resolve_source_grid(ds, src)
+            except ValueError as exc:
+                rep.error(
+                    f"{block}.source.{name}.coordinate_file",
+                    f"No horizontal grid available: {path} has no recognisable lat/lon "
+                    f"coordinates and no 'coordinate_file' is set. ({exc.__class__.__name__}: "
+                    f"{str(exc).splitlines()[0]}) Training would still run, but "
+                    "`credit rollout` would fail when writing output coordinates.",
+                    fix="Add coordinate_file: <path to a file with lat/lon>, or "
+                    "lat_name/lon_name if the coordinates are present under other names.",
+                )
+            except Exception:  # noqa: BLE001 — unreadable data is not this check's business
+                continue
 
 
 def _check_channel_schema(conf: dict, rep: _Report) -> None:
@@ -1089,7 +1158,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
         rep.error("custom_objects", f"Failed to load: {type(exc).__name__}: {exc}")
 
     # A data-only fragment has nothing to say about models, losses, or training.
-    checks = [_check_data_sources, _check_validation_data, _check_paths]
+    checks = [_check_data_sources, _check_validation_data, _check_paths, _check_source_grids]
     if not _is_data_fragment(conf):
         checks += [
             _check_registry_keys,

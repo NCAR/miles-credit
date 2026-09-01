@@ -65,6 +65,7 @@ from __future__ import annotations
 
 import logging
 from glob import glob
+from os.path import expandvars
 from typing import Any
 
 import cftime
@@ -82,9 +83,35 @@ from credit.datasets.gen_2._utils import (  # pyright: ignore[reportPrivateUsage
     to_calendar,
 )
 from credit.datasets.gen_2.base_dataset import BaseDataset
-from credit.datasets.gen_2.grid_utils import find_coord_pair, infer_grid_type, write_source_grid_schema_if_missing
+from credit.datasets.gen_2.grid_utils import (
+    expected_spatial_shape,
+    resolve_source_grid,
+    write_source_grid_schema_if_missing,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def first_data_file(source_cfg: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """Return ``(path, field_cfg)`` for the first data file a local source can open.
+
+    Field types are tried in the order ``prognostic``, ``dynamic_forcing``,
+    ``diagnostic``, ``static``; a field with no ``path``, or whose glob matches
+    nothing, is skipped. Returns None when no field yields a file.
+
+    Module-level rather than a method so ``credit check`` can probe a source's
+    data without constructing a dataset — keeping the two in agreement about
+    which file "the source's data" means.
+    """
+    variables = source_cfg.get("variables") or {}
+    for field_type in ("prognostic", "dynamic_forcing", "diagnostic", "static"):
+        field_cfg = variables.get(field_type)
+        if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+            continue
+        files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
+        if files:
+            return files[0], field_cfg
+    return None
 
 
 class LocalDataset(BaseDataset):
@@ -100,6 +127,10 @@ class LocalDataset(BaseDataset):
               dataset_type: "local"
               grid_type: "unstructured"         # Recommended: explicit override (auto-detection is a
                                                 # size-based heuristic and can misfire -- see Assumptions)
+              coordinate_file: "/data/grid.nc"  # Optional: read lat/lon from here instead of the data
+                                                # files, for data that carries no coordinates of its own
+              lat_name: "latCell"               # Optional: name the coordinate variables directly when
+              lon_name: "lonCell"               # the built-in name table doesn't recognise them
               level_coord: "level"
               levels: [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
               variables:
@@ -133,17 +164,23 @@ class LocalDataset(BaseDataset):
         4. Dimension order for Unstructured: (time, level, ncol) for 3D; (time, ncol) for 2D.
         5. Static fields are automatically replicated along the time axis. If a static
            file contains a dummy time dimension, it is safely ignored.
-        6. Finding lat/lon arrays (regardless of naming convention) is delegated to
-           `find_coord_pair`. There is no required name for the flattened spatial
-           dimension itself (e.g. "ncol" above is illustrative, not enforced) --
-           auto-detection instead prefers lat/lon sharing one real dimension in the
-           file, falling back to a weaker same-length heuristic; set `grid_type:`
-           explicitly to bypass both.
-        7. An unstructured source's native grid cannot be resolved as an output grid
-           on its own (`credit.datasets.gen_2.grid_utils` only represents rectilinear/
-           curvilinear) -- an active `Regridder` preblock targeting a structured
-           destination grid is required for this source, or `GridSchema.resolve`
-           raises at training/rollout setup.
+        6. Finding and classifying lat/lon arrays (regardless of naming convention)
+           is delegated to `credit.datasets.gen_2.grid_utils.resolve_source_grid`.
+           There is no required name for the flattened spatial dimension itself
+           (e.g. "ncol" above is illustrative, not enforced) -- auto-detection
+           instead prefers lat/lon sharing one real dimension in the file, falling
+           back to a weaker same-length heuristic; set `grid_type:` explicitly to
+           bypass both. Coordinate *variable* names are matched against a table of
+           known conventions (longitude/latitude, lon/lat, XLONG/XLAT, ...); set
+           `lon_name:`/`lat_name:` in the source config to name them directly.
+           Note that `x`/`y` are never treated as geographic coordinates -- on a
+           projected grid they carry projection units, not degrees.
+        7. An unstructured source resolves and writes on its native mesh: output
+           uses a single `ncol` dimension with per-cell `latitude`/`longitude` as
+           CF auxiliary coordinates. A `Regridder` preblock onto a structured
+           destination grid is therefore an option for such a source, not a
+           requirement (it was required previously, when `GridSchema` represented
+           only rectilinear/curvilinear grids).
     """
 
     def __init__(self, data_config: dict[str, Any], return_target: bool = False) -> None:
@@ -388,73 +425,189 @@ class LocalDataset(BaseDataset):
         return info["cycle_year"] if info is not None else None
 
     def _find_grid(self, source_cfg: dict[str, Any]) -> dict[str, Any] | None:
-        """Read the real lat/lon coordinates from the first available data file, once.
+        """Read this source's real lat/lon coordinates, once.
+
+        Coordinates come from an explicit ``coordinate_file:`` when the config
+        names one, else from the first available data file (the original
+        behaviour). The two paths differ in how they treat failure:
+
+        * **Data file** — failures are non-fatal: warn and return None. A file
+          that simply has no coordinates is a normal, tolerated situation.
+        * **coordinate_file** — failures raise. The user named this file
+          specifically to supply the grid, so silently ignoring it (and then
+          dying much later in ``GridSchema.resolve`` with an unrelated message)
+          would be actively misleading.
 
         This is a debugging aid (``self.static_metadata["grid"]``) reflecting this
         source's *native* grid. It is not necessarily the grid actually written to
         output — a regridding preblock downstream may change that; see
         ``credit.datasets.gen_2.grid_utils.GridSchema``. Also best-effort persisted
         to ``{save_loc}/{source}_grid_schema.nc`` (see
-        ``write_source_grid_schema_if_missing``). Failures are non-fatal: warn and
-        return None.
+        ``write_source_grid_schema_if_missing``).
 
-        While the file is open, also fills ``self.levels`` from the same
-        ``level_coord`` if it's still unset (absent from config) and present in
-        this file — piggybacking on the same open rather than a separate read.
-        If this particular file lacks the level coordinate (e.g. it happens to
-        be a 2D-only field type), ``self.levels`` stays ``None`` here and falls
-        back to ``_read_3d_array``'s lazy per-batch resolution.
+        ``self.levels`` is filled from ``level_coord`` when still unset (absent
+        from config) — always from a *data* file, never from the coordinate
+        file, since the vertical coordinate is unrelated to horizontal geometry.
+        On the data-file path this piggybacks on the same open; on the
+        coordinate-file path it shares the open used for grid/data validation.
+        If no data file carries the level coordinate (e.g. it happens to be a
+        2D-only field type), ``self.levels`` stays None and falls back to
+        ``_read_3d_array``'s lazy per-batch resolution.
         """
         engine = source_cfg.get("engine")
-        variables = source_cfg.get("variables") or {}
-        for field_type in ("prognostic", "dynamic_forcing", "diagnostic", "static"):
-            field_cfg = variables.get(field_type)
-            if not isinstance(field_cfg, dict) or not field_cfg.get("path"):
+        coordinate_file = source_cfg.get("coordinate_file")
+        if coordinate_file:
+            return self._grid_from_coordinate_file(coordinate_file, source_cfg, engine)
+
+        probe = first_data_file(source_cfg)
+        if probe is None:
+            return None
+        path, _field_cfg = probe
+        try:
+            with xr.open_dataset(path, engine=engine) as ds:
+                grid = resolve_source_grid(ds, source_cfg)
+                write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+
+                if self.levels is None and self.level_coord in ds.coords:
+                    self.levels = ds[self.level_coord].values.tolist()
+                return grid
+
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LocalDataset '%s': could not find grid in %s (%s).",
+                self.curr_source_name,
+                path,
+                exc,
+            )
+            return None
+
+    def _grid_from_coordinate_file(
+        self,
+        coordinate_file: str,
+        source_cfg: dict[str, Any],
+        engine: str | None,
+    ) -> dict[str, Any]:
+        """Read the grid from an explicit ``coordinate_file:``, then validate it.
+
+        Unlike the data-file path, every failure here raises: an explicitly
+        configured coordinate file that cannot be opened, has no recognisable
+        coordinate pair, or describes a grid the data does not sit on is a
+        config error the user needs to see now, not a warning to scroll past.
+
+        Args:
+            coordinate_file: Path from the source config (``$VAR`` expanded).
+            source_cfg: This source's config block.
+            engine: Optional xarray engine.
+
+        Returns:
+            The resolved grid dict.
+
+        Raises:
+            ValueError: if the file cannot be opened, yields no coordinate pair,
+                or disagrees with the data's spatial shape.
+        """
+        path = expandvars(coordinate_file)
+        try:
+            coord_ds = xr.open_dataset(path, engine=engine)
+        except Exception as exc:
+            raise ValueError(
+                f"LocalDataset '{self.curr_source_name}': could not open coordinate_file "
+                f"'{path}' ({type(exc).__name__}: {exc})."
+            ) from exc
+
+        with coord_ds as ds:
+            # resolve_source_grid raises its own descriptive ValueError when the
+            # file has no recognisable coordinate pair; let it through unwrapped.
+            grid = resolve_source_grid(ds, source_cfg)
+
+        self._fill_levels_and_validate(grid, source_cfg, engine)
+        write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
+        logger.info(
+            "LocalDataset '%s': grid read from coordinate_file %s (grid_type=%s, shape=%s).",
+            self.curr_source_name,
+            path,
+            grid["grid_type"],
+            expected_spatial_shape(grid),
+        )
+        return grid
+
+    def _fill_levels_and_validate(
+        self,
+        grid: dict[str, Any],
+        source_cfg: dict[str, Any],
+        engine: str | None,
+    ) -> None:
+        """Open a data file once to fill ``self.levels`` and cross-check *grid*.
+
+        Only used on the ``coordinate_file`` path. Being unable to open a data
+        file here is not fatal — the grid itself is already resolved, and the
+        ordinary read path will report a missing file far more clearly.
+        """
+        probe = first_data_file(source_cfg)
+        if probe is None:
+            return
+        path, field_cfg = probe
+        try:
+            data_ds = xr.open_dataset(path, engine=engine)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "LocalDataset '%s': could not open %s to validate coordinate_file against (%s).",
+                self.curr_source_name,
+                path,
+                exc,
+            )
+            return
+
+        with data_ds as ds:
+            if self.levels is None and self.level_coord in ds.coords:
+                self.levels = ds[self.level_coord].values.tolist()
+            self._check_grid_matches_data(grid, ds, path, source_cfg, field_cfg)
+
+    def _check_grid_matches_data(
+        self,
+        grid: dict[str, Any],
+        ds: xr.Dataset,
+        path: str,
+        source_cfg: dict[str, Any],
+        field_cfg: dict[str, Any],
+    ) -> None:
+        """Raise if *grid* cannot describe the variables in *ds*.
+
+        A coordinate file that silently disagrees with the data is the failure
+        mode this whole feature introduces: nothing downstream would notice,
+        and the run would produce output on plausible-looking but wrong
+        coordinates. Every configured variable present in *ds* is measured by
+        stripping its time and level dimensions; the grid passes if any one of
+        them matches the shape it implies.
+
+        Note ``time_coord`` is read from *source_cfg* rather than ``self``:
+        ``_find_grid`` runs before ``self.time_coord`` is assigned in ``__init__``.
+        """
+        time_coord = source_cfg.get("time_coord", "time")
+        expected = expected_spatial_shape(grid)
+
+        seen: dict[str, tuple[int, ...]] = {}
+        for vname in (field_cfg.get("vars_3D") or []) + (field_cfg.get("vars_2D") or []):
+            if vname not in ds:
                 continue
-            files = sorted(glob(_path_template_to_glob(field_cfg["path"])))
-            if not files:
-                continue
-            try:
-                with xr.open_dataset(files[0], engine=engine) as ds:
-                    lon, lat, lon_name, lat_name = find_coord_pair(ds)
+            da = ds[vname]
+            spatial = tuple(
+                size for dim, size in zip(da.dims, da.shape) if dim not in (time_coord, self.level_coord)
+            )
+            if spatial == expected:
+                return
+            seen[vname] = spatial
 
-                    # 1. Check for explicit YAML override
-                    config_grid_type = source_cfg.get("grid_type")
+        if not seen:
+            return  # nothing comparable in this file; not evidence of a mismatch
 
-                    # 2. Robust unstructured detection
-                    if config_grid_type:
-                        grid_type = config_grid_type
-                    elif lat.ndim == 1 and lon.ndim == 1 and ds[lon_name].dims == ds[lat_name].dims:
-                        # Reliable structural signal: lat/lon share the exact same 1D
-                        # dimension in the file (e.g. 'ncol').
-                        grid_type = "unstructured"
-                    elif lat.ndim == 1 and lon.ndim == 1 and len(lat) == len(lon):
-                        # Weaker fallback: lat/lon don't share a dimension, but happen to
-                        # be the same length and some dimension in the file matches it.
-                        # Prefer an explicit `grid_type:` override for anything the check
-                        # above doesn't catch -- this can misfire on a coincidental size
-                        # match (e.g. a square rectilinear grid).
-                        shared_dims = [dim for dim, size in ds.sizes.items() if size == len(lat)]
-                        grid_type = "unstructured" if shared_dims else infer_grid_type(lat, lon)
-                    else:
-                        grid_type = infer_grid_type(lat, lon)
-
-                    grid = {"grid_type": grid_type, "lat": lat, "lon": lon}
-                    write_source_grid_schema_if_missing(self.curr_source_name, grid, self.save_loc)
-
-                    if self.levels is None and self.level_coord in ds.coords:
-                        self.levels = ds[self.level_coord].values.tolist()
-                    return grid
-
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "LocalDataset '%s': could not find grid in %s (%s).",
-                    self.curr_source_name,
-                    files[0],
-                    exc,
-                )
-                return None
-        return None
+        raise ValueError(
+            f"LocalDataset '{self.curr_source_name}': coordinate_file describes a "
+            f"{grid['grid_type']} grid of shape {expected}, but no configured variable in "
+            f"{path} has that spatial shape (found {seen}). The coordinate file and the data "
+            "are on different grids — check that coordinate_file matches this source's data, "
+            "or set grid_type/lat_name/lon_name if the grid was classified wrongly."
+        )
 
     def _extract_field(
         self,
