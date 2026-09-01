@@ -319,6 +319,103 @@ def test_data_valid_alias_warns(conf):
 
 
 # ===========================================================================
+# Grid coordinate configuration (coordinate_file / lat_name / lon_name)
+# ===========================================================================
+
+
+def test_missing_coordinate_file_is_an_error(conf, tmp_path):
+    """LocalDataset raises on an unopenable coordinate_file; catch the typo here."""
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(tmp_path / "nope.nc")
+    rep = _run(conf)
+    assert "data.source.ERA5.coordinate_file" in _wheres(rep)
+    assert "File not found" in _text(rep)
+
+
+def test_existing_coordinate_file_is_silent(conf, tmp_path):
+    grid = tmp_path / "grid.nc"
+    grid.write_bytes(b"")  # existence is all _check_paths inspects
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(grid)
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_coordinate_file_checked_in_validation_data_too(conf, tmp_path):
+    conf["validation_data"] = copy.deepcopy(conf["data"])
+    conf["validation_data"]["source"]["ERA5"]["coordinate_file"] = str(tmp_path / "nope.nc")
+    assert "validation_data.source.ERA5.coordinate_file" in _wheres(_run(conf))
+
+
+@pytest.mark.parametrize(("given", "missing"), [("lat_name", "lon_name"), ("lon_name", "lat_name")])
+def test_half_a_coordinate_name_pair_is_an_error(conf, given, missing):
+    """find_coord_pair requires both names or neither."""
+    conf["data"]["source"]["ERA5"][given] = "XLAT"
+    rep = _run(conf)
+    assert f"data.source.ERA5.{missing}" in _wheres(rep)
+    assert "pair" in _text(rep)
+
+
+def test_both_coordinate_names_are_silent(conf):
+    conf["data"]["source"]["ERA5"]["lat_name"] = "XLAT"
+    conf["data"]["source"]["ERA5"]["lon_name"] = "XLONG"
+    assert _wheres(_run(conf)) == set()
+
+
+def _write_source_file(tmp_path, name, with_coords):
+    """A tiny local data file, with or without lat/lon coordinates."""
+    import numpy as np
+    import xarray as xr
+
+    path = tmp_path / name
+    coords = {"level": [1, 2]}
+    dims = ("level", "j", "i")
+    if with_coords:
+        coords |= {"latitude": ("j", np.linspace(-90, 90, 4)), "longitude": ("i", np.linspace(0, 350, 6))}
+        dims = ("level", "latitude", "longitude")
+    xr.Dataset({"T": (dims, np.zeros((2, 4, 6), "f4"))}, coords=coords).to_netcdf(path)
+    return path
+
+
+def test_coordless_local_source_is_an_error(conf, tmp_path):
+    """Training would run and only rollout would fail — catch it before submitting."""
+    path = _write_source_file(tmp_path, "nocoords.nc", with_coords=False)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+
+    rep = _run(conf)
+
+    assert "data.source.ERA5.coordinate_file" in _wheres(rep)
+    assert "No horizontal grid available" in _text(rep)
+    assert "coordinate_file" in _text(rep)
+
+
+def test_source_with_inline_coords_is_silent(conf, tmp_path):
+    path = _write_source_file(tmp_path, "withcoords.nc", with_coords=True)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_coordless_source_with_coordinate_file_is_silent(conf, tmp_path):
+    """Setting the key is the fix, so the error must go away once it is set."""
+    path = _write_source_file(tmp_path, "nocoords.nc", with_coords=False)
+    grid = _write_source_file(tmp_path, "grid.nc", with_coords=True)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(grid)
+
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_grid_check_skips_non_local_sources(conf, tmp_path):
+    """Remote sources resolve their grid lazily on first read; nothing to inspect."""
+    conf["data"]["source"]["ERA5"]["dataset_type"] = "arco_era5"
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_grid_check_silent_when_data_files_are_absent(conf):
+    """An unglobbable path is reported by the path checks, not duplicated here."""
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = "/definitely/not/here_%Y.nc"
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+# ===========================================================================
 # Model geometry and channel counts
 # ===========================================================================
 

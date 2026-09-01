@@ -196,7 +196,13 @@ def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
     assert "invalid flip_axis values [2]" in caplog.text
 
 
-def test_grid_schema_resolve_rejects_unstructured_native_grid():
+def test_grid_schema_resolve_accepts_unstructured_native_grid():
+    """An unstructured source resolves on its native mesh — no Regridder needed.
+
+    This previously raised: GridSchema represented only rectilinear/curvilinear,
+    so an unstructured source could not produce an output grid without a
+    Regridder preblock reprojecting it onto a structured destination.
+    """
     from types import SimpleNamespace
 
     from credit.datasets.gen_2.grid_utils import GridSchema
@@ -205,8 +211,11 @@ def test_grid_schema_resolve_rejects_unstructured_native_grid():
         static_metadata={"grid": {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)}}
     )
 
-    with pytest.raises(ValueError, match="native grid_type='unstructured'"):
-        GridSchema.resolve(dataset)
+    schema = GridSchema.resolve(dataset)
+
+    assert schema.grid_type == "unstructured"
+    assert schema.origin == "native"
+    assert schema.lat.shape == (4,)
 
 
 def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
@@ -228,18 +237,37 @@ def test_grid_schema_resolve_regrids_unstructured_native_grid(weight_file):
     assert schema.lon.shape == (4,)
 
 
-def test_unstructured_source_grid_schema_is_skipped(tmp_path, caplog):
-    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+def test_unstructured_source_grid_schema_is_written(tmp_path):
+    """Unstructured grids are now persisted like any other; this used to be skipped."""
+    from credit.datasets.gen_2.grid_utils import GridSchema, write_source_grid_schema_if_missing
 
-    caplog.set_level("INFO")
     write_source_grid_schema_if_missing(
         "Test_Local",
         {"grid_type": "unstructured", "lat": np.arange(4), "lon": np.arange(4)},
         str(tmp_path),
     )
 
+    path = tmp_path / "Test_Local_grid_schema.nc"
+    assert path.exists()
+    schema = GridSchema.load(str(path))
+    assert schema.grid_type == "unstructured"
+    assert schema.lat.shape == (4,)
+
+
+def test_unsupported_grid_type_is_still_skipped(tmp_path, caplog):
+    """A grid type GridSchema cannot represent is logged, not raised — this runs
+    inside the data-loading path and must never break it."""
+    from credit.datasets.gen_2.grid_utils import write_source_grid_schema_if_missing
+
+    caplog.set_level("INFO")
+    write_source_grid_schema_if_missing(
+        "Test_Local",
+        {"grid_type": "spectral", "lat": np.arange(4), "lon": np.arange(4)},
+        str(tmp_path),
+    )
+
     assert not (tmp_path / "Test_Local_grid_schema.nc").exists()
-    assert "unstructured" in caplog.text
+    assert "spectral" in caplog.text
 
 
 # ---------------------------------------------------------------------------

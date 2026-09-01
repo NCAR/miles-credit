@@ -447,24 +447,38 @@ def test_static_metadata_grid_found_from_real_coords(
 
 @pytest.mark.parametrize(
     ("grid_layout", "expected_grid_type"),
-    [("shared_dim", "unstructured"), ("same_length_fallback", "unstructured")],
+    [
+        # lat/lon share one dimension -> a genuine unstructured mesh.
+        ("shared_dim", "unstructured"),
+        # Square grid: lat/lon are the same length but on *different* dimensions,
+        # and the data is indexed by both -> rectilinear. This case previously
+        # returned "unstructured" purely because the sizes matched, which then
+        # failed at GridSchema.resolve; classification is now decided by the
+        # data's own dimensionality (see grid_utils._data_spatial_rank).
+        ("square_rectilinear", "rectilinear"),
+        # Same ambiguity, but the data really is on one horizontal dimension.
+        ("separate_dims_flat_data", "unstructured"),
+    ],
 )
 def test_local_find_grid_detects_unstructured_layout(tmp_path, monkeypatch, grid_layout, expected_grid_type):
-    """_find_grid detects both the shared-dimension and weaker same-length paths."""
+    """Grid classification for 1D lat/lon, across the ambiguous same-length cases."""
     path = tmp_path / f"{grid_layout}.nc"
     values = np.arange(4, dtype=np.float32)
+    lat_values = [10.0, 20.0, 30.0, 40.0]
     if grid_layout == "shared_dim":
         ds = xr.Dataset(
             {"T": ("ncol", values)},
-            coords={"lat": ("ncol", [10.0, 20.0, 30.0, 40.0]), "lon": ("ncol", values)},
+            coords={"lat": ("ncol", lat_values), "lon": ("ncol", values)},
         )
-    else:
+    elif grid_layout == "square_rectilinear":
         ds = xr.Dataset(
             {"T": (("lat_dim", "lon_dim"), np.arange(16, dtype=np.float32).reshape(4, 4))},
-            coords={
-                "lat": ("lat_dim", [10.0, 20.0, 30.0, 40.0]),
-                "lon": ("lon_dim", values),
-            },
+            coords={"lat": ("lat_dim", lat_values), "lon": ("lon_dim", values)},
+        )
+    else:  # separate_dims_flat_data
+        ds = xr.Dataset(
+            {"T": ("ncol", values)},
+            coords={"lat": ("lat_dim", lat_values), "lon": ("lon_dim", values)},
         )
     ds.to_netcdf(path)
 
@@ -479,6 +493,225 @@ def test_local_find_grid_detects_unstructured_layout(tmp_path, monkeypatch, grid
 
     assert grid["grid_type"] == expected_grid_type
     np.testing.assert_array_equal(grid["lat"], [10.0, 20.0, 30.0, 40.0])
+
+
+# ---------------------------------------------------------------------------
+# coordinate_file: grid read from a file separate from the data
+# ---------------------------------------------------------------------------
+
+
+def _bare_local_dataset(level_coord: str = "level"):
+    """A LocalDataset skeleton carrying only what _find_grid touches.
+
+    Mirrors test_local_find_grid_detects_unstructured_layout: _find_grid runs
+    early in __init__, before time_coord/static_metadata exist, so it may only
+    depend on these four attributes.
+    """
+    ds = LocalDataset.__new__(LocalDataset)
+    ds.curr_source_name = "Test_Local"
+    ds.save_loc = None
+    ds.level_coord = level_coord
+    ds.levels = None
+    return ds
+
+
+@pytest.fixture
+def coordless_data_file(tmp_path):
+    """A data file with bare projected x/y dims and no geographic coordinates."""
+    path = tmp_path / "data_2020.nc"
+    xr.Dataset(
+        {
+            "T": (("time", "level", "y", "x"), np.zeros((2, 3, 6, 9), "f4")),
+            "SP": (("time", "y", "x"), np.zeros((2, 6, 9), "f4")),
+        },
+        coords={
+            "time": np.array(["2020-01-01", "2020-01-01T06"], dtype="datetime64[ns]"),
+            "level": [1000, 850, 500],
+            "x": np.arange(9, dtype="f8") * 3000.0,
+            "y": np.arange(6, dtype="f8") * 3000.0,
+        },
+    ).to_netcdf(path)
+    return path
+
+
+def _write_curvilinear_grid(path, ny=6, nx=9):
+    lat2d, lon2d = np.meshgrid(np.linspace(20, 50, ny), np.linspace(-130, -60, nx), indexing="ij")
+    xr.Dataset(coords={"XLAT": (("y", "x"), lat2d), "XLONG": (("y", "x"), lon2d)}).to_netcdf(path)
+    return path
+
+
+def _cfg(data_path, coordinate_file=None, **extra):
+    cfg = {"variables": {"prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"], "path": str(data_path)}}}
+    if coordinate_file is not None:
+        cfg["coordinate_file"] = str(coordinate_file)
+    cfg.update(extra)
+    return cfg
+
+
+def test_coordinate_file_supplies_grid_for_coordless_data(tmp_path, coordless_data_file):
+    """The motivating case: data has only x/y, geography lives in a separate file."""
+    grid_path = _write_curvilinear_grid(tmp_path / "grid.nc")
+    ds = _bare_local_dataset()
+
+    grid = ds._find_grid(_cfg(coordless_data_file, coordinate_file=grid_path))
+
+    assert grid["grid_type"] == "curvilinear"
+    assert grid["lat"].shape == (6, 9)
+
+
+def test_coordinate_file_still_takes_levels_from_the_data_file(tmp_path, coordless_data_file):
+    """Levels are a vertical concern — they must never come from the grid file."""
+    grid_path = _write_curvilinear_grid(tmp_path / "grid.nc")
+    ds = _bare_local_dataset()
+
+    ds._find_grid(_cfg(coordless_data_file, coordinate_file=grid_path))
+
+    assert ds.levels == [1000, 850, 500]
+
+
+def test_coordinate_file_supports_unstructured_grids(tmp_path):
+    """MPAS-style: data over ncol, lonCell/latCell in a separate grid file."""
+    data_path = tmp_path / "u_data_2020.nc"
+    xr.Dataset(
+        {"T": (("time", "level", "ncol"), np.zeros((2, 3, 12), "f4"))},
+        coords={
+            "time": np.array(["2020-01-01", "2020-01-01T06"], dtype="datetime64[ns]"),
+            "level": [1000, 850, 500],
+        },
+    ).to_netcdf(data_path)
+    grid_path = tmp_path / "u_grid.nc"
+    xr.Dataset(
+        coords={
+            "latCell": ("ncol", np.linspace(-80, 80, 12)),
+            "lonCell": ("ncol", np.linspace(0, 350, 12)),
+        }
+    ).to_netcdf(grid_path)
+
+    ds = _bare_local_dataset()
+    cfg = {"variables": {"prognostic": {"vars_3D": ["T"], "path": str(data_path)}}}
+    cfg["coordinate_file"] = str(grid_path)
+
+    grid = ds._find_grid(cfg)
+
+    assert grid["grid_type"] == "unstructured"
+    assert grid["lat"].shape == (12,)
+
+
+def test_missing_coordinate_file_raises(tmp_path, coordless_data_file):
+    """An explicitly configured grid file that cannot be opened is fatal, not a warning."""
+    ds = _bare_local_dataset()
+    with pytest.raises(ValueError, match="could not open coordinate_file"):
+        ds._find_grid(_cfg(coordless_data_file, coordinate_file=tmp_path / "does_not_exist.nc"))
+
+
+def test_coordinate_file_without_coordinates_raises(coordless_data_file):
+    """Pointing coordinate_file at a file that has no lat/lon is fatal."""
+    ds = _bare_local_dataset()
+    with pytest.raises(ValueError, match="coordinate pair"):
+        ds._find_grid(_cfg(coordless_data_file, coordinate_file=coordless_data_file))
+
+
+def test_coordinate_file_shape_mismatch_raises(tmp_path, coordless_data_file):
+    """The failure mode a detached grid file introduces: silently wrong geometry."""
+    grid_path = _write_curvilinear_grid(tmp_path / "grid_wrong.nc", ny=10, nx=9)
+    ds = _bare_local_dataset()
+    with pytest.raises(ValueError, match="different grids"):
+        ds._find_grid(_cfg(coordless_data_file, coordinate_file=grid_path))
+
+
+def test_coordinate_file_expands_env_vars(tmp_path, coordless_data_file, monkeypatch):
+    _write_curvilinear_grid(tmp_path / "grid.nc")
+    monkeypatch.setenv("CREDIT_TEST_GRID_DIR", str(tmp_path))
+    ds = _bare_local_dataset()
+
+    grid = ds._find_grid(_cfg(coordless_data_file, coordinate_file="$CREDIT_TEST_GRID_DIR/grid.nc"))
+
+    assert grid["grid_type"] == "curvilinear"
+
+
+def test_coordless_data_without_coordinate_file_still_returns_none(coordless_data_file):
+    """Backward compatibility: the in-file path stays warn-and-continue, never raises."""
+    ds = _bare_local_dataset()
+    assert ds._find_grid(_cfg(coordless_data_file)) is None
+
+
+def test_explicit_coord_names_resolve_unrecognised_conventions(tmp_path):
+    """lat_name/lon_name is the escape hatch for names not in the candidate table."""
+    path = tmp_path / "odd_2020.nc"
+    xr.Dataset(
+        {"T": (("time", "row", "col"), np.zeros((2, 6, 9), "f4"))},
+        coords={
+            "time": np.array(["2020-01-01", "2020-01-01T06"], dtype="datetime64[ns]"),
+            "MY_LAT": ("row", np.linspace(-90, 90, 6)),
+            "MY_LON": ("col", np.linspace(0, 350, 9)),
+        },
+    ).to_netcdf(path)
+
+    ds = _bare_local_dataset()
+    cfg = {"variables": {"prognostic": {"vars_2D": ["T"], "path": str(path)}}}
+    cfg.update(lat_name="MY_LAT", lon_name="MY_LON")
+
+    grid = ds._find_grid(cfg)
+
+    assert grid["grid_type"] == "rectilinear"
+    np.testing.assert_allclose(grid["lat"], np.linspace(-90, 90, 6))
+
+
+def test_projection_axes_captured_from_curvilinear_coordinate_file(tmp_path, coordless_data_file):
+    """Phase 3: 1D x/y are carried alongside the 2D lat/lon they index."""
+    grid_path = tmp_path / "grid.nc"
+    lat2d, lon2d = np.meshgrid(np.linspace(20, 50, 6), np.linspace(-130, -60, 9), indexing="ij")
+    xr.Dataset(
+        coords={
+            "XLAT": (("y", "x"), lat2d),
+            "XLONG": (("y", "x"), lon2d),
+            "y": ("y", np.arange(6, dtype="f8") * 3000.0),
+            "x": ("x", np.arange(9, dtype="f8") * 3000.0),
+        }
+    ).to_netcdf(grid_path)
+    # Units come from the file; nothing is fabricated when they are absent.
+    with xr.open_dataset(grid_path) as _check_written:
+        assert "y" in _check_written.coords
+
+    ds = _bare_local_dataset()
+    grid = ds._find_grid(_cfg(coordless_data_file, coordinate_file=grid_path))
+
+    assert grid["grid_type"] == "curvilinear"
+    np.testing.assert_allclose(grid["y"], np.arange(6) * 3000.0)
+    np.testing.assert_allclose(grid["x"], np.arange(9) * 3000.0)
+
+
+def test_no_projection_axes_when_dims_have_no_coordinate_variables(tmp_path, coordless_data_file):
+    """WRF-style dims with no coordinate variables: absence is normal, not an error."""
+    grid_path = tmp_path / "grid_bare_dims.nc"
+    lat2d, lon2d = np.meshgrid(np.linspace(20, 50, 6), np.linspace(-130, -60, 9), indexing="ij")
+    xr.Dataset(
+        coords={
+            "XLAT": (("south_north", "west_east"), lat2d),
+            "XLONG": (("south_north", "west_east"), lon2d),
+        }
+    ).to_netcdf(grid_path)
+
+    grid = _bare_local_dataset()._find_grid(_cfg(coordless_data_file, coordinate_file=grid_path))
+
+    assert grid["grid_type"] == "curvilinear"
+    assert "y" not in grid and "x" not in grid
+
+
+def test_rectilinear_grid_carries_no_projection_axes(tmp_path):
+    """On a rectilinear grid the dimension coords already are lat/lon."""
+    path = tmp_path / "rect_2020.nc"
+    xr.Dataset(
+        {"T": (("latitude", "longitude"), np.zeros((6, 9), "f4"))},
+        coords={"latitude": np.linspace(-90, 90, 6), "longitude": np.linspace(0, 350, 9)},
+    ).to_netcdf(path)
+
+    grid = _bare_local_dataset()._find_grid(
+        {"variables": {"prognostic": {"vars_2D": ["T"], "path": str(path)}}}
+    )
+
+    assert grid["grid_type"] == "rectilinear"
+    assert "y" not in grid and "x" not in grid
 
 
 def test_local_read_3d_array_rejects_nonleading_level_dimension():
