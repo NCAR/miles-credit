@@ -1,0 +1,337 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# CREDIT SDL config — fine-tune stochastic noise-injection layers on top of an
+# already-trained wxformer checkpoint, for ensemble generation.
+#
+# SDL (StochasticDecompositionLayer) does not train a model from scratch. It wraps a
+# trained wxformer's encoder/decoder with a handful of small noise-injection layers,
+# freezes every pretrained weight, and only trains the new layers. See
+# docs/source/SDL.md before running this — in particular, the checkpoint you fine-tune
+# from has to be copied into save_loc below first; load_weights alone will not find it.
+#
+# Quick-start, once the checkpoint is in place:
+#
+#   credit check -c config/gen_2/examples/wxformer_sdl.yml
+#   credit submit --cluster casper -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --chain 4
+# --------------------------------------------------------------------------------------------------------------------- #
+
+# ---- USER SETTINGS: output directory ---- #
+# A NEW directory, not the base model's save_loc. Copy the base checkpoint here
+# before the first run (see docs/source/SDL.md):
+#   mkdir -p /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl
+#   cp /glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/checkpoint.pt \
+#      /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl/checkpoint.pt
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl'
+seed: 1000
+
+
+# ---- USER SETTINGS: training data ---- #
+# Same source and variables as the base model. SDL only adds noise-injection
+# layers to the architecture; the data pipeline is unchanged.
+data:
+  source:
+    ERA5:
+      dataset_type: "local"
+      level_coord: "level"
+      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      variables:
+        prognostic:
+          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
+          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        diagnostic:
+          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        dynamic_forcing:
+          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        static:
+          vars_2D: [ 'z_norm', 'land_sea_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+  start_datetime: "1979-01-01"
+  end_datetime: "2018-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- USER SETTINGS: validation data ---- #
+validation_data:
+  source:
+    ERA5:
+      dataset_type: "local"
+      level_coord: "level"
+      levels: [ 1., 9., 19., 29., 39., 49., 59., 69., 79., 89., 97., 104., 111., 116., 122., 126., 131., 136. ]
+      variables:
+        prognostic:
+          vars_3D: [ 'u_component_of_wind', 'v_component_of_wind', 'temperature', 'specific_total_water' ]
+          vars_2D: [ 'SP', 'VAR_2T', 'VAR_10U', 'VAR_10V' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        diagnostic:
+          vars_2D: [ 'total_precipitation', 'evaporation', 'top_net_thermal_radiation', 'top_net_solar_radiation',
+                     'surface_latent_heat_flux', 'surface_net_solar_radiation',
+                     'surface_net_thermal_radiation', 'surface_sensible_heat_flux' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        dynamic_forcing:
+          vars_2D: [ 'toa_incident_solar_radiation', 'land_sea_CI_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/all_in_one/ERA5_mlevel_1deg_6h_subset_%Y*'
+
+        static:
+          vars_2D: [ 'z_norm', 'land_sea_mask' ]
+          path: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+  start_datetime: "2019-01-01"
+  end_datetime: "2020-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- USER SETTINGS: training hyperparameters ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp
+    tensor: 1
+    domain: 1
+
+  activation_checkpoint: True
+
+  # Load the base checkpoint's weights (strict=False — the new noise layers
+  # aren't in it and start from their default init). Everything else starts
+  # fresh: a new optimizer/scheduler for the (much smaller) set of trainable
+  # parameters, epoch counter at 0.
+  load_weights: True
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: False
+
+  save_backup_weights: True
+  save_best_weights: True
+
+  # Only the noise-injection layers have requires_grad=True (model.freeze:
+  # True below freezes everything else), so this trains far fewer parameters
+  # than the base model did. A smaller learning rate and far fewer epochs are
+  # typically enough — start here and watch validation loss.
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 8
+  valid_batch_size: 8
+
+  batches_per_epoch: 5
+  valid_batches_per_epoch: 100
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 1
+  epochs: &epochs 10   # fine-tuning the noise layers needs far fewer epochs than base training
+
+  use_tensorboard: True
+  use_ema: True
+  ema_decay: 0.9999
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 200
+    total_steps: 50000
+    min_lr: 1.0e-6
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 4
+
+
+# ---- Preblocks / Postblocks ---- #
+# Identical to the base model's config — SDL doesn't change how data is
+# normalized or reassembled, only what happens inside the model.
+preblocks:
+  per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: ['ERA5/prognostic/3d/u_component_of_wind', 'ERA5/prognostic/3d/v_component_of_wind',
+                    'ERA5/prognostic/3d/temperature', 'ERA5/prognostic/3d/specific_total_water',
+                    'ERA5/prognostic/2d/SP', 'ERA5/prognostic/2d/VAR_2T', 'ERA5/prognostic/2d/VAR_10U',
+                    'ERA5/prognostic/2d/VAR_10V', 'ERA5/dynamic_forcing/2d/toa_incident_solar_radiation',
+                    'ERA5/diagnostic/2d/total_precipitation', 'ERA5/diagnostic/2d/evaporation',
+                    'ERA5/diagnostic/2d/top_net_thermal_radiation', 'ERA5/diagnostic/2d/top_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_latent_heat_flux', 'ERA5/diagnostic/2d/surface_net_solar_radiation',
+                    'ERA5/diagnostic/2d/surface_net_thermal_radiation', 'ERA5/diagnostic/2d/surface_sensible_heat_flux']
+        method: transform
+        scaler_params:
+          channels_last: False
+    concat:
+      type: concat
+
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: false
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: []
+        method: inverse_transform
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: 'y'
+        out_key: 'y_target_processed'
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+        variables: []
+        method: inverse_transform
+        key: 'y_target_processed'
+
+
+# ---- Architecture ---- #
+# Everything above use_spectral_norm must match the base checkpoint exactly
+# (same image size, levels, channels, dim/depth, window sizes, padding) — SDL
+# loads that checkpoint's weights by matching parameter names and shapes, so
+# an architecture mismatch either fails to load or silently loads into the
+# wrong shapes. Copy these values from the base model's config, don't retype
+# them from memory.
+model:
+  type: "crossformer-ensemble"  # SDL model class (CrossFormerWithNoise); see docs/source/SDL.md
+  frames: 1
+  image_height: 181
+  image_width: 360
+  levels: 18
+  channels: 4
+  surface_channels: 4
+  input_only_channels: 4
+  output_only_channels: 8
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [32, 64, 128, 256]
+  depth: [ 2, 2, 8, 2 ]
+
+  global_window_size: [ 8, 4, 2, 1 ]
+  local_window_size: 4
+  cross_embed_kernel_sizes:
+    - [ 4, 8, 16, 32 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+    - [ 2, 4 ]
+  cross_embed_strides: [ 2, 2, 2, 2 ]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  interp: True
+  use_spectral_norm: True
+  upsample_with_ps: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [ 37, 38 ]
+    pad_lon: [ 12, 12 ]
+
+  # ---- SDL-specific: everything above is the frozen base architecture;
+  # everything below is new and gets trained. ----
+  freeze: True                  # freeze every pretrained weight; train only the noise layers
+  encoder_noise: True           # inject noise in the encoder as well as the decoder
+  noise_latent_dim: 128         # dimensionality of the sampled noise vector z
+  encoder_noise_factor: 0.05    # initial (learnable) scale of encoder noise injection
+  decoder_noise_factor: 0.275   # initial (learnable) scale of decoder noise injection
+  correlated: False             # True: one z per forward pass, shared across all injection points
+
+
+# ---- Loss ---- #
+# Same as the base model. A single stochastic sample per batch is scored
+# against the same deterministic target here (mse); see docs/source/SDL.md
+# for how to move to an ensemble-aware loss (e.g. ring-crps) once you're
+# generating multiple members per init at rollout/inference time.
+loss:
+  type: base
+  args:
+    training_loss: "mse"
+    base_loss_parameters: {}
+
+    var_weighting: "inverse_variance"
+    scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
+    variable_weights: {}
+    normalize_weights: true
+
+    include_computed_diagnostics: true
+
+    use_latitude_weights: True
+    latitude_weights: '/glade/campaign/cisl/aiml/ksha/CREDIT_data/ERA5_mlevel_1deg/static/ERA5_mlevel_1deg_static_subset.zarr'
+
+
+# ---- Inference (used by rollout_gen2.py, not training) ---- #
+# Each rollout call samples new noise, so re-running inference against the
+# same checkpoint gives a different ensemble member every time — that's the
+# point. See docs/source/SDL.md for generating a full ensemble from one config.
+inference:
+  run_mode: batch
+  mode: ddp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl_forecast'
+  batch_forecast:
+    forecast_length: "1d"
+    first_init_date: "2020-01-01"
+    last_init_date: "2020-01-01"
+    init_interval: "12h"
+
+  single_forecast:
+    forecast_length: "10d"
+    start_datetime: "2020-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: null
+    variables: null
+    metadata: "era5.yaml"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4
+
+pbs: # derecho
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "wxformer_sdl"
+  walltime: "04:00:00"   # fine-tuning is much shorter than base training
+  nodes: 8
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'
