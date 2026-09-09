@@ -156,14 +156,14 @@ of this step covers batch submission on NCAR HPC (Casper/Derecho) with
 calculate it yourself.
 
 ```bash
-# Casper — chain computed automatically from config.  Override gpu count to 4.
-credit submit --cluster casper  -c my_experiment.yml --gpus 4
+# Casper — chain computed automatically from config.  Override gpu count to 4.  Be sure to use your authorized account key.
+credit submit --cluster casper -c my_experiment.yml -A <ACCOUNT_KEY> --gpus 4
 
 # Derecho — 1 node × 4 GPUs
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1
+credit submit --cluster derecho -c my_experiment.yml -A <ACCOUNT_KEY> --gpus 4 --nodes 1
 
 # Derecho — multi-node (e.g. 4 nodes × 4 GPUs = 16 GPUs total)
-credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 4
+credit submit --cluster derecho -c my_experiment.yml -A <ACCOUNT_KEY> --gpus 4 --nodes 4
 ```
 
 Before submitting, `credit submit` always prints a job plan:
