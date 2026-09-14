@@ -365,7 +365,8 @@ class CubedWXFormer(nn.Module):
 
         # ── Channel arithmetic ───────────────────────────────────────────
         self.input_channels = (channels * levels + surface_channels + input_only_channels) * frames
-        self.output_channels = channels * levels + surface_channels + output_only_channels
+        self.prognostic_channels = channels * levels + surface_channels
+        self.output_channels = self.prognostic_channels + output_only_channels
         self.frames = frames
         self.halo_size = halo_size
 
@@ -653,10 +654,16 @@ class CubedWXFormer(nn.Module):
         """
         B, C, T, ncol = x.shape
 
-        # Residual base: prognostic channels of the last input frame.
-        # Model predicts a delta; the residual gives persistence at random init,
-        # which yields non-zero positive ACC from the first batch.
-        x_res = x[:, : self.output_channels, T - 1, :]  # (B, C_out, ncol)
+        # Residual base: prognostic channels of the last input frame, zero-padded
+        # for output-only (diagnostic) channels, which have no matching input to
+        # persist. Model predicts a delta; the residual gives persistence at
+        # random init for prognostic channels, which yields non-zero positive
+        # ACC from the first batch. The input's remaining channels beyond the
+        # prognostic block are input-only forcing/static fields and must not be
+        # used as a residual for anything.
+        x_res = x[:, : self.prognostic_channels, T - 1, :]  # (B, C_prog, ncol)
+        if self.output_channels > self.prognostic_channels:
+            x_res = F.pad(x_res, (0, 0, 0, self.output_channels - self.prognostic_channels))
 
         # Merge time into channels: (B, C*T, ncol)
         x_flat = x.reshape(B, C * T, ncol)

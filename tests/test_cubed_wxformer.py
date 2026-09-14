@@ -121,8 +121,16 @@ def test_use_column_attn_true_forward_shape_roundtrips(tmp_path, decoder_col_att
     assert tuple(y.shape) == (1, c_out, 1, ncol)
 
 
+def _expected_residual(x, c_prog, c_out, ncol):
+    """Prognostic channels of the last input frame, zero-padded for any
+    output-only (diagnostic) channels -- never copied from input-only fields."""
+    return torch.cat([x[:, :c_prog, 0, :], torch.zeros(x.shape[0], c_out - c_prog, ncol)], dim=1)
+
+
 def test_zero_init_head_gives_persistence(tmp_path):
-    """Zero-init head => delta 0 => output equals the residual exactly.
+    """Zero-init head => delta 0 => output equals the residual exactly: the
+    prognostic part of the last input frame, with output-only (diagnostic)
+    channels held at zero rather than copied from unrelated input-only fields.
 
     This also proves the final step is an unpad/crop, not an interpolation:
     a bilinear resize back to the face size would not reproduce the input.
@@ -131,13 +139,40 @@ def test_zero_init_head_gives_persistence(tmp_path):
     model = _make_model(si)
     model.eval()
 
-    c_out = 2 * 3 + 4 + 1
+    c_prog = 2 * 3 + 4  # channels * levels + surface_channels
     x = torch.randn(1, 2 * 3 + 4 + 5, 1, ncol)
     with torch.no_grad():
         y = model(x)
 
-    x_res = x[:, :c_out, 0, :]
-    assert torch.allclose(y[:, :, 0, :], x_res, atol=0.0)
+    expected = _expected_residual(x, c_prog, model.output_channels, ncol)
+    assert torch.allclose(y[:, :, 0, :], expected, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    "input_only_channels,output_only_channels",
+    [
+        (5, 1),  # output_only < input_only (Cout < Cin)
+        (0, 5),  # no input-only channels at all
+        (1, 8),  # output_only far exceeds input_only -> Cout > Cin
+    ],
+)
+def test_zero_init_head_gives_persistence_various_channel_counts(tmp_path, input_only_channels, output_only_channels):
+    """Same zero-residual behavior holds regardless of how input-only and
+    output-only channel counts relate -- including Cout > Cin, which used to
+    raise a shape error, and Cout > C_prognostic, which used to silently copy
+    input-only (forcing/static) fields into the diagnostic residual."""
+    si, ncol = _write_full_cube_index(tmp_path, 50)
+    model = _make_model(si, input_only_channels=input_only_channels, output_only_channels=output_only_channels)
+    model.eval()
+
+    c_prog = 2 * 3 + 4
+    x = torch.randn(1, c_prog + input_only_channels, 1, ncol)
+    with torch.no_grad():
+        y = model(x)
+
+    assert tuple(y.shape) == (1, model.output_channels, 1, ncol)
+    expected = _expected_residual(x, c_prog, model.output_channels, ncol)
+    assert torch.allclose(y[:, :, 0, :], expected, atol=0.0)
 
 
 def test_pad_crop_is_identity(tmp_path):

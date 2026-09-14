@@ -572,7 +572,8 @@ class WXFormerColumn(BaseModel):
         input_channels = (atmos_channels + surface_channels + input_only_channels) * frames
         last_dim = dim[-1]
 
-        self.output_channels = channels * levels + surface_channels + output_only_channels
+        self.prognostic_channels = channels * levels + surface_channels
+        self.output_channels = self.prognostic_channels + output_only_channels
 
         # ── Input processing ─────────────────────────────────────────────
         self.level_embedding = LevelEmbedding(channels, levels)
@@ -662,14 +663,18 @@ class WXFormerColumn(BaseModel):
         else:
             x = x.squeeze(2)
 
-        # Residual base: prognostic channels of the last input frame.
-        # Model predicts a delta; adding the base means output ≈ persistence at
-        # random init, which gives non-zero ACC from the very first batch.
+        # Residual base: prognostic channels of the last input frame, zero-padded
+        # for output-only (diagnostic) channels, which have no matching input to
+        # persist. Model predicts a delta; adding the base means output ≈
+        # persistence at random init for prognostic channels, which gives
+        # non-zero ACC from the very first batch. The input's remaining channels
+        # beyond the prognostic block are input-only forcing/static fields and
+        # must not be used as a residual for anything.
         total_per_frame = self.channels * self.levels + self.surface_channels + self.input_only_channels
         last_frame_offset = (T - 1) * total_per_frame
-        x_res = x[:, last_frame_offset : last_frame_offset + self.output_channels]
-        if x_res.shape[1] < self.output_channels:
-            x_res = F.pad(x_res, (0, 0, 0, 0, 0, self.output_channels - x_res.shape[1]))
+        x_res = x[:, last_frame_offset : last_frame_offset + self.prognostic_channels]
+        if self.output_channels > self.prognostic_channels:
+            x_res = F.pad(x_res, (0, 0, 0, 0, 0, self.output_channels - self.prognostic_channels))
 
         # Apply level embedding and column attention to each frame's atmos channels
         atmos_size = self.channels * self.levels
