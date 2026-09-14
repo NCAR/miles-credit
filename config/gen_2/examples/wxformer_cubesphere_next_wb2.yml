@@ -119,14 +119,16 @@ postblocks:
           ERA5/prognostic/2d/volumetric_soil_water_layer_1, ERA5/prognostic/2d/volumetric_soil_water_layer_2,
           ERA5/prognostic/2d/volumetric_soil_water_layer_3, ERA5/prognostic/2d/volumetric_soil_water_layer_4]
         method: inverse_transform
-    # Map the (denormalized) SE prediction and target back to the native
-    # 0.25 deg lat/lon grid for verification. Bilinear reverse weights here;
-    # swap to *_conserve.nc when area-integral budgets matter.
+    # Map the (denormalized) SE prediction back to the native 0.25 deg lat/lon
+    # grid for verification. `reconstruct` above writes the nested prediction
+    # dict to "y_processed" (its default out_key) -- that's the key to regrid
+    # here, not "prediction". Bilinear reverse weights here; swap to
+    # *_conserve.nc when area-integral budgets matter.
     to_latlon:
       type: se_to_latlon
       args:
         weight_file: /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_ne120_to_latlon721x1440.nc
-        keys: [prediction, target]
+        keys: [y_processed]
 loss:
   training_loss: mse
   validation_loss: mse

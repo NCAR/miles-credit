@@ -65,8 +65,16 @@ class Reconstruct(BasePostblock):
         y_pred = batch_dict[self.in_key]
         output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
-        # Flatten time dim if input arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
-        if y_pred.dim() == 5:
+        # Fold a singleton frame/time axis at dim=2 into the channel dim before
+        # slicing. Models return this at different total ranks depending on
+        # spatial dimensionality: 5D (B, C, 1, H, W) for 2D lat-lon/tile grids,
+        # 4D (B, C, 1, ncol) for 1D SE/cube-sphere grids. Checking shape[2] == 1
+        # (rather than a hardcoded dim() == 5) generalizes to both -- a plain
+        # (B, C, H, W) input with no frame axis is untouched either way, since a
+        # real spatial dim is never of size 1. Left unhandled, the frame axis
+        # survives as a spurious extra dimension through every downstream
+        # postblock (e.g. SEToLatLonPostBlock's regrid) and breaks netCDF writing.
+        if y_pred.dim() >= 4 and y_pred.shape[2] == 1:
             y_pred = y_pred.flatten(1, 2)
 
         y_processed = {}
@@ -151,9 +159,12 @@ class FlattenToTensor(BasePostblock):
         for var_key in sorted(channel_map, key=lambda k: channel_map[k]["slice"].start):
             source = var_key.split("/")[0]
             tensor = work[source][var_key]
-            # (B, n_levels, n_time, H, W) -> (B, n_levels * n_time, H, W)
-            if tensor.dim() == 5:
-                tensor = tensor.flatten(1, 2)
+            # y_processed tensors are always (B, n_levels, n_time, ...spatial) by
+            # Reconstruct's own contract -- dims 1 and 2 are always (n_levels,
+            # n_time) regardless of spatial rank (H, W for lat-lon grids; ncol
+            # for SE/cube-sphere grids), so this flatten is unconditional rather
+            # than gated on a hardcoded total rank.
+            tensor = tensor.flatten(1, 2)
             pieces.append(tensor)
 
         batch_dict[self.out_key] = torch.cat(pieces, dim=1)
