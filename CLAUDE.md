@@ -130,10 +130,12 @@ denormalize and enforce physical constraints (`conservation.py`, `mslp.py`, `pre
 `wind_filter.py`). Every gen2 preblock chain must end with `concat`; every gen2 postblock chain starts
 with `reconstruct` (its inverse).
 
-Gotcha when writing configs: a `bridgescaler_transform` preblock that will **fit a new scaler**
-(via `credit preprocess`) must set `scaler_params: {channels_last: False}` — bridgescaler defaults to
-`channels_last=True`, but CREDIT tensors are channels-first, so omitting it silently fits statistics
-over the wrong axis. Transform-only use of an already-fitted scaler is unaffected.
+Gotcha when writing configs: bridgescaler defaults to `channels_last=True`, but CREDIT tensors are
+channels-first, so `BridgeScalerTransform` defaults `scaler_params.channels_last` to `False` when it
+**fits a new scaler** (via `credit preprocess`) — override it explicitly only if you have a reason to.
+Transform-only use of an already-fitted scaler is unaffected. Separately, a scaler's `spatial_variables`
+(grid-wise scaling) must match between the preblock that fits it and the postblock that applies it, or
+the postblock's column-count check fails on the first training batch — `credit check` validates this.
 
 ### Applications vs CLI vs top-level `applications/`
 

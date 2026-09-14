@@ -155,13 +155,21 @@ When `credit preprocess` fits a *new* scaler (no file at `scaler_path` yet),
 the scaler is constructed from `scaler_type` (`standard` or `quantile`) and
 `scaler_params`, which is passed straight to the bridgescaler constructor.
 
+```{note}
+bridgescaler's own default is `channels_last=True`, but CREDIT tensors are
+channels-first `(batch, channels, lat, lon)`, so `BridgeScalerTransform`
+defaults `scaler_params.channels_last` to `False` for any new scaler it fits —
+you don't need to set it yourself unless you have a reason to override it.
+(Once fitted, the setting is saved in the scaler JSON, so transform-only use
+of an existing scaler is unaffected.)
+```
+
 ```{warning}
-A common pitfall: bridgescaler's default is `channels_last=True`, but CREDIT
-tensors are channels-first `(batch, channels, lat, lon)`. Always set
-`scaler_params: {channels_last: False}` on any `bridgescaler_transform`
-preblock that will fit a new scaler — otherwise the scaler silently computes
-statistics over the wrong axis. (Once fitted, the setting is saved in the
-scaler JSON, so transform-only use of an existing scaler is unaffected.)
+If a variable is scaled grid-wise via `spatial_variables`, that same list must
+be set identically on both the preblock that fits the scaler and the
+postblock that applies it — a variable fit per-level but applied grid-wise (or
+vice versa) fails the scaler's column-count check on the first training batch.
+`credit check` catches this mismatch for you.
 ```
 
 ```yaml
