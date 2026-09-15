@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import os
 from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import Any, NamedTuple
 
 import pandas as pd
@@ -37,6 +38,10 @@ from credit.datasets.gen_2.multi_source import make_single_source_subconfig
 
 logger = logging.getLogger(__name__)
 
+_CHUNK_SIZE = 8 * 1024 * 1024
+_CLIENT_OPTIONS = {"timeout": "30m", "connect_timeout": "30s", "read_timeout": "60s"}
+_RETRY_CONFIG = {"max_retries": 5, "retry_timeout": timedelta(minutes=30)}
+
 
 class _DownloadTask(NamedTuple):
     remote_path: str
@@ -45,21 +50,32 @@ class _DownloadTask(NamedTuple):
 
 
 def _download_one(task: _DownloadTask, store: Any) -> str:
-    if os.path.exists(task.local_path) and not task.overwrite:
+    if os.path.exists(task.local_path) and os.path.getsize(task.local_path) > 0 and not task.overwrite:
         return f"skip  {task.local_path}"
     os.makedirs(os.path.dirname(task.local_path), exist_ok=True)
+    partial_path = f"{task.local_path}.{os.getpid()}.part"
     try:
         result = store.get(task.remote_path)
-        with open(task.local_path, "wb") as output:
-            output.write(result.bytes())
+        with open(partial_path, "wb") as output:
+            for chunk in result.stream(min_chunk_size=_CHUNK_SIZE):
+                output.write(chunk)
+        os.replace(partial_path, task.local_path)
         return f"ok    {task.local_path}"
     except Exception as exc:  # noqa: BLE001
         logger.warning("Could not download %s: %s", task.remote_path, exc)
+        try:
+            os.remove(partial_path)
+        except OSError:
+            pass
         return f"miss  {task.remote_path}"
 
 
 def download_gefs(data_config: dict[str, Any], num_workers: int = 4, overwrite: bool = False) -> None:
     """Download selected GEFS initialization files for local ``GEFSDataset`` use.
+
+    Each object is streamed to a ``.part`` file and renamed into place only
+    after the transfer completes, so an interrupted download never leaves a
+    truncated file that a later run would treat as already present.
 
     Args:
         data_config: Top-level ``data`` configuration with exactly one
@@ -117,7 +133,12 @@ def download_gefs(data_config: dict[str, Any], num_workers: int = 4, overwrite: 
     from obstore.store import GCSStore
 
     del obstore
-    store = GCSStore(bucket=_GEFS_BUCKET, config={"skip_signature": True})
+    store = GCSStore(
+        bucket=_GEFS_BUCKET,
+        config={"skip_signature": True},
+        client_options=_CLIENT_OPTIONS,
+        retry_config=_RETRY_CONFIG,
+    )
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         for result in executor.map(lambda task: _download_one(task, store), tasks):
             logger.info(result)

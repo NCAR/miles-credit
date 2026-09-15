@@ -527,3 +527,30 @@ class GEFSDataset(BaseDataset):
             per_step.append(step_sample)
         for key in per_step[0]:
             sample[key] = torch.cat([step[key] for step in per_step], dim=2)
+
+    def _load_sample(self, t: pd.Timestamp, i: int) -> dict[str, Any]:
+        """Build the sample, dropping the member dimension for a single member.
+
+        Every other Gen2 dataset emits ``(levels, time, lat, lon)`` and lets the
+        DataLoader's collation supply the leading batch dimension. GEFS carries
+        an extra leading member dimension, so with more than one member the
+        collated tensor is one rank too high and ``ConcatToTensor`` reads the
+        member axis as channels.
+
+        For the single-member case the member dimension is exactly the batch
+        dimension the loader would add, so it is dropped here and GEFS matches
+        the convention used by every other source. Multi-member samples are
+        returned unchanged and still need the member axis folded into the batch
+        downstream.
+        """
+        sample = super()._load_sample(t, i)
+        if len(self.members) != 1:
+            return sample
+        for data_type in ("input", "target"):
+            group = sample.get(data_type)
+            if not isinstance(group, dict):
+                continue
+            for key, value in group.items():
+                if isinstance(value, torch.Tensor):
+                    group[key] = value.squeeze(0)
+        return sample
