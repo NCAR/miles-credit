@@ -683,3 +683,134 @@ def test_wb2_era5_64x32_single_load(minimal_wb2_era5_config):
     temp_tgt = sample["target"]["WeatherBench2_ERA5/prognostic/3d/temperature"]
     assert temp_tgt.shape == (n_levels, 1, lat, lon)
     assert ~torch.any(torch.isnan(temp_tgt))
+
+
+# ---------------------------------------------------------------------------
+# ARCOERA5Dataset I/O: concurrent variable reads and per-process store caching
+# (offline: a small local zarr stands in for the GCS store)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def fake_arco_store(tmp_path, monkeypatch):
+    """Write a tiny ARCO-shaped zarr and point ARCOERA5Dataset's store at it; count opens."""
+    times = pd.date_range("2022-12-31", periods=24, freq="1h")
+    levels = [500, 850, 1000]
+    lat, lon = np.linspace(90, -90, 5), np.arange(0, 360, 45.0)
+    rng = np.random.default_rng(0)
+    ds = xr.Dataset(
+        {
+            "temperature": (("time", "level", "latitude", "longitude"), rng.random((24, 3, 5, 8), dtype=np.float32)),
+            "specific_humidity": (
+                ("time", "level", "latitude", "longitude"),
+                rng.random((24, 3, 5, 8), dtype=np.float32),
+            ),
+            "surface_pressure": (("time", "latitude", "longitude"), rng.random((24, 5, 8), dtype=np.float32)),
+            "2m_temperature": (("time", "latitude", "longitude"), rng.random((24, 5, 8), dtype=np.float32)),
+            # ARCO stores "static" fields with a time axis too
+            "land_sea_mask": (("time", "latitude", "longitude"), rng.random((24, 5, 8), dtype=np.float32)),
+        },
+        coords={"time": times, "level": levels, "latitude": lat, "longitude": lon},
+    )
+    path = str(tmp_path / "arco.zarr")
+    ds.to_zarr(path, zarr_format=3, consolidated=True)
+
+    def fake_init_fs(self):
+        self._fs = True
+        self.pres_level_store = path
+        self.mod_level_store = path
+
+    opens = []
+    real_open_zarr = xr.open_zarr
+
+    def counting_open_zarr(store, **kwargs):
+        opens.append(store)
+        return real_open_zarr(store, **kwargs)
+
+    monkeypatch.setattr(ARCOERA5Dataset, "_init_fs", fake_init_fs)
+    monkeypatch.setattr("credit.datasets.gen_2.era5.xr.open_zarr", counting_open_zarr)
+    return {"ds": ds, "opens": opens}
+
+
+def _fake_arco_config(tmp_path, io_threads):
+    return {
+        "save_loc": str(tmp_path),
+        "timestep": "6h",
+        "forecast_len": 1,
+        "start_datetime": "2022-12-31 00:00",
+        "end_datetime": "2022-12-31 18:00",
+        "source": {
+            "ARCO": {
+                "dataset_type": "arco_era5",
+                "level_coord": "level",
+                "levels": [1000, 500],
+                "io_threads": io_threads,
+                "variables": {
+                    "prognostic": {
+                        "vars_3D": ["temperature", "specific_humidity"],
+                        "vars_2D": ["surface_pressure", "2m_temperature"],
+                    },
+                    "static": {"vars_2D": ["land_sea_mask"]},
+                },
+            }
+        },
+    }
+
+
+def test_arco_concurrent_reads_match_sequential(tmp_path, fake_arco_store):
+    """Threaded reads return the same tensors, in the same key order, as sequential reads."""
+    t = pd.Timestamp("2022-12-31 06:00")
+    seq = ARCOERA5Dataset(_fake_arco_config(tmp_path, 1), return_target=True)[(t, 0)]
+    par = ARCOERA5Dataset(_fake_arco_config(tmp_path, 8), return_target=True)[(t, 0)]
+    for part in ("input", "target"):
+        assert list(seq[part]) == list(par[part])
+        for key in seq[part]:
+            torch.testing.assert_close(seq[part][key], par[part][key])
+
+    src = fake_arco_store["ds"]
+    temp = par["input"]["ARCO/prognostic/3d/temperature"]
+    assert temp.shape == (2, 1, 5, 8)
+    expected = src["temperature"].sel(time=t, level=[1000, 500]).values
+    np.testing.assert_array_equal(temp[:, 0].numpy(), expected)
+    sp_target = par["target"]["ARCO/prognostic/2d/surface_pressure"]
+    assert sp_target.shape == (1, 1, 5, 8)
+    np.testing.assert_array_equal(
+        sp_target[0, 0].numpy(), src["surface_pressure"].sel(time=t + pd.Timedelta("6h")).values
+    )
+
+
+def test_arco_store_opened_once_per_process(tmp_path, fake_arco_store):
+    """The zarr store is opened on the first read and reused for every later sample and field."""
+    dset = ARCOERA5Dataset(_fake_arco_config(tmp_path, 4), return_target=True)
+    for t in pd.date_range("2022-12-31 00:00", "2022-12-31 12:00", freq="6h"):
+        dset[(t, 0)]
+    assert len(fake_arco_store["opens"]) == 1
+
+
+def test_arco_forked_copy_after_parent_read_raises(tmp_path, fake_arco_store, monkeypatch):
+    """obstore hangs after fork once the parent has read, so a forked copy must fail fast instead."""
+    dset = ARCOERA5Dataset(_fake_arco_config(tmp_path, 4), return_target=True)
+    t = pd.Timestamp("2022-12-31 06:00")
+    dset[(t, 0)]
+    monkeypatch.setattr("credit.datasets.gen_2.era5.os.getpid", lambda: -1)
+    with pytest.raises(RuntimeError, match="spawn"):
+        dset[(t, 0)]
+
+
+def test_arco_pickle_drops_io_handles(tmp_path, fake_arco_store):
+    """Pickling (spawned workers) drops stores, datasets and the pool; the copy reopens and still works."""
+    import pickle
+
+    dset = ARCOERA5Dataset(_fake_arco_config(tmp_path, 4), return_target=True)
+    t = pd.Timestamp("2022-12-31 06:00")
+    ref = dset[(t, 0)]
+    clone = pickle.loads(pickle.dumps(dset))
+    assert clone._ds_cache == {} and clone._executor is None and clone.pres_level_store is None
+    out = clone[(t, 0)]
+    for key in ref["input"]:
+        torch.testing.assert_close(ref["input"][key], out["input"][key])
+
+
+def test_arco_io_threads_must_be_positive(tmp_path, fake_arco_store):
+    with pytest.raises(ValueError, match="io_threads"):
+        ARCOERA5Dataset(_fake_arco_config(tmp_path, 0))

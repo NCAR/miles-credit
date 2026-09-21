@@ -39,8 +39,11 @@ from __future__ import annotations
 
 import cftime
 import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
+import numpy as np
 import obstore.store as obs
 import pandas as pd
 import torch
@@ -77,11 +80,21 @@ class ARCOERA5Dataset(BaseDataset):
                   vars_2D: ["land_sea_mask"]
                 diagnostic:
                   vars_2D: ["total_precipitation"]
+              io_threads: 16  # optional: concurrent variable reads per field (1 = sequential)
 
           start_datetime: "2017-01-01"
           end_datetime: "2019-12-31"
           timestep: "6h"
           forecast_len: 1
+
+    Performance:
+        Reads are network-bound (each 3D variable is one ~95 MB chunk holding all 37
+        pressure levels), so every variable of a field type at one time step is fetched
+        concurrently on a thread pool of ``io_threads`` workers. The zarr stores are opened
+        once per process and reused across samples. The open handles and the pool are
+        dropped on pickling, so each ``spawn`` DataLoader worker opens its own. ``fork``
+        workers are unsupported once the parent has read (obstore hangs after fork), and
+        they raise a RuntimeError instead.
 
     Assumptions:
         1. A "time" dimension / coordinate is present for non-static fields.
@@ -143,13 +156,91 @@ class ARCOERA5Dataset(BaseDataset):
             "datetime_fmt": "unix_ns",
         }
         self.mode = "remote"
+        self.io_threads: int = int(self.curr_source_cfg.get("io_threads", 16))
+        if self.io_threads < 1:
+            raise ValueError(f"io_threads must be >= 1 for source '{self.curr_source_name}', got {self.io_threads}")
 
         # Initialize the field registration based on the provided config and populate
         #   dictionary of variables and file paths for each field type
         self.init_register_all_fields()
 
-        # Initialize the s3fs on the first call to _extract_field within __getitem__
+        # Per-process I/O handles, created lazily on the first read (see _get_ds).
         self._fs = None
+        self._handles_pid: int | None = None
+        self._ds_cache: dict[str, xr.Dataset] = {}
+        self._executor: ThreadPoolExecutor | None = None
+
+    def __getstate__(self) -> dict[str, Any]:
+        """Drop open stores, datasets, and the thread pool so each unpickled copy (e.g. a spawned DataLoader worker) opens its own."""
+        state = self.__dict__.copy()
+        state.update(
+            _fs=None,
+            pres_level_store=None,
+            mod_level_store=None,
+            _handles_pid=None,
+            _ds_cache={},
+            _executor=None,
+        )
+        return state
+
+    def _ensure_handles(self) -> None:
+        """Open the object stores on this process's first read; fail fast in a forked child.
+
+        obstore's async runtime is process-global and doesn't survive ``fork``: once the
+        parent has read from any obstore store, every obstore call in a forked child hangs
+        forever, even on a freshly created store. Pickled copies (``spawn`` workers, which
+        the gen2 trainer uses) reset ``_handles_pid`` via ``__getstate__`` and are fine.
+        A copy inherited through ``fork`` after the parent already read is not, so it
+        raises instead of deadlocking.
+        """
+        if self._handles_pid is None:
+            self._init_fs()
+            self._handles_pid = os.getpid()
+        elif self._handles_pid != os.getpid():
+            raise RuntimeError(
+                f"ARCOERA5Dataset '{self.curr_source_name}' was read in process {self._handles_pid} and then "
+                f"forked into process {os.getpid()}. obstore cannot be used after fork once the parent has "
+                "read from it (reads hang). Use DataLoader(multiprocessing_context='spawn'), or avoid "
+                "reading from the dataset in the parent before starting workers."
+            )
+
+    def _get_ds(self, level_type: str) -> xr.Dataset:
+        """Return the pressure-level (``"pres"``) or model-level (``"mod"``) dataset, opened once per process.
+
+        Opening the ARCO store (273 variables, ~1.3M hourly timestamps) costs ~0.35 s of
+        metadata reads and time decoding, so it is cached instead of reopened per read.
+        """
+        self._ensure_handles()
+        ds = self._ds_cache.get(level_type)
+        if ds is None:
+            store = self.pres_level_store if level_type == "pres" else self.mod_level_store
+            ds = xr.open_zarr(store, chunks=None)
+            if "grid" not in self.static_metadata:
+                self._cache_grid(ds)
+            self._ds_cache[level_type] = ds
+        return ds
+
+    @staticmethod
+    def _select_time(ds: xr.Dataset, t: pd.Timestamp) -> xr.Dataset:
+        """Select time step *t* (lazily); datasets without a time dim are returned unchanged."""
+        if "time" not in ds.dims:
+            return ds
+        if isinstance(ds.time.values[0], cftime.datetime):
+            return ds.sel(time=_to_cftime(t, ds.time.values[0].calendar))
+        return ds.sel(time=t)
+
+    def _read_arrays(self, requests: list[tuple[str, xr.DataArray]]) -> list[tuple[str, np.ndarray]]:
+        """Load each lazy DataArray in *requests*, concurrently when ``io_threads > 1``.
+
+        Results come back in request order, which matters because concat preserves
+        insertion order within each (field_type, dim) channel bucket.
+        """
+        if self.io_threads == 1 or len(requests) <= 1:
+            return [(key, da.values) for key, da in requests]
+        if self._executor is None:
+            self._executor = ThreadPoolExecutor(max_workers=self.io_threads, thread_name_prefix="arco-era5-io")
+        futures = [(key, self._executor.submit(lambda d: d.values, da)) for key, da in requests]
+        return [(key, fut.result()) for key, fut in futures]
 
     def _init_fs(self):
         """Initialize the obstore GCS stores and zarr stores for pressure-level and model-level ERA5 data."""
@@ -184,7 +275,7 @@ class ARCOERA5Dataset(BaseDataset):
         sample: dict[str, Any],
     ) -> None:
         """
-        Open the dataset for *field_type* at time *t* and populate *sample*.
+        Read every variable of *field_type* at time *t* (concurrently) and populate *sample*.
 
         Keys written are ``"{source_name}/{field_type}/3d/{varname}"`` for 3D variables
         and ``"{source_name}/{field_type}/2d/{varname}"`` for 2D variables.
@@ -199,79 +290,29 @@ class ARCOERA5Dataset(BaseDataset):
                 - 3D variable: ``(n_levels, 1, lat, lon)``
                 - 2D variable: ``(1, 1, lat, lon)``
         """
-        if self._fs is None:
-            self._init_fs()
-
         vd = self.var_dict[field_type]
         vars_3D: list[str] = vd["vars_3D"]
         vars_2D: list[str] = vd["vars_2D"]
-        if self.level_coord == "level":
-            with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
-                if "grid" not in self.static_metadata:
-                    self._cache_grid(ds)
-                # Select the time step; static fields have no time dim
-                if "time" in ds.dims:
-                    if isinstance(ds.time.values[0], cftime.datetime):
-                        calendar = ds.time.values[0].calendar
-                        t_sel = _to_cftime(t, calendar)
-                    else:
-                        t_sel = t
-                    ds_t = ds.sel(time=t_sel)
-                else:
-                    ds_t = ds
 
-                # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
-                for vname in vars_3D:
-                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
-                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    key = self._get_field_name(field_type, "3d", vname)
-                    sample[key] = tensor
+        # Build lazy selections first, then fetch them all concurrently. Model-level runs
+        # take 3D variables from the model-level store and 2D ones from the pressure-level store.
+        store_3d = "pres" if self.level_coord == "level" else "mod"
+        requests: list[tuple[str, xr.DataArray]] = []
+        if vars_3D:
+            ds_t = self._select_time(self._get_ds(store_3d), t)
+            for vname in vars_3D:
+                key = self._get_field_name(field_type, "3d", vname)
+                requests.append((key, ds_t[vname].sel({self.level_coord: self.levels})))
+        n_3d = len(requests)
+        if vars_2D:
+            ds_t = self._select_time(self._get_ds("pres"), t)
+            for vname in vars_2D:
+                requests.append((self._get_field_name(field_type, "2d", vname), ds_t[vname]))
 
-                # 2D variables: (lat, lon) → (1, 1, lat, lon)
-                for vname in vars_2D:
-                    arr = ds_t[vname].values
-                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    key = self._get_field_name(field_type, "2d", vname)
-                    sample[key] = tensor
-        else:
-            with xr.open_zarr(self.mod_level_store, chunks=None) as ds:
-                if "grid" not in self.static_metadata:
-                    self._cache_grid(ds)
-                # Select the time step; static fields have no time dim
-                if "time" in ds.dims:
-                    if isinstance(ds.time.values[0], cftime.datetime):
-                        calendar = ds.time.values[0].calendar
-                        t_sel = _to_cftime(t, calendar)
-                    else:
-                        t_sel = t
-                    ds_t = ds.sel(time=t_sel)
-                else:
-                    ds_t = ds
-
-                # 3D variables: (n_levels, lat, lon) → (n_levels, 1, lat, lon)
-                for vname in vars_3D:
-                    arr = ds_t[vname].sel({self.level_coord: self.levels}).values
-                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(1)
-                    key = self._get_field_name(field_type, "3d", vname)
-                    sample[key] = tensor
-
-            with xr.open_zarr(self.pres_level_store, chunks=None) as ds:
-                # Select the time step; static fields have no time dim
-                if "time" in ds.dims:
-                    if isinstance(ds.time.values[0], cftime.datetime):
-                        calendar = ds.time.values[0].calendar
-                        t_sel = _to_cftime(t, calendar)
-                    else:
-                        t_sel = t
-                    ds_t = ds.sel(time=t_sel)
-                else:
-                    ds_t = ds
-                # 2D variables: (lat, lon) → (1, 1, lat, lon)
-                for vname in vars_2D:
-                    arr = ds_t[vname].values
-                    tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
-                    key = self._get_field_name(field_type, "2d", vname)
-                    sample[key] = tensor
+        for i, (key, arr) in enumerate(self._read_arrays(requests)):
+            tensor = torch.tensor(arr, dtype=torch.float32)
+            # 3D: (n_levels, lat, lon) -> (n_levels, 1, lat, lon); 2D: (lat, lon) -> (1, 1, lat, lon)
+            sample[key] = tensor.unsqueeze(1) if i < n_3d else tensor.unsqueeze(0).unsqueeze(0)
 
 
 _WB2_ERA5_BASE = "gs://weatherbench2/datasets/era5"

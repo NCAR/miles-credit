@@ -147,7 +147,18 @@ data:
         prognostic: 
           vars_3D: ["temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"]
           vars_2D: ["surface_pressure"]
+      # Optional: number of variables fetched concurrently per field and time step
+      # (default 16; 1 reads them one at a time).
+      io_threads: 16
 ```
+
+Loading is network-bound: every 3D variable is stored as one chunk holding all 37 pressure
+levels (~95 MB), so the whole chunk is downloaded even if you request fewer levels. For each
+field type and time step, the dataset fetches all variables concurrently on `io_threads`
+threads. It opens the zarr store once per DataLoader worker and reuses it across samples.
+Concurrent reads cut loading a 0.25° sample with 6 3D and 5 2D prognostic variables by about 4×.
+Even so, streaming the full-resolution store rarely keeps a GPU busy. For full-scale training,
+copy the variables and levels you need to local disk.
 
 ### WeatherBench2ERA5Dataset
 *API reference: {py:class}`credit.datasets.gen_2.era5.WeatherBench2ERA5Dataset`* · `dataset_type: weatherbench2_era5`

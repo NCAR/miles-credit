@@ -281,6 +281,20 @@ def test_empty_levels_list_is_an_error(conf):
     assert "ZERO" in _text(rep)
 
 
+def test_io_threads_must_be_positive_int(conf):
+    conf["data"]["source"]["ERA5"]["dataset_type"] = "arco_era5"
+    conf["data"]["source"]["ERA5"]["io_threads"] = 0
+    rep = _run(conf)
+    assert "data.source.ERA5.io_threads" in _wheres(rep)
+
+
+def test_io_threads_on_non_arco_source_warns(conf):
+    conf["data"]["source"]["ERA5"]["io_threads"] = 8
+    rep = _run(conf)
+    assert "data.source.ERA5.io_threads" in _wheres(rep, "warning")
+    assert "data.source.ERA5.io_threads" not in _wheres(rep)
+
+
 def test_unknown_field_type_suggests_nearest(conf):
     conf["data"]["source"]["ERA5"]["variables"]["prognostc"] = None
     rep = _run(conf)
