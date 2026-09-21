@@ -281,8 +281,9 @@ def test_empty_levels_list_is_an_error(conf):
     assert "ZERO" in _text(rep)
 
 
-def test_io_threads_must_be_positive_int(conf):
-    conf["data"]["source"]["ERA5"]["dataset_type"] = "arco_era5"
+@pytest.mark.parametrize("dataset_type", ["arco_era5", "weatherbench2_era5"])
+def test_io_threads_must_be_positive_int(conf, dataset_type):
+    conf["data"]["source"]["ERA5"]["dataset_type"] = dataset_type
     conf["data"]["source"]["ERA5"]["io_threads"] = 0
     rep = _run(conf)
     assert "data.source.ERA5.io_threads" in _wheres(rep)

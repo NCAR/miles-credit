@@ -341,7 +341,7 @@ def _check_data_sources(conf: dict, rep: _Report) -> None:
                 fix="Remove the key to take the dataset default, or list the levels explicitly.",
             )
 
-        # io_threads: concurrent variable reads, read only by the arco_era5 dataset.
+        # io_threads: concurrent variable reads, read by the obstore-backed ERA5 datasets.
         if "io_threads" in src:
             io_threads = src["io_threads"]
             if isinstance(io_threads, bool) or not isinstance(io_threads, int) or io_threads < 1:
@@ -350,10 +350,11 @@ def _check_data_sources(conf: dict, rep: _Report) -> None:
                     f"io_threads must be a positive integer, got {io_threads!r}.",
                     fix="io_threads: 16 (or 1 to read variables sequentially)",
                 )
-            elif src.get("dataset_type") != "arco_era5":
+            elif src.get("dataset_type") not in ("arco_era5", "weatherbench2_era5"):
                 rep.warn(
                     f"{base}.io_threads",
-                    f"io_threads is only read by dataset_type 'arco_era5'; ignored for '{src.get('dataset_type')}'.",
+                    "io_threads is only read by dataset_type 'arco_era5' and 'weatherbench2_era5'; "
+                    f"ignored for '{src.get('dataset_type')}'.",
                 )
 
         variables = src.get("variables") or {}

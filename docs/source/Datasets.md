@@ -186,12 +186,21 @@ data:
           vars_2D: ["sea_surface_temperature"]
         static:
           vars_2D: ["land_sea_mask", "geopotential_at_surface"]
+      # Optional: number of variables fetched concurrently per field and time step
+      # (default 16; 1 reads them one at a time).
+      io_threads: 16
   start_datetime: "1979-01-01"
   end_datetime: "2017-12-31 18:00:00"
   timestep: "6h"
   history_len: 1
   forecast_len: 1
 ```
+
+Like `arco_era5`, this dataset opens its zarr store once per DataLoader worker and fetches a
+field's variables concurrently on `io_threads` threads. That matters most for the 0.25°
+`1440x721` and `full` stores. Both datasets need `spawn` DataLoader workers, which the gen2
+trainer uses. A `fork` after the parent process has read raises an error, because obstore
+reads hang after a fork.
 
 ### TISRDataset
 *API reference: {py:class}`credit.datasets.gen_2.tisr.TISRDataset`* · `dataset_type: tisr`
