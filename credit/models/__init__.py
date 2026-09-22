@@ -83,6 +83,11 @@ _MODEL_REGISTRY = {
         "NextGenWXFormer",
         "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
     ),
+    "wxformer_next_looped": (
+        "credit.models.wxformer.wxformer_next_looped",
+        "WXFormerNextLooped",
+        "Loading WXFormerNextLooped (NextGen WXFormer + input-conditioned recurrent bottleneck refinement) ...",
+    ),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
