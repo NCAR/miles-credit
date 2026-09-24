@@ -56,10 +56,20 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
     if ac_conf:
         _apply_activation_checkpointing(model)
 
+    # Inner shards keep their outputs in the compute dtype: output_dtype applies
+    # only to the model's final output. Casting every block's output (e.g. back
+    # to fp32) would feed fp32 activations into the next unsharded bf16 layer,
+    # which raises a dtype mismatch.
+    inner_kwargs = dict(kwargs)
+    if mp_policy is not None and mp_policy.output_dtype is not None:
+        import dataclasses
+
+        inner_kwargs["mp_policy"] = dataclasses.replace(mp_policy, output_dtype=None)
+
     count = 0
     for module in model.modules():
         if _is_shardable(module, ac_conf):
-            fully_shard(module, **kwargs)
+            fully_shard(module, **inner_kwargs)
             count += 1
 
     # Outermost shard
