@@ -828,6 +828,11 @@ class CrossFormer(BaseModel):
             nn.PixelShuffle(upscale_factor=scale),  # now (target_channels, H*2, W*2),
             nn.Conv2d(self.output_channels, self.output_channels, 3, padding=1),
         )
+        # FSDP2 per-block sharding / activation-checkpointing opt-in, like the
+        # other decoder blocks. This block runs at full resolution with
+        # output_channels * 4 channels, so its saved activations are the
+        # largest in the model (several GB at 0.25 deg with 137 levels).
+        self.up_block4._fsdp2_shard = True
 
         # A pre-removal upsample_with_ps=False checkpoint cannot be migrated; say so
         # at load time instead of silently random-initializing the whole decoder.

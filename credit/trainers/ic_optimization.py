@@ -10,6 +10,7 @@ import logging
 import pandas as pd
 from torch.utils.data import IterableDataset
 from credit.trainers.base_trainer import BaseTrainer
+from credit.trainers.grad_clip import AdaptiveGradClipper
 from credit.data import concat_and_reshape, reshape_only
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 from torch.optim.lr_scheduler import CosineAnnealingLR  # , CosineAnnealingWarmRestarts
@@ -400,6 +401,8 @@ class TrainerIC(BaseTrainer):
             optimizer = torch.optim.AdamW(
                 [x0], lr=conf["trainer"]["learning_rate"], weight_decay=conf["trainer"]["weight_decay"]
             )
+            # Each x0 is a separate optimization problem with its own gradient scale.
+            x0_clipper = AdaptiveGradClipper.from_config(conf["trainer"])
 
             init_datetimes = date_time.utcfromtimestamp(batch["datetime"][0].item()).strftime("%Y-%m-%dT%HZ")
             save_datetimes = init_datetimes
@@ -561,11 +564,8 @@ class TrainerIC(BaseTrainer):
                         # Gradient clipping
                         scaler.unscale_(optimizer)
                         if grad_max_norm == "dynamic":
-                            local_norm = x0.grad.detach().norm(2)
-                            if distributed:
-                                dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                            global_norm = local_norm.sqrt()
-                            torch.nn.utils.clip_grad_norm_([x0], max_norm=global_norm)
+                            # x0 is this rank's own sample, so its norm stays local.
+                            x0_clipper.clip_([x0], distributed=False)
                         elif grad_max_norm > 0.0:
                             torch.nn.utils.clip_grad_norm_([x0], max_norm=grad_max_norm)
 

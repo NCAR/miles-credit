@@ -537,6 +537,40 @@ def test_exp_transform_custom_key():
     assert torch.allclose(result["my_output"][_SOURCE][_VAR], x, atol=1e-5)
 
 
+def test_exp_transform_max_value_clamps():
+    """max_value caps the physical output; values under the cap round-trip unchanged."""
+    x = torch.tensor([1e-3, 0.02, 100.0]).reshape(1, 1, 1, 1, 3)
+    logged = LogTransform(variables=[_VAR])(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], max_value=0.05)(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result.flatten(), torch.tensor([1e-3, 0.02, 0.05]), rtol=1e-5)
+
+
+def test_exp_transform_max_value_prevents_overflow():
+    """A huge log-space value is clamped before exp, so the output stays finite."""
+    result = ExpTransform(variables=[_VAR], max_value=0.05)(_postblock_batch_dict(torch.full((1, 1, 1, 2, 2), 1e4)))
+    out = result["y_processed"][_SOURCE][_VAR]
+    assert torch.isfinite(out).all()
+    assert torch.allclose(out, torch.full_like(out, 0.05), rtol=1e-5)
+
+
+def test_exp_transform_max_value_per_variable():
+    """A dict max_value clamps only the listed variables."""
+    other = "era5/prognostic/3d/OTHER"
+    y = torch.full((1, 1, 1, 2, 2), 30.0)
+    batch = {"y_processed": {_SOURCE: {_VAR: y.clone(), other: y.clone()}}}
+    result = ExpTransform(variables=[_VAR, other], max_value={_VAR: 0.05})(batch)["y_processed"][_SOURCE]
+    assert torch.allclose(result[_VAR], torch.full_like(y, 0.05), rtol=1e-5)
+    assert (result[other] > 1e4).all()
+
+
+def test_exp_transform_max_value_unknown_key():
+    """A max_value key that is not a selected variable raises (catches typos)."""
+    block = ExpTransform(variables=[_VAR], max_value={"era5/prognostic/3d/TYPO": 0.05})
+    with pytest.raises(ValueError, match="max_value"):
+        block(_postblock_batch_dict(torch.ones(1, 1, 1, 2, 2)))
+
+
 def test_square_transform_round_trip():
     """SqrtTransform → SquareTransform recovers the original tensor."""
     x = torch.rand(2, 4, 1, 8, 8)

@@ -429,10 +429,12 @@ save_metric_vars: True
 update_learning_rate: False
 ```
 
-- **`False`** → Learning rate is **controlled by the scheduler**.  
-- **`True`** → Manually updates `optimizer.param_groups`.  
-
-💡 *Set this to `False` if you are using a scheduler!*  
+- **`False`** → The learning rate comes from the checkpoint (when the optimizer or
+  scheduler is reloaded) or from `learning_rate` on a fresh run.  
+- **`True`** → Makes `learning_rate` the new base learning rate, e.g. to change it
+  when resuming. With a scheduler, its base LR is rescaled and its position kept, so
+  a warmup still starts from 0 on a fresh run; without one (or with `plateau`), the
+  optimizer LR is set directly.  
 
 ---
 
@@ -601,8 +603,21 @@ grad_max_norm: 'dynamic'
   - `1` → Normal training.  
   - `>1` → Accumulates gradients over multiple steps **before updating weights** (useful for small batch sizes).  
 - **`grad_max_norm`**:  
-  - `'dynamic'` → Uses **adaptive gradient clipping**.  
+  - `'dynamic'` → **Adaptive gradient clipping**: after a short warmup, each step's global
+    gradient norm is clipped to `factor ×` an EMA of recent norms, so normal steps pass
+    untouched and spikes (e.g. an outlier sample) are scaled back. Tune it with the
+    optional `dynamic_grad_clip` block; its state is saved next to the checkpoint
+    (`grad_clip_state.json`) and resumed with `load_weights`.  
+  - a number `> 0` → Fixed clipping to that global norm (e.g. `1.0`).  
   - `0` → No clipping.  
+
+```yaml
+grad_max_norm: 'dynamic'
+dynamic_grad_clip:      # optional; defaults shown
+  factor: 2.0           # clip when the norm exceeds factor x EMA
+  ema_decay: 0.99       # EMA of the post-clip global grad norm
+  warmup_steps: 50      # steps that only accumulate the EMA, never clip
+```
 
 💡 *Enable gradient accumulation (`grad_accum_every > 1`) if batch size is **constrained by memory** but you need a higher effective batch size.*  
 

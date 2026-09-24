@@ -145,7 +145,18 @@ comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
 instead of manual autocast — the trainer disables autocast and the GradScaler
 automatically because the policy replaces both. With spectral norm the policy
 is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
-explicitly.
+explicitly. `output_dtype` applies to the model's final output only; the
+per-block shards keep their outputs in `param_dtype`, so `output_dtype: float32`
+gives a full-precision `y_pred` for the postblocks while the blocks compute in bf16.
+
+```yaml
+trainer:
+  amp: True
+  fsdp2_mp_policy:
+    param_dtype: bfloat16
+    reduce_dtype: float32
+    output_dtype: float32
+```
 
 **Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
 `tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
