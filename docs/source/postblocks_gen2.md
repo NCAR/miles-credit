@@ -157,7 +157,16 @@ args:
     - "era5/prognostic/3d/specific_humidity"
   eps: 1.0e-8      # must match the LogTransform eps
   base: "e"        # must match the LogTransform base
+  max_value:       # optional: cap the physical output (float, or per-variable dict)
+    "era5/prognostic/3d/specific_humidity": 0.05
 ```
+
+`max_value` clamps the log-space input before exponentiating, so an outlier
+prediction cannot become an unphysical (or infinite) value. Without it, a
+modest log-space error can turn into specific humidity of ~100 kg/kg, which
+makes a physical-units loss (and any diagnostic computed from it, such as
+geopotential) explode. Values above the cap receive zero gradient.
+Variables missing from a `max_value` dict are not clamped.
 
 ### `square_transform` (SquareTransform)
 

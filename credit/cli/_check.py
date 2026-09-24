@@ -905,6 +905,35 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
                     fix=f"Accepted: {', '.join(p for p in _accepted_params(cls) if p != 'optimizer')}",
                 )
 
+    grad_max_norm = _get(conf, "trainer", "grad_max_norm", default=0.0)
+    if grad_max_norm == "dynamic":
+        from credit.trainers.grad_clip import AdaptiveGradClipper
+
+        clip_args = _get(conf, "trainer", "dynamic_grad_clip", default={}) or {}
+        err = _bind_error(AdaptiveGradClipper, clip_args)
+        if err is None:
+            try:
+                AdaptiveGradClipper(**clip_args)
+            except ValueError as exc:
+                err = str(exc)
+        if err is not None:
+            rep.error(
+                "trainer.dynamic_grad_clip",
+                err,
+                fix="dynamic_grad_clip:\n  factor: 2.0\n  ema_decay: 0.99\n  warmup_steps: 50",
+            )
+    elif isinstance(grad_max_norm, str) or not (isinstance(grad_max_norm, (int, float)) and grad_max_norm >= 0):
+        rep.error(
+            "trainer.grad_max_norm",
+            f"grad_max_norm must be 'dynamic' or a number >= 0 (0 disables clipping), got {grad_max_norm!r}.",
+            fix="grad_max_norm: 'dynamic'   # or e.g. 1.0",
+        )
+    elif _get(conf, "trainer", "dynamic_grad_clip") is not None:
+        rep.warn(
+            "trainer.dynamic_grad_clip",
+            f"dynamic_grad_clip is ignored because grad_max_norm is {grad_max_norm!r}, not 'dynamic'.",
+        )
+
     epochs = _get(conf, "trainer", "epochs")
     num_epoch = _get(conf, "trainer", "num_epoch")
     if epochs is not None and num_epoch is not None and num_epoch > epochs:
@@ -959,6 +988,57 @@ def _check_paths(conf: dict, rep: _Report) -> None:
                     f"postblocks.{section}.{name}.level_info_file",
                     f"Metadata file not found: {meta_file} (resolved to {get_meta_file_path(meta_file)})",
                 )
+
+
+def _check_scaler_stats(conf: dict, rep: _Report) -> None:
+    """Flag fitted scaler channels whose statistics make the transform NaN or inf.
+
+    A channel that was all-NaN or constant when ``credit preprocess`` fit it
+    (e.g. ARCO ERA5 cloud cover on the top hybrid levels) stores a NaN mean or a
+    zero variance/range. Scaling divides by it, so every sample comes out
+    NaN/inf and the first loss is NaN. Only files that already exist are read.
+    """
+    import torch
+
+    seen = set()
+    for where, path in _iter_config_paths(conf):
+        expanded = os.path.expandvars(path)
+        if "scaler" not in where or expanded in seen or not os.path.isfile(expanded):
+            continue
+        seen.add(expanded)
+        try:
+            from bridgescaler import load_scaler_dict
+
+            scaler_dict = load_scaler_dict(expanded)
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(where, f"Could not read scaler {expanded}: {type(exc).__name__}: {exc}")
+            continue
+        for data_type, sources in scaler_dict.items():
+            for source_scalers in (sources or {}).values():
+                for var_key, scaler in (source_scalers or {}).items():
+                    stats = {name: getattr(scaler, name, None) for name in ("mean_x_", "var_x_", "min_x_", "max_x_")}
+                    stats = {k: torch.as_tensor(v).double().flatten() for k, v in stats.items() if v is not None}
+                    if not stats:
+                        continue
+                    bad = torch.zeros_like(next(iter(stats.values())), dtype=torch.bool)
+                    for value in stats.values():
+                        bad |= ~torch.isfinite(value)
+                    if "var_x_" in stats:
+                        bad |= stats["var_x_"] <= 0
+                    if "min_x_" in stats and "max_x_" in stats:
+                        bad |= stats["max_x_"] <= stats["min_x_"]
+                    if bad.any():
+                        channels = (bad.nonzero().flatten() + 1).tolist()
+                        shown = ", ".join(map(str, channels[:10])) + (" ..." if len(channels) > 10 else "")
+                        rep.error(
+                            where,
+                            f"Scaler {expanded} [{data_type}] {var_key}: {len(channels)} channel(s) have a "
+                            f"NaN/inf statistic or zero variance (1-based channel/level: {shown}). Scaling "
+                            "them produces NaN/inf, so training fails on the first batch.",
+                            fix="Drop those levels, or fill their NaNs with a fill_values preblock before the "
+                            "scaler and give the now-constant channels a finite mean and a nonzero variance "
+                            "in the scaler JSON (e.g. the nearest valid level's variance).",
+                        )
 
 
 def _iter_config_paths(conf: dict):
@@ -1089,7 +1169,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
         rep.error("custom_objects", f"Failed to load: {type(exc).__name__}: {exc}")
 
     # A data-only fragment has nothing to say about models, losses, or training.
-    checks = [_check_data_sources, _check_validation_data, _check_paths]
+    checks = [_check_data_sources, _check_validation_data, _check_paths, _check_scaler_stats]
     if not _is_data_fragment(conf):
         checks += [
             _check_registry_keys,

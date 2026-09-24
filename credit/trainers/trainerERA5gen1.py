@@ -243,13 +243,8 @@ class TrainerERA5Gen1(BaseTrainer):
             # grad norm clipping
             scaler.unscale_(optimizer)
             if self.grad_max_norm == "dynamic":
-                local_norm = torch.norm(
-                    torch.stack([p.grad.detach().norm(2) for p in self.model.parameters() if p.grad is not None])
-                )
-                if self.distributed:
-                    dist.all_reduce(local_norm, op=dist.ReduceOp.SUM)
-                global_norm = local_norm.sqrt()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                # Clip to a multiple of the recent typical global grad norm (credit.trainers.grad_clip).
+                self.grad_clipper.clip_(self.model.parameters(), self.distributed)
             elif self.grad_max_norm > 0.0:
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 

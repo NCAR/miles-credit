@@ -31,6 +31,7 @@ from tqdm import tqdm
 from credit.distributed import select_device
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
+from credit.trainers.grad_clip import AdaptiveGradClipper
 from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
 from credit.trainers.utils import cleanup, effective_mode
 
@@ -314,6 +315,13 @@ class BaseTrainer(ABC):
         else:
             self.ema = None
         logger.info(f"Grad-max-norm: {self.grad_max_norm}")
+        # 'dynamic' = clip to a multiple of the recent typical grad norm (see
+        # credit.trainers.grad_clip); its EMA is resumed with the weights.
+        self.grad_clipper = None
+        if self.grad_max_norm == "dynamic":
+            self.grad_clipper = AdaptiveGradClipper.from_config(trainer_conf)
+            if self.load_weights and self.grad_clipper.load(self.save_loc):
+                logger.info(f"Resumed dynamic grad clipping state (step {self.grad_clipper.steps})")
 
         # ---- TensorBoard setup ----
         use_tb = trainer_conf.get("use_tensorboard", False)
@@ -485,6 +493,8 @@ class BaseTrainer(ABC):
                 "unexpected keys until the checkpoint is remapped."
             )
         sched_state = scheduler.state_dict() if self.use_scheduler and scheduler is not None else None
+        if self.grad_clipper is not None and self.rank == 0:
+            self.grad_clipper.save(self.save_loc)
 
         if self.mode == "fsdp2":
             from credit.parallel.fsdp2 import fsdp2_optimizer_state_dict, fsdp2_state_dict
