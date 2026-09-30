@@ -1,0 +1,517 @@
+# Quick-start: edit the USER SETTINGS sections below, then:
+#   EXAMPLE RUNNING ON AN INTERCATIVE NODE (sequential)
+
+#   credit preprocess -c config/example-end-to-end.yml
+#   credit train -c config/example-end-to-end.yml
+#   credit rollout -c config/example-end-to-end.yml
+# --------------------------------------------------------------------------------------------------------------------- #
+
+
+# ---- USER SETTINGS: output directory ---- #
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/GEFS_testing'
+seed: 1000
+# ---- Custom objects: user-side classes, no CREDIT source changes ---- #
+# module_path is a dotted import path resolved against sys.path, so the repo root must
+# be on PYTHONPATH. `credit` is a console script and console scripts do NOT put the
+# current directory on sys.path, so running from the repo root is not enough -- and the
+# editable install only exposes the `credit.*` packages, not `scripts/`. Export it
+# explicitly, interactively and in any PBS script:
+#     export PYTHONPATH=/path/to/miles-credit:$PYTHONPATH
+# (no scripts/__init__.py needed -- namespace packages cover it).
+custom_objects:
+  drop_variables:
+    object_type: preblock
+    module_path: scripts.gefs_plugins
+    module_name: DropVariables
+
+  # Takes the ensemble member from $GEFS_MEMBER so one config serves every subjob
+  # of the PBS array (scripts/rollout_gefs_members.pbs). Falls back to the
+  # `members:` list below when the variable is unset, so interactive runs are
+  # unchanged. See the class docstring for why the member cannot be a config
+  # placeholder: `members` is not expandvars'd and the validator rejects one.
+  EnvMemberGEFS:
+    object_type: dataset
+    module_path: scripts.gefs_plugins
+
+
+# ---- USER SETTINGS: training data ---- #
+# Dates follow ISO 8601: "YYYY-MM-DD". The default below uses 1979–2018 for training.
+data: &data
+  source:
+    GEFS: &gefs_source
+      dataset_type: "EnvMemberGEFS"   # plain "gefs" plus a $GEFS_MEMBER override
+      mode: "remote"
+      members: [ "p02" ]
+      variables:
+        # Prognostic: model both predicts and receives as input next step
+        prognostic:
+          vars_3D: ['u_a', 'v_a', 't', 'Qtot']
+          vars_2D: [ 'ps', 't2m']
+    CESM: &cesm_source
+      dataset_type: "local"
+      variables:
+        static:
+          # PHIS is loaded for MSLPDiagnostic only -- it is NOT a model input. The
+          # drop_variables preblock removes it before concat so x stays 136 channels.
+          vars_2D: ['z_norm','LANDM_COSLAT','PHIS']
+          path: '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+
+        diagnostic:
+          vars_2D: [ 'PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                     'QFLX', 'FSNS', 'FLNS', 'FSNT', 'FLNT', 'SHFLX', 'LHFLX' ]
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs_f32_02/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        # Dynamic forcing: time-varying inputs (not predicted)
+        dynamic_forcing:
+          vars_2D: ['SOLIN','SST','ICEFRAC','co2vmr_3d']
+          path: '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate_branch_allvars_2026.zarr'
+
+  start_datetime: "2000-06-11T00:00:00"
+  end_datetime: "2030-06-11T06:00:00"
+  timestep: "6h"
+
+  history_len: 1            # number of past steps fed as input (e.g. history_len: 2 feeds in t-1 and t)
+  forecast_len: 1           # autoregressive steps per training sample (1 = single-step)
+
+# ---- USER SETTINGS: preblocks ---- #
+# GEFS initial conditions arrive on the C384 cube sphere -- 884,736 points with the six
+# tiles flattened -- on 65 hybrid model levels. This chain lands them on the CAMulator
+# grid: horizontal regrid to CAM 0.9x1.25 (192 x 288), then vertical interpolation from
+# GEFS's 65 levels to CAM's 32.
+#
+# Order matters: regrid first. The vertical interpolation needs surface pressure on the
+# same grid as the fields, and interpolating 55,296 columns instead of 884,736 is ~16x
+# less work for an identical result.
+#
+# Path gotcha: these fields expand $VARS but NOT '~'. Use $HOME or an absolute path.
+preblocks:
+  ic_only:
+    regrid:
+      type: regrid
+      args:
+        weight_file: '/glade/work/dgagne/camulator_gefs_weights.nc'
+        data_types: ['input']
+        reshape_to_xy: true
+        variables:
+          - 'GEFS/prognostic/3d/t'
+          - 'GEFS/prognostic/3d/Qtot'
+          - 'GEFS/prognostic/3d/u_a'
+          - 'GEFS/prognostic/3d/v_a'
+          - 'GEFS/prognostic/2d/ps'
+          - 'GEFS/prognostic/2d/t2m'
+          - 'GEFS/prognostic/2d/q2m'
+
+    # 65 GEFS hybrid levels -> 32 CAM levels, linear in log(pressure), column by column.
+    # cesm_level_info.nc ships in credit/metadata, so the bare filename resolves.
+    # Use hyai/hybi (interfaces, in Pa), NOT hyam/hybm -- those are stored in raw CAM
+    # dimensionless form and would give pressures 1e5 times too small, silently.
+    vert_interp:
+      type: hybrid_level_interp
+      args:
+        data_types: ['input']
+        surface_pressure_var: 'GEFS/prognostic/2d/ps'
+        source_level_info_file: 'gefs_vcoord.nc'   # ships in credit/metadata
+        source_a_var: 'vcoord'          # 2D and same name as b -> row 0 = a (Pa), row 1 = b
+        source_b_var: 'vcoord'
+        source_on_interfaces: true      # 66 interfaces -> 65 midpoints
+        dest_level_info_file: 'cesm_level_info.nc'
+        dest_a_var: 'hyai'
+        dest_b_var: 'hybi'
+        dest_on_interfaces: true        # 33 interfaces -> 32 midpoints
+        variables:
+          - 'GEFS/prognostic/3d/t'
+          - 'GEFS/prognostic/3d/Qtot'
+          - 'GEFS/prognostic/3d/u_a'
+          - 'GEFS/prognostic/3d/v_a'
+
+    # The raw GEFS tracers carry small negative values from the model's advection
+    # scheme -- every one of the six Qtot species has them (sphum down to -3.3e-3),
+    # so Qtot inherits them. Neither preblock above creates negatives: the ESMF
+    # weights are all positive and log-linear interpolation is a convex combination.
+    # They are ~0.09% of points, concentrated in the mid-troposphere. Clamping is a
+    # modelling decision -- it costs a little conservation -- so it is left off by
+    # default. Uncomment to enable.
+    #
+    # clamp_moisture:
+    #   type: fill_values
+    #   args:
+    #     data_types: ['input']
+    #     variables: ['GEFS/prognostic/3d/Qtot']
+    #     rules:
+    #       - search: 0.0
+    #         op: "<"
+    #         fill: 0.0
+
+    # gen2 equivalent of gen1's credit/metadata/gefs_to_cam.yml. Renames GEFS variables
+    # to the CAM names the CAMulator model was trained on, and moves them across the
+    # source boundary (GEFS/... -> CESM/...) so everything downstream is keyed to CESM.
+    # Must run after regrid and vert_interp, which both address GEFS/... keys.
+    rename_to_cam:
+      type: rename
+      args:
+        data_types: ['input']
+        mapping:
+          'GEFS/prognostic/3d/t':     'GEFS/prognostic/3d/T'
+          'GEFS/prognostic/3d/Qtot':  'GEFS/prognostic/3d/Qtot'
+          'GEFS/prognostic/3d/u_a':   'GEFS/prognostic/3d/U'
+          'GEFS/prognostic/3d/v_a':   'GEFS/prognostic/3d/V'
+          'GEFS/prognostic/2d/ps':    'GEFS/prognostic/2d/PS'
+          'GEFS/prognostic/2d/t2m':   'GEFS/prognostic/2d/TREFHT'
+          'GEFS/prognostic/2d/fice':  'GEFS/dynamic_forcing/2d/ICEFRAC'
+
+    # PHIS must reach the postblocks but not the model. ic_raw is captured from the
+    # RAW batch before ic_only runs, so dropping here leaves PHIS available to
+    # MSLPDiagnostic while keeping it out of x.
+    drop_phis:
+      type: drop_variables
+      args:
+        variables:
+          - 'CESM/static/2d/PHIS'
+
+  # Every gen2 preblock chain ends with concat, which flattens the nested variable
+  # dict into the single (batch, channel, time, lat, lon) tensor the model consumes.
+  per_step:
+    # Normalise into the units the model was trained on. This lives in per_step, not
+    # ic_only, because at t>0 the rollout re-enters the chain here with a batch
+    # assembled from the previous step's physical output -- ic_only never runs again.
+    #
+    # Built by scripts/make_gefs_bridgescaler.py from the CESM mean/std files. Keys
+    # are the POST-rename keys, which is why this must follow rename_to_cam.
+    #
+    # `variables` uses partial-path shorthand. CESM/static is deliberately absent:
+    # z_norm and LANDM_COSLAT have no entry in the statistics files (one is already
+    # normalised, the other is a 0-1 mask), and listing them would fail the
+    # "found in var_dict but missing in scalers" assertion.
+    #
+    # PS is scaled per gridpoint, so it must be named in spatial_variables.
+    #
+    # Path gotcha: scaler_path expands $VARS but NOT '~' -- and a path that does not
+    # resolve does NOT error, it silently switches the block into fit mode and later
+    # fails with "'scalers' must be a dict or a scaler object with a 'transform' method".
+    scale:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/derecho/scratch/cbecker/CREDIT_runs/GEFS_testing/scaler_cesm_gefs.json'
+        method: transform
+        variables:
+          - 'GEFS/prognostic'
+          - 'CESM/dynamic_forcing'
+        spatial_variables:
+          - 'GEFS/prognostic/2d/PS'
+
+    concat:
+      type: concat
+
+
+# ============================================================================== #
+# Translated from config/gen_2/camulator/old_AIWQ.yml (gen1).
+#
+# The data: block above is deliberately untouched, so this section is NOT runnable
+# as-is -- see "WHAT STILL HAS TO BE RECONCILED" at the bottom of this file.
+# ============================================================================== #
+
+# ---- model: carried over almost verbatim; gen2 crossformer takes the same args ---- #
+# The gen1 `post_conf:` sub-block is gone -- conservation now lives in `postblocks:`.
+model:
+    # NOT "crossformer": the checkpoint in save_loc has a PixelShuffle decoder head
+    # (UpBlockPS), which is Camulator's. A crossformer here loads with
+    #   size mismatch for up_block1.conv.weight_orig: copying a param with shape
+    #   torch.Size([4096, 2048, 3, 3]) ... current model is torch.Size([2048, 1024, 2, 2])
+    # The gen1 old_AIWQ.yml this was translated from also says "crossformer" -- it is
+    # wrong there too, or predates the split of camulator.py out of crossformer.py.
+    type: "camulator"
+    frames: 1
+    image_height: 192                 # CAM 0.9x1.25 grid, matches the regrid weight file
+    image_width: 288
+    levels: 32                        # matches the 65 -> 32 vert_interp above
+    channels: 4                       # U V T Qtot
+    surface_channels: 2               # PS TREFHT
+    input_only_channels: 6            # SOLIN SST ICEFRAC co2vmr_3d + z_norm LANDM_COSLAT
+    output_only_channels: 15          # the diagnostic variables
+
+    patch_width: 1
+    patch_height: 1
+    frame_patch_size: 1
+
+    dim: [256, 512, 1024, 2048]
+    depth: [2, 2, 18, 2]
+    global_window_size: [4, 4, 2, 1]
+    local_window_size: 3
+    cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+    cross_embed_strides: [2, 2, 2, 2]
+    attn_dropout: 0.
+    ff_dropout: 0.
+
+    use_spectral_norm: True
+    interp: True
+
+    padding_conf:
+        activate: True
+        mode: earth
+        pad_lat: [48, 48]
+        pad_lon: [48, 48]
+
+# ---- postblocks: gen1's model.post_conf, restructured ---- #
+# gen1 applied these inside the model wrapper via `activate_outside_model: True`.
+# In gen2 they are an explicit chain, and every chain starts with `reconstruct`
+# (the inverse of the preblock `concat`).
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+
+    # Invert the preblock scaling. This is REQUIRED before the fixers below: the gen2
+    # conservation blocks do no scaling of their own and expect physical units in and
+    # out (see the module docstring in credit/postblock/conservation.py). Without it
+    # they would balance mass, water and energy budgets on normalised numbers.
+    # The postblock always reads the scaler's "target" slice, so these keys are the
+    # model's OUTPUT variables -- prognostic plus diagnostic.
+    unscale:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/glade/derecho/scratch/cbecker/CREDIT_runs/GEFS_testing/scaler_cesm_gefs.json'
+        method: inverse_transform
+        variables:
+          - 'GEFS/prognostic'
+          - 'CESM/diagnostic'
+        spatial_variables:
+          - 'GEFS/prognostic/2d/PS'
+
+    # gen1: post_conf.tracer_fixer
+    tracer_fixer:
+      type: tracer_fixer
+      args:
+        tracer_vars:
+          - 'GEFS/prognostic/3d/Qtot'
+          - 'CESM/diagnostic/2d/PRECT'
+          - 'CESM/diagnostic/2d/U10'
+          - 'CESM/diagnostic/2d/CLDHGH'
+          - 'CESM/diagnostic/2d/CLDLOW'
+          - 'CESM/diagnostic/2d/CLDMED'
+        tracer_thres: [0, 0, 0, 0, 0, 0]
+
+    # gen1: post_conf.global_mass_fixer
+    global_mass_fixer:
+      type: global_mass_fixer
+      args:
+        q_var: 'GEFS/prognostic/3d/Qtot'
+        sp_var: 'GEFS/prognostic/2d/PS'
+        save_loc_physics: '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+        lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+        grid_type: 'sigma'
+        midpoint: True
+
+    # gen1: post_conf.global_water_fixer
+    global_water_fixer:
+      type: global_water_fixer
+      args:
+        q_var: 'GEFS/prognostic/3d/Qtot'
+        sp_var: 'GEFS/prognostic/2d/PS'
+        precip_var: 'CESM/diagnostic/2d/PRECT'
+        evapor_var: 'CESM/diagnostic/2d/QFLX'
+        lead_time_periods: 6
+        save_loc_physics: '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+        lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+        grid_type: 'sigma'
+        midpoint: True
+
+    # gen1: post_conf.global_energy_fixer
+    # Uses `global_energy_fixer_net`, the gen2 port of gen1's net-flux
+    # GlobalEnergyFixer. NOT `global_energy_fixer` -- that key is aliased to
+    # GlobalEnergyFixerUpDown, which needs the separated up/down components
+    # (FSUTOA/FLUT/FSDS_J/FSUS/FLDS_J/FLUS) this model does not predict.
+    # Net fluxes cannot be split into up/down after the fact.
+    global_energy_fixer:
+      type: global_energy_fixer_net
+      args:
+        T_var: 'GEFS/prognostic/3d/T'
+        q_var: 'GEFS/prognostic/3d/Qtot'
+        U_var: 'GEFS/prognostic/3d/U'
+        V_var: 'GEFS/prognostic/3d/V'
+        sp_var: 'GEFS/prognostic/2d/PS'
+        surface_geopotential_name: 'PHIS'
+        toa_net_solar_var: 'CESM/diagnostic/2d/FSNT'
+        toa_net_lw_var: 'CESM/diagnostic/2d/FLNT'
+        surf_net_solar_var: 'CESM/diagnostic/2d/FSNS'
+        surf_net_lw_var: 'CESM/diagnostic/2d/FLNS'
+        surf_sh_var: 'CESM/diagnostic/2d/SHFLX'
+        surf_lh_var: 'CESM/diagnostic/2d/LHFLX'
+        lead_time_periods: 6
+        save_loc_physics: '/glade/derecho/scratch/kjmayer/CREDIT_runs/S2Socnlndatm_MLdata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc'
+        lon_lat_level_name: ['lon2d', 'lat2d', 'hyai', 'hybi']
+        grid_type: 'sigma'
+        midpoint: True
+
+    # NOT TRANSLATED -- gen1 post_conf.global_drymass_fixer
+    # There is no "global_drymass_fixer" entry in _POSTBLOCK_REGISTRY at all.
+
+    # The three required output fields are TREFHT and PRECT (both already model
+    # outputs) plus mean sea level pressure, which is diagnosed here from PS +
+    # TREFHT + PHIS. geopotential_diagnostic and pressure_interp_diagnostic were
+    # removed: they exist for the 500/700/850 hPa fields, which are not required.
+    #
+    # This MUST be per_step, not post_rollout. run_forecast writes each step from
+    # inside the rollout loop (`save_output_fn(full_data_dict["y_processed"], ...)`)
+    # and only runs post_rollout blocks afterwards, so anything post_rollout adds to
+    # y_processed is computed once, after every file has been written, and never
+    # reaches the output. The symptom is silent: the writer's `variables:` filter
+    # skips names that aren't present rather than reporting them missing.
+    #
+    # Last in the chain on purpose -- it reads PS and TREFHT, and global_mass_fixer
+    # above adjusts PS, so it must see the post-fixer values.
+    #
+    # ic_raw is captured once before the loop and persists, so PHIS is available at
+    # every step, not just the first.
+    mslp:
+      type: mslp_diagnostic
+      args:
+        output_name: 'GEFS/derived_diagnostic/2d/mean_sea_level_pressure'
+        surface_pressure_var: 'GEFS/prognostic/2d/PS'
+        temperature_var: 'GEFS/prognostic/2d/TREFHT'
+        surface_geopotential_var: 'CESM/static/2d/PHIS'
+        static_source_key: 'ic_raw'
+
+
+# ---- trainer: gen1 trainer:, retargeted to gen2 ---- #
+# Not used by rollout, but `credit check` requires both this and loss: before it
+# will validate anything else. gen1's `mode: ddp` becomes the parallelism block.
+trainer:
+    type: gen2                        # gen1 was "era5"
+    parallelism:
+        data: none                     # ddp | fsdp2 | none
+        tensor: 1
+        domain: 1
+    load_weights: True
+    load_optimizer: True
+    load_scaler: True
+    load_scheduler: True
+    save_backup_weights: True
+    save_best_weights: True
+    save_every_epoch: True
+    save_metric_vars: True
+    learning_rate: 1.0e-04
+    weight_decay: 0
+    train_batch_size: 4
+    valid_batch_size: 4
+    batches_per_epoch: 0
+    valid_batches_per_epoch: 70
+    stopping_patience: 5000
+    skip_validation: False
+    start_epoch: 0
+    num_epoch: 5
+    reload_epoch: True
+    epochs: 300
+    use_scheduler: True
+    scheduler:
+      scheduler_type: cosine-annealing-restarts
+      first_cycle_steps: 100
+      cycle_mult: 6.0
+      max_lr: 1.0e-04
+      min_lr: 1.0e-09
+      warmup_steps: 99
+      gamma: 0.7
+    amp: False
+    mixed_precision:
+        param_dtype: "float32"
+        reduce_dtype: "float32"
+        buffer_dtype: "float32"
+
+# ---- loss: gen1 loss: ---- #
+# NOTE: gen1's flat loss block still validates, but gen2's preferred form is
+# `type: base` with the univariate loss under args.training_loss, which scores in
+# physical units on the postblock output. See credit/losses/base.py.
+loss:
+    training_loss: "mse"
+    use_power_loss: False
+    use_spectral_loss: False
+    spectral_lambda_reg: 0.1
+    spectral_wavenum_init: 20
+    latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+    use_latitude_weights: True
+    use_variable_weights: False
+
+# ---- inference: gen1's predict: block ---- #
+inference:
+  run_mode: single
+  mode: none                          # gen1 predict.mode was ddp; use none for the per-member loop
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/AIWQ_rollout_GEFS/'
+
+  # ---- THE MEMBER THIS ROLLOUT RUNS ---- #
+  # apply_inference_overrides replaces conf["data"] wholesale -- it is not a deep
+  # merge -- so this block has to be a complete data: config. YAML merge keys make
+  # that cheap: `<<: *data` inherits timestep / datetimes / history_len, and
+  # `<<: *gefs_source` inherits the GEFS source, leaving `members` as the only line
+  # that actually differs. `source:` must be respecified because merge keys only
+  # merge one level deep.
+  #
+  # NOTHING rewrites this file for the weekly ensemble. The member comes from
+  # $GEFS_MEMBER via the EnvMemberGEFS dataset (see custom_objects), the init time
+  # from --init-time, and the output path from --save-dir -- so all 31 subjobs of
+  # scripts/rollout_gefs_members.pbs read this one config, read-only.
+  # The `members:` value below is only the fallback for interactive single runs.
+  #
+  # Do NOT go back to `yq -i ... $CFG` inside each subjob: that mutates one shared
+  # file from 31 concurrent subjobs, so each reads whichever member another subjob
+  # wrote last and nothing records what actually ran.
+  #
+  # Keep it to exactly ONE member: multi-member samples keep the member axis and
+  # ConcatToTensor then reads it as channels (RuntimeError on the first batch).
+  #
+  # The global data: block above stays the canonical/training layout, which is also
+  # what ChannelSchema derives from (apply_inference_overrides returns the
+  # pre-override config for exactly that purpose).
+  data:
+#    <<: *data
+    timestep: 6h
+    history_len: 1
+    source:
+      GEFS:
+        <<: *gefs_source
+        members: [ "p02" ]
+      CESM: *cesm_source
+
+  single_forecast:
+    start_datetime: "2026-06-11T00:00Z"
+    forecast_length: "33d"            # gen1 predict.forecasts.days: 33
+
+  output:
+    format: netcdf
+    group_by: full
+    output_interval: null
+    variables:
+      - 'GEFS/prognostic/2d/TREFHT'
+      - 'CESM/diagnostic/2d/PRECT'
+      - 'GEFS/derived_diagnostic/2d/mean_sea_level_pressure'
+
+# ============================================================================== #
+# WHAT STILL HAS TO BE RECONCILED
+#
+# 1. Channel counts. `credit check -c this-file` reports exactly this, because the
+#    data: block was left as-is:
+#
+#      model.channels             is 4  but the config defines 5 3D prognostic vars
+#                                       (zh is the extra one -- drop it, or set 5)
+#      model.surface_channels     is 2  but the config defines 6 2D prognostic vars
+#                                       (slmsk/tsea/fice/q2m are not model inputs)
+#      model.input_only_channels  is 6  but the config defines 0
+#                                       (needs SOLIN via a `tisr` source, co2vmr_3d,
+#                                        and statics z_norm / LANDM_COSLAT)
+#      model.output_only_channels is 15 but the config defines 0
+#                                       (the diagnostic: field group is unset)
+#
+#    The four model.* numbers are correct for the trained CAMulator -- it is the
+#    data: block that has to grow to match, not the model block that should shrink.
+#
+# 2. Diagnostics. All the CESM/diagnostic/2d/* keys referenced by the fixers and
+#    by `variables:` are model OUTPUTS -- they never appear in the input batch.
+#    They reach y_processed through the ChannelSchema saved at training time, so
+#    the trained model's schema must be present in save_loc.
+#
+# 3. Not carried over: post_conf.requires_scaling / scaling_coefs (every
+#    coefficient was 1, a no-op), post_conf.skebs (activate: False), and
+#    predict.use_laplace_filter (False).
+# ============================================================================== #

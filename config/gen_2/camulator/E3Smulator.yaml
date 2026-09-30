@@ -1,0 +1,855 @@
+# Gen2 config for the subE3SMulator model (CESM-coupled climate emulator).
+#   - Single GPU, no physics post-blocks (those come in a follow-up)
+#   - 2-year training window (1980-1981), 1-year validation (2013)
+#   - Reduced batch/epoch counts for fast iteration
+#
+# BridgeScaler JSONs generated from gen1 mean/std NetCDF via `credit convert`:
+#   pre:  /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_pre_scaler.json
+#   post: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
+# ===================================================================================================================== #
+
+save_loc: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/'
+seed: 1000
+# ---- Training/validation data ---- #
+# Paths under each variable group are TRAINING-ONLY (ignored by Quick_Climate inference).
+data:
+  source: &data_sources
+    E3SM_ATM: # ncol size: 21600
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D:
+              - 'U'
+              - 'V'
+              - 'T'
+              - 'Q'
+          vars_2D:
+              - 'PS'
+              - 'TS'
+              - 'SST'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.eam.h1.h2.%Y.nc'
+        diagnostic:
+          vars_2D:
+              - 'PRECT'
+              - 'TREFHT'
+              - 'CLDTOT'
+              - 'TAUX'
+              - 'TAUY'
+              - 'U10'
+              - 'Z500'
+              - 'OMEGA850'
+              - 'OMEGA200'
+              - 'QFLX'
+              - 'FLUT'
+              - 'FSNS'
+              - 'FLNS'
+              - 'FSNT'
+              - 'FLNT'
+              - 'SHFLX'
+              - 'LHFLX'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.eam.h1.h2.%Y.nc'
+        dynamic_forcing:
+          vars_2D:
+              - 'SOLIN'
+              - 'co2vmr_3d'
+              - 'TLAI'
+          path: "/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/dynamicforcing_%Y.nc"
+
+        static:
+          vars_2D:
+              - 'PHIS'
+              - 'landfrac'
+              - 'ZTOP_CANOPY'
+              - 'ZBOT_CANOPY'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/staticforcing.nc'
+
+    E3SM_OCN: # nCells = 236853 (missing coordinate data)
+      dataset_type: "local"
+      coordinate_file: "/global/cfs/cdirs/m5388/cbecker/metadata/EC30to60E2r2.scrip.201005.nc"
+      lat_name: 'grid_center_lat'
+      lon_name: 'grid_center_lon'
+      variables:
+        prognostic:
+          vars_2D:
+              - 'SSS'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.mpaso.hist.am.6hr.%Y.nc'
+
+        diagnostic:
+          vars_2D:
+              - 'dMLD'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.mpaso.hist.am.6hr.%Y.nc'
+
+    E3SM_ICE: # nCells = 236853 (missing coordinate data)
+      dataset_type: "local"
+      coordinate_file: "/global/cfs/cdirs/m5388/cbecker/metadata/EC30to60E2r2.scrip.201005.nc"
+      lat_name: 'grid_center_lat'
+      lon_name: 'grid_center_lon'
+      variables:
+        prognostic:
+          vars_2D:
+              - 'sithick'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.mpassi.hist.am.6hr.%Y.nc'
+
+    E3SM_LND: # nCols = 21600
+      dataset_type: "local"
+      variables:
+        prognostic:
+          vars_2D:
+              - 'SOILWAT_2m'
+              - 'TSOI_2m'
+              - 'SNOWDP'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.elm.h1.%Y.withtop2m.negclip.nc'
+
+        diagnostic:
+          vars_2D:
+              - 'QRUNOFF'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.elm.h1.%Y.withtop2m.negclip.nc'
+
+
+  date_ranges:
+      - ["1951-01-01", "1999-12-31"]
+      - ["2010-01-01", "2024-12-31"]
+      - ["2041-01-01", "2050-12-31"]
+  timestep: "6h"
+
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Validation data ---- #
+validation_data:
+  source: *data_sources
+  date_ranges:
+      - ["2000-01-01", "2009-12-31"]
+  timestep: "6h"
+  history_len: 1
+  forecast_len: 1
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+# ---- Training hyperparameters ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: none               # ddp | fsdp2 | none
+    tensor: 1
+    domain: 1
+
+  cpu_offload: False
+  activation_checkpoint: True
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: True
+  update_learning_rate: True
+
+  save_backup_weights: True
+  save_best_weights: True
+  save_every_epoch: True
+
+  save_metric_vars: ["PRECT", "TREFHT", "SOILWAT_2m", "TSOI_2m", "U", "T", "SST", "SSS"]
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 2
+  valid_batch_size: 2
+
+  batches_per_epoch: 3
+  valid_batches_per_epoch: 3
+  stopping_patience: 5000
+
+  start_epoch: 0
+  num_epoch: 2
+  epochs: &epochs 2
+
+  use_tensorboard: True
+  use_ema: False
+
+  use_scheduler: False
+  scheduler:
+    scheduler_type: cosine-annealing
+    T_max: *epochs
+    last_epoch: -1
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
+
+
+# ---- Preblocks / Postblocks ---- #
+# Preblocks run before the model; postblocks run after each forward pass.
+# scaler (BridgeScaler) normalizes inputs/targets before the model and
+# denormalizes outputs after. concat assembles the nested variable dict into
+# the flat (B, C, H, W) tensor the model expects. reconstruct is required
+# for forecast_len > 1 rollout.
+preblocks:
+  ic_only:
+    atmlndregrid:
+        type: "regrid"
+        args:
+            weight_file: "/global/cfs/cdirs/m5388/cbecker/metadata/fe30_to_cesm.nc"
+            variables:
+                - 'E3SM_ATM/static/2d/PHIS'
+                - 'E3SM_ATM/static/2d/landfrac'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+                - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+                - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/prognostic/3d/U'
+                - 'E3SM_ATM/prognostic/3d/V'
+                - 'E3SM_ATM/prognostic/3d/T'
+                - 'E3SM_ATM/prognostic/3d/Q'
+                - 'E3SM_ATM/prognostic/2d/TS'
+                - 'E3SM_ATM/prognostic/2d/SST'
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
+                - 'E3SM_ATM/diagnostic/2d/TREFHT'
+                - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+                - 'E3SM_ATM/diagnostic/2d/TAUX'
+                - 'E3SM_ATM/diagnostic/2d/TAUY'
+                - 'E3SM_ATM/diagnostic/2d/U10'
+                - 'E3SM_ATM/diagnostic/2d/Z500'
+                - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+                - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+                - 'E3SM_ATM/diagnostic/2d/QFLX'
+                - 'E3SM_ATM/diagnostic/2d/FLUT'
+                - 'E3SM_ATM/diagnostic/2d/FSNS'
+                - 'E3SM_ATM/diagnostic/2d/FLNS'
+                - 'E3SM_ATM/diagnostic/2d/FSNT'
+                - 'E3SM_ATM/diagnostic/2d/FLNT'
+                - 'E3SM_ATM/diagnostic/2d/SHFLX'
+                - 'E3SM_ATM/diagnostic/2d/LHFLX'
+                - 'E3SM_ATM/prognostic/2d/PS'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+            reshape_to_xy: true
+    ocnregrid:
+        type: "regrid"
+        args:
+            weight_file: "/global/cfs/cdirs/m5388/cbecker/metadata/EC30to60E2r2_to_CESMf09.nc"
+            variables:
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+  per_step:
+    log_trans:
+      type: "log_transform"
+      args:
+        variables:
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'   # signed delta: log/exp is invalid (exp overflows the mse)
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+#        data_types: ['input', 'target']
+        variables:
+            - 'E3SM_ATM/static/2d/PHIS'
+            - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+            - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+            - 'E3SM_ATM/prognostic/3d/U'
+            - 'E3SM_ATM/prognostic/3d/V'
+            - 'E3SM_ATM/prognostic/3d/T'
+            - 'E3SM_ATM/prognostic/3d/Q'
+            - 'E3SM_ATM/prognostic/2d/TS'
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_ATM/prognostic/2d/SST'
+            - 'E3SM_LND/prognostic/2d/TSOI_2m'
+            - 'E3SM_ATM/diagnostic/2d/TREFHT'
+            - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+            - 'E3SM_ATM/diagnostic/2d/TAUX'
+            - 'E3SM_ATM/diagnostic/2d/TAUY'
+            - 'E3SM_ATM/diagnostic/2d/U10'
+            - 'E3SM_ATM/diagnostic/2d/Z500'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+            - 'E3SM_ATM/diagnostic/2d/QFLX'
+            - 'E3SM_ATM/diagnostic/2d/FLUT'
+            - 'E3SM_ATM/diagnostic/2d/FSNS'
+            - 'E3SM_ATM/diagnostic/2d/FLNS'
+            - 'E3SM_ATM/diagnostic/2d/FSNT'
+            - 'E3SM_ATM/diagnostic/2d/FLNT'
+            - 'E3SM_ATM/diagnostic/2d/SHFLX'
+            - 'E3SM_ATM/diagnostic/2d/LHFLX'
+            - 'E3SM_ATM/prognostic/2d/PS'
+            - 'E3SM_OCN/prognostic/2d/SSS'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+            - 'E3SM_OCN/diagnostic/2d/dMLD'
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        spatial_variables:
+#            - 'E3SM_ATM/prognostic/2d/PS'
+#            - 'E3SM_OCN/prognostic/2d/SSS'
+#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+#            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'
+#            - 'E3SM_ICE/prognostic/2d/sithick'
+#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+        method: transform
+    # fillneg:
+    #     type: "fill_values"
+    #     args:
+    #         rules:
+    #             - search: 0.0        # < 0.0       → 0.0
+    #               op: "<"
+    #               fill: 0.0
+    #         variables:               # optional — defaults to all variables
+    #             - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+    fillnan:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_ATM/prognostic/2d/SST'
+                - 'E3SM_ATM/static/2d/landfrac'   # ocean cells are NaN; 0 = no land, the physically correct fill
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    concat:
+      type: concat
+
+# -----------------------------------------------------------------------
+# Physics conservation fixers — gen2 name-based postblock schema.
+#
+# The "super dict" carried through the postblock chain (y_processed, built by
+# reconstruct) is keyed by variable NAME, so the fixers address fields by name
+# rather than channel index. They also do NO scaling: like the geopotential /
+# mslp flagship blocks they operate in physical units. The bridgescaler blocks
+# own the scaling, and the preblocks own input scaling.
+#
+# Pipeline order (per_step):
+#   1. reconstruct (detach: false)  -> split y_pred into named y_processed,
+#                                       keeping the autograd graph
+#   2. inverse bridgescaler         -> y_processed in physical units
+#   3. tracer / mass / water / energy fixers (name-based, physical, no scaling)
+#   4. flatten_to_tensor            -> forward-scale a copy + rebuild flat y_pred
+#                                       (normalized) for the loss; y_processed
+#                                       stays physical for rollout assembly
+#
+# Because reconstruct no longer detaches, the conservation corrections flow into
+# the loss/gradient (loss is computed on y_pred after step_postblocks run).
+#
+# The fixers read t0 by name from the per-step physical input the model
+# consumed that step (default key x_physical, set by the trainer each step). For
+# forecast_len=1 that equals the initial condition; for multistep it is the
+# previous step's predicted physical state plus the current step's forcing.
+# SOLIN (TOA downwelling solar) is an input-only dynamic forcing, also read from
+# x_physical.
+# -----------------------------------------------------------------------
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: False   # REQUIRED with flatten_to_tensor in training: keeps y_processed
+                        # on the autograd graph so the rebuilt y_pred can backprop
+#    wind_filter:
+#      type: wind_artifact_filter
+#      args:
+#        u_var: E3SM_ATM/prognostic/3d/U
+#        v_var: E3SM_ATM/prognostic/3d/V
+#        target_vars:
+#          - E3SM_ATM/prognostic/3d/U
+#          - E3SM_ATM/prognostic/3d/V
+#          - E3SM_ATM/prognostic/3d/T
+#          - E3SM_ATM/prognostic/3d/Q
+#        mask_level: 14
+#        target_levels: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+#        # values below copied verbatim from the gen1 stable-run config,
+#        # climate/assets/inference_config.yml (tuned for normalized values —
+#        # keep paired with the pre-inverse_scale placement of this block)
+#        speed_threshold: 2.8
+#        smooth_sigma: 1.2
+#        smooth_sigma_zonal: 2.0
+#        smooth_sigma_meridional: 0.5
+#        dilation_zonal: 15
+#        dilation_meridional: 5
+#        falloff_sigma: 4.0
+#        preserve_amplitude: true
+
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+#        data_types: ['input', 'target']
+        variables:
+            - 'E3SM_ATM/static/2d/PHIS'
+            - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+            - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+            - 'E3SM_ATM/prognostic/3d/U'
+            - 'E3SM_ATM/prognostic/3d/V'
+            - 'E3SM_ATM/prognostic/3d/T'
+            - 'E3SM_ATM/prognostic/3d/Q'
+            - 'E3SM_ATM/prognostic/2d/TS'
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_ATM/prognostic/2d/SST'
+            - 'E3SM_LND/prognostic/2d/TSOI_2m'
+            - 'E3SM_ATM/diagnostic/2d/TREFHT'
+            - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+            - 'E3SM_ATM/diagnostic/2d/TAUX'
+            - 'E3SM_ATM/diagnostic/2d/TAUY'
+            - 'E3SM_ATM/diagnostic/2d/U10'
+            - 'E3SM_ATM/diagnostic/2d/Z500'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+            - 'E3SM_ATM/diagnostic/2d/QFLX'
+            - 'E3SM_ATM/diagnostic/2d/FLUT'
+            - 'E3SM_ATM/diagnostic/2d/FSNS'
+            - 'E3SM_ATM/diagnostic/2d/FLNS'
+            - 'E3SM_ATM/diagnostic/2d/FSNT'
+            - 'E3SM_ATM/diagnostic/2d/FLNT'
+            - 'E3SM_ATM/diagnostic/2d/SHFLX'
+            - 'E3SM_ATM/diagnostic/2d/LHFLX'
+            - 'E3SM_ATM/prognostic/2d/PS'
+            - 'E3SM_OCN/prognostic/2d/SSS'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+            - 'E3SM_OCN/diagnostic/2d/dMLD'
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        spatial_variables:
+#            - 'E3SM_ATM/prognostic/2d/PS'
+#            - 'E3SM_OCN/prognostic/2d/SSS'
+#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+#            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'
+#            - 'E3SM_ICE/prognostic/2d/sithick'
+#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        method: inverse_transform
+    log_trans:
+      type: "exp_transform"
+      args:
+        max_output: 1.0e+6   # overflow guard; ~55x QRUNOFF's measured max of 1.83e4
+                            # (scripts/check_exp_ranges.py). Must stay above every real
+                            # value: this block also runs on the target twin, so a low
+                            # cap would silently clip the ground truth.
+        variables:
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'   # signed delta: log/exp is invalid (exp overflows the mse)
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+
+# ----------------------------------------------------------------------- #
+# Target twin.
+#
+# BaseLoss and the gen2 metrics both score y_processed (the prediction) against
+# y_target_processed (the truth), and both sides must be in the same physical
+# units. These three blocks mirror the *unit-changing* blocks above
+# (bridgescaler_transform, exp_transform) onto the target, writing to
+# 'y_target_processed' via the `key` / `out_key` args instead of the default
+# 'y_processed'.
+#
+# The conservation fixers below are deliberately NOT mirrored: they correct the
+# prediction, so running them on the target would "fix" the truth being scored.
+# ----------------------------------------------------------------------- #
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: 'y'                 # the flat target tensor, split with the same
+                                    # metadata.target._channel_map as y_pred
+        out_key: 'y_target_processed'
+        detach: True                # the target carries no gradient — unlike the
+                                    # prediction reconstruct above, which needs
+                                    # detach: False so the loss can backprop
+
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+        key: 'y_target_processed'
+        variables:
+            - 'E3SM_ATM/static/2d/PHIS'
+            - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+            - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+            - 'E3SM_ATM/prognostic/3d/U'
+            - 'E3SM_ATM/prognostic/3d/V'
+            - 'E3SM_ATM/prognostic/3d/T'
+            - 'E3SM_ATM/prognostic/3d/Q'
+            - 'E3SM_ATM/prognostic/2d/TS'
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_ATM/prognostic/2d/SST'
+            - 'E3SM_LND/prognostic/2d/TSOI_2m'
+            - 'E3SM_ATM/diagnostic/2d/TREFHT'
+            - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+            - 'E3SM_ATM/diagnostic/2d/TAUX'
+            - 'E3SM_ATM/diagnostic/2d/TAUY'
+            - 'E3SM_ATM/diagnostic/2d/U10'
+            - 'E3SM_ATM/diagnostic/2d/Z500'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+            - 'E3SM_ATM/diagnostic/2d/QFLX'
+            - 'E3SM_ATM/diagnostic/2d/FLUT'
+            - 'E3SM_ATM/diagnostic/2d/FSNS'
+            - 'E3SM_ATM/diagnostic/2d/FLNS'
+            - 'E3SM_ATM/diagnostic/2d/FSNT'
+            - 'E3SM_ATM/diagnostic/2d/FLNT'
+            - 'E3SM_ATM/diagnostic/2d/SHFLX'
+            - 'E3SM_ATM/diagnostic/2d/LHFLX'
+            - 'E3SM_ATM/prognostic/2d/PS'
+            - 'E3SM_OCN/prognostic/2d/SSS'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+            - 'E3SM_OCN/diagnostic/2d/dMLD'
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        spatial_variables:
+#            - 'E3SM_ATM/prognostic/2d/PS'
+#            - 'E3SM_OCN/prognostic/2d/SSS'
+#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+#            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'
+#            - 'E3SM_ICE/prognostic/2d/sithick'
+#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        method: inverse_transform
+
+    log_trans_target:
+      type: "exp_transform"
+      args:
+        max_output: 1.0e+6   # overflow guard; ~55x QRUNOFF's measured max of 1.83e4
+                            # (scripts/check_exp_ranges.py). Must stay above every real
+                            # value: this block also runs on the target twin, so a low
+                            # cap would silently clip the ground truth.
+        key: 'y_target_processed'
+        variables:
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+#            - 'E3SM_OCN/diagnostic/2d/dMLD'   #
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+
+    tracer_fixer:
+      type: tracer_fixer
+      args:
+        tracer_thres: 0.0
+        tracer_vars:
+          - E3SM_ATM/prognostic/3d/Q
+          - E3SM_OCN/prognostic/2d/SSS
+          - E3SM_LND/prognostic/2d/SOILWAT_2m
+          - E3SM_LND/prognostic/2d/SNOWDP
+          - E3SM_ICE/prognostic/2d/sithick
+          - E3SM_ATM/diagnostic/2d/PRECT
+          - E3SM_ATM/diagnostic/2d/CLDTOT
+          - E3SM_ATM/diagnostic/2d/FLUT
+          - E3SM_LND/diagnostic/2d/QRUNOFF
+          - E3SM_OCN/diagnostic/2d/dMLD
+
+#    mass_fixer:
+#      type: global_mass_fixer
+#      args:
+##        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+#
+#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+#        grid_type: sigma
+#        midpoint: true
+#        q_var: E3SM_ATM/prognostic/3d/Q
+#        sp_var: E3SM_ATM/prognostic/2d/PS
+
+#    water_fixer:
+#      type: global_water_fixer
+#      args:
+##        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+#        grid_type: sigma
+#        midpoint: true
+#        lead_time_periods: 6
+#        q_var: E3SM_ATM/prognostic/3d/Q
+#        sp_var: E3SM_ATM/prognostic/2d/PS
+#        precip_var: E3SM_ATM/diagnostic/2d/PRECT
+#        evapor_var: E3SM_ATM/diagnostic/2d/QFLX
+
+
+#    energy_fixer_net:
+#      type: GlobalNetEnergyFixer
+#      args:
+#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+#        grid_type: sigma
+#        midpoint: true
+#        lead_time_periods: 6
+#        T_var: E3SM_ATM/prognostic/3d/T
+#        q_var: E3SM_ATM/prognostic/3d/Q
+#        U_var: E3SM_ATM/prognostic/3d/U
+#        V_var: E3SM_ATM/prognostic/3d/V
+#        surface_geopotential_name: E3SM_ATM/static/2d/PHIS
+#        toa_net_solar_var: E3SM_ATM/diagnostic/2d/FSNT
+#        toa_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNT
+#        surf_net_solar_var: E3SM_ATM/diagnostic/2d/FSNS
+#        surf_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNS
+#        surf_sh_var: E3SM_ATM/diagnostic/2d/SHFLX
+#        surf_lh_var: E3SM_ATM/diagnostic/2d/LHFLX
+
+
+# ONLY NEEDED FOR TRAINING #
+#    flatten:
+#      type: flatten_to_tensor
+#      args:
+#        method: transform
+#        key: y_processed
+#        out_key: y_pred
+#        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
+#        variables:
+#          - CESM/prognostic/3d/U
+#          - CESM/prognostic/3d/V
+#          - CESM/prognostic/3d/T
+#          - CESM/prognostic/3d/Qtot
+#          - CESM/prognostic/2d/PS
+#          - CESM/prognostic/2d/TREFHT
+#          - CESM/diagnostic/2d/PRECT
+#          - CESM/diagnostic/2d/TS
+#          - CESM/diagnostic/2d/CLDHGH
+#          - CESM/diagnostic/2d/CLDLOW
+#          - CESM/diagnostic/2d/CLDMED
+#          - CESM/diagnostic/2d/TAUX
+#          - CESM/diagnostic/2d/TAUY
+#          - CESM/diagnostic/2d/U10
+#          - CESM/diagnostic/2d/QFLX
+#          - CESM/diagnostic/2d/FSDS_J
+#          - CESM/diagnostic/2d/FLDS_J
+#          - CESM/diagnostic/2d/FSUS
+#          - CESM/diagnostic/2d/FLUS
+#          - CESM/diagnostic/2d/SHFLX
+#          - CESM/diagnostic/2d/LHFLX
+#          - CESM/diagnostic/2d/FSUTOA
+#          - CESM/diagnostic/2d/FLUT
+
+
+# ---- Model architecture ---- #
+# Must match the checkpoint — do not edit for the shipped model.
+model:
+  type: "camulator"
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 72
+  channels: 4               # 3D prognostic: U V T Q
+  surface_channels: 8       # 2D prognostic: PS TREFHT
+  input_only_channels: 7    # dynamic_forcing (4) + static (3)
+  output_only_channels: 19  # diagnostic variables
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [256, 512, 1024, 2048]
+  depth: [2, 2, 18, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  use_spectral_norm: True
+  interp: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [48, 48]
+    pad_lon: [48, 48]
+
+
+# ---- Loss ---- #
+#loss:
+#  training_loss: "mse"
+#
+#  use_power_loss: False
+#  use_spectral_loss: False
+#  spectral_lambda_reg: 0.1
+#  spectral_wavenum_init: 20
+#
+#  latitude_weights: "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+#  use_latitude_weights: True
+#
+#  use_variable_weights: False
+
+loss:
+  type: base
+  args:
+    training_loss: "mse"              # univariate loss per variable (mse | mae | huber | logcosh | ...)
+    base_loss_parameters: {}
+    # base_loss_overrides:            # optional per-variable univariate loss
+    #   ERA5/diagnostic/2d/total_precipitation: {loss: "mae"}
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
+    # file (approximates normalized-space training). Options:
+    # inverse_variance | manual | learnable | none
+    var_weighting: "inverse_variance"
+    scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: true           # rescale combination weights to mean 1
+
+    # Data diagnostic variables are always scored; postblock-computed
+    # diagnostics (e.g. from mslp_diagnostic) only when true.
+    include_computed_diagnostics: false
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+
+metrics:
+  type: combined
+  args:
+    metrics:                          # registry names of univariate metrics
+      rmse: {}
+      r2score: {}
+      bias: {}
+    # To score a variable with a different functional, add that metric to the
+    # list above — each entry scores every variable under its own namespace
+    # (e.g. "mae/ERA5/..."). There is no per-variable metric override: unlike
+    # the loss, a combined metric has no single "base" metric to override.
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance divides each variable by sigma**scale_power, using the
+    # bridgescaler file. scale_power is a property of the metric, so the
+    # aggregate is dimensionless whatever its order: 2 for mse, 1 for rmse/mae/
+    # bias/activity, and 0 for already-normalized scores like r2score/acc
+    # (which ignore the scaler entirely).
+    # Options: inverse_variance | manual | none (no learnable for metrics).
+    var_weighting: "inverse_variance"
+    scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: true           # rescale combination weights to mean 1
+
+    include_computed_diagnostics: false
+
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+
+# ---- Inference ---- #
+# run_mode selects between batch and single forecast.
+#   batch:  generates forecasts for a range of init times defined under batch_forecast.initialization
+#   single: runs one forecast from a specific init time defined under single_forecast.start_datetime
+inference:
+  run_mode: single
+  mode: none                          # none | ddp | fsdp
+  save_forecast: '/global/common/software/m5388/cbecker/CREDIT_runs/subE3SMulator/rollout/'
+
+  batch_forecast:
+    forecast_length: "45d"                    # 1 no-leap year
+    first_init_date: "2026-01-01"
+    last_init_date: "2039-12-31"
+    init_interval: "1w"
+
+  single_forecast:
+    forecast_length: "30d"                    # 1460 6-hourly steps = 1 no-leap year
+    start_datetime: "1995-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: month
+    metadata: "/global/cfs/cdirs/m5388/cbecker/metadata/camulator_metadata.yaml"
+    variables:
+#      - name: "CESM/prognostic/3d/U"
+#      - name: "CESM/prognostic/3d/V"
+#      - name: "CESM/prognostic/3d/T"
+#      - name: "CESM/prognostic/3d/Qtot"
+      - name: "CESM/prognostic/2d/PS"
+      - name: "CESM/prognostic/2d/TREFHT"
+      - name: "CESM/diagnostic/2d/PRECT"
+      - name: "CESM/diagnostic/2d/TS"
+      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDLOW"
+      - name: "CESM/diagnostic/2d/CLDMED"
+      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUY"
+      - name: "CESM/diagnostic/2d/U10"
+      - name: "CESM/diagnostic/2d/QFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/FSDS_J"
+      - name: "CESM/diagnostic/2d/FLDS_J"
+      - name: "CESM/diagnostic/2d/FSUS"
+      - name: "CESM/diagnostic/2d/FLUS"
+      - name: "CESM/diagnostic/2d/FSUTOA"
+      - name: "CESM/diagnostic/2d/FLUT"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 0
+
+slurm:
+  conda: "/global/common/software/m5388/djgagne/envs/credit-perlmutter"
+  project: "m5388_g"
+  job_name: "credit_wb2_tiny"
+  nodes: 1
+  ngpus: 2
+  ncpus: 64
+  walltime: "00:20:00"
+  qos: "debug"
+  constraint: "gpu"
+  env_setup:
+    - "export NCCL_DEBUG=INFO"
