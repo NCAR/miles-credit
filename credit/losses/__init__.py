@@ -261,8 +261,9 @@ def load_loss(conf, reduction="none", validation=False):
         args = dict(loss_conf.get("args") or {})
         if loss_type == "base":
             from credit.datasets.gen_2.channel_utils import ChannelSchema
-            from credit.losses.base import BaseLoss
+            from credit.losses.base import BaseLoss, exp_transform_specs
 
+            args.setdefault("exp_transforms", exp_transform_specs(conf))
             logger.info("Loaded BaseLoss (%s)", mode)
             return BaseLoss(channel_schema=ChannelSchema.load_or_from_config(conf), validation=validation, **args)
         cls = _load_loss_entry(loss_type)
