@@ -620,6 +620,38 @@ class GlobalEnergyFixerUpDown(nn.Module):
         E_qgk_t0 = LH_WATER * q_input + GPH_surf + ken_t0
         E_qgk_t1 = LH_WATER * q_pred + GPH_surf + ken_t1
 
+        # TODO(investigate): flux-unit asymmetry between the TOA and surface branches.
+        #
+        # The ``* self.N_seconds`` on all three TOA terms cancels exactly against the
+        # ``/ self.N_seconds`` below, so ``R_T`` keeps whatever units the inputs are in,
+        # while ``F_S`` (see below) *is* divided by ``N_seconds``. Since the
+        # ``net_forcing=self.N_seconds * (R_T_sum - F_S_sum)`` argument to
+        # ``_apply_energy_correction`` consumes both as rates, the block is
+        # only self-consistent if TOA fluxes arrive as W m-2 and surface fluxes as J m-2
+        # accumulated over the step -- a mixed convention no dataset provides.
+        #
+        # Measured dT injected per 6 h step, realistic global atmosphere, TOA net +1 W m-2:
+        #     all fluxes W m-2 (CAM native)      0.0021 K  (surface term silently dropped)
+        #     only FSDS_J/FLDS_J accumulated     1.1109 K
+        #     all surface accumulated, TOA W     0.4368 K
+        #     all fluxes J m-2                  44.9218 K  (blows up in 1-2 steps)
+        #
+        # The fix is to drop the three multiplies, making both branches uniformly J m-2
+        # (matching GlobalNetEnergyFixer's default ``flux_units="J m-2"``):
+        #
+        #     TOA_down_solar = self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device)
+        #     TOA_up_solar = _pred(batch_dict, self.toa_up_solar_var)[:, 0, 0, ...]
+        #     TOA_up_OLR = _pred(batch_dict, self.toa_up_olr_var)[:, 0, 0, ...]
+        #
+        # Left inactive deliberately: it changes the injected correction, so any checkpoint
+        # trained against the current behavior would shift. Before enabling, confirm the
+        # actual units in the forcing files that config/gen_2/camulator/*.yml read -- those
+        # configs name FSDS_J/FLDS_J with a ``_J`` suffix but FSUS/FLUS/SHFLX/LHFLX without,
+        # so the F_S sum below may itself mix accumulated and rate terms. Adding a
+        # ``flux_units`` argument here, as GlobalNetEnergyFixer has, is the tidier endpoint.
+        #
+        # Separately unresolved: the ``+ surf_SH + surf_LH`` signs in the ``F_S`` sum below (see
+        # ENERGY_FIXER_REVIEW.md) -- worth at least as much drift as the units question.
         TOA_down_solar = (
             self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device) * self.N_seconds
         )
