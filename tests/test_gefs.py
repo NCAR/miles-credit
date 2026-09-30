@@ -7,6 +7,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import cftime
 import numpy as np
 import obstore
 import pandas as pd
@@ -14,7 +15,7 @@ import pytest
 import torch
 import xarray as xr
 from torch.utils.data import DataLoader
-from credit.datasets.gen_2.gefs import GEFSDataset, _member_file_paths
+from credit.datasets.gen_2.gefs import _MICROPHYSICS_VARIABLES, GEFSDataset, _member_file_paths
 from credit.datasets.gen_2.gefs_download import download_gefs
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.preblock.concat import ConcatToTensor
@@ -98,6 +99,14 @@ def _netcdf_bytes(member_offset: float) -> tuple[bytes, bytes, bytes]:
             "v_w": (("lev", "lat", "lonp"), np.full((3, 2, 3), 4 + member_offset, dtype=np.float32)),
             "u_w": (("lev", "lat", "lonp"), np.full((3, 2, 3), 5 + member_offset, dtype=np.float32)),
             "v_s": (("lev", "latp", "lon"), np.full((3, 3, 2), 6 + member_offset, dtype=np.float32)),
+            # Qtot species: sphum varies per level (0, 1, 2), the five condensates
+            # are distinct powers of two summing to 62, so Qtot == level + 62.
+            "sphum": (("lev", "lat", "lon"), np.tile(np.arange(3, dtype=np.float32)[:, None, None], (1, 2, 2))),
+            "liq_wat": (("lev", "lat", "lon"), np.full((3, 2, 2), 2, dtype=np.float32)),
+            "ice_wat": (("lev", "lat", "lon"), np.full((3, 2, 2), 4, dtype=np.float32)),
+            "rainwat": (("lev", "lat", "lon"), np.full((3, 2, 2), 8, dtype=np.float32)),
+            "snowwat": (("lev", "lat", "lon"), np.full((3, 2, 2), 16, dtype=np.float32)),
+            "graupel": (("lev", "lat", "lon"), np.full((3, 2, 2), 32, dtype=np.float32)),
         },
         coords=coords,
     )
@@ -288,8 +297,81 @@ def test_multi_member_sample_keeps_the_member_dim(fake_remote):
     assert sample["input"]["GEFS/prognostic/3d/t"].shape == (2, 2, 1, 24)
 
 
+def test_qtot_sums_microphysics_species_per_level(fake_remote):
+    """Qtot is the elementwise sum of the six species, taken per grid point.
+
+    The fixture sets sphum to the level index and the five condensates to powers
+    of two summing to 62, so Qtot == level + 62. Config levels [1, 3] are
+    one-based, selecting level indices 0 and 2 -> 62 and 64. A sum that collapsed
+    the vertical axis, or dropped a species, would not produce these.
+    """
+    dataset = GEFSDataset(_config(variables={"prognostic": {"vars_3D": ["Qtot"]}}))
+    values = dataset[(dataset.datetimes[0], 0)]["input"]["GEFS/prognostic/3d/Qtot"]
+
+    assert values.shape == (2, 1, 24)
+    assert torch.equal(values[:, 0, 0], torch.tensor([62.0, 64.0]))
+    assert torch.equal(values[0], torch.full((1, 24), 62.0))
+    assert torch.equal(values[1], torch.full((1, 24), 64.0))
+
+
+def test_qtot_does_not_consume_the_raw_species(fake_remote):
+    """Requesting Qtot alongside a species returns both, independently."""
+    dataset = GEFSDataset(_config(variables={"prognostic": {"vars_3D": ["Qtot", "sphum", "graupel"]}}))
+    sample = dataset[(dataset.datetimes[0], 0)]["input"]
+
+    assert sample["GEFS/prognostic/3d/Qtot"][:, 0, 0].tolist() == [62.0, 64.0]
+    assert sample["GEFS/prognostic/3d/sphum"][:, 0, 0].tolist() == [0.0, 2.0]
+    assert sample["GEFS/prognostic/3d/graupel"][:, 0, 0].tolist() == [32.0, 32.0]
+
+
+def test_raw_species_alone_never_produce_qtot(fake_remote):
+    """Not asking for Qtot leaves the channel set untouched."""
+    dataset = GEFSDataset(_config(variables={"prognostic": {"vars_3D": ["sphum", "liq_wat"]}}))
+    sample = dataset[(dataset.datetimes[0], 0)]["input"]
+
+    assert set(sample) == {"GEFS/prognostic/3d/sphum", "GEFS/prognostic/3d/liq_wat"}
+
+
+def test_qtot_names_the_missing_species(fake_remote):
+    """A species absent from the file names Qtot and the culprit, not a bare KeyError."""
+    dataset = GEFSDataset(_config(variables={"prognostic": {"vars_3D": ["Qtot"]}}))
+    partial = xr.Dataset(
+        {name: (("lev", "lat", "lon"), np.zeros((3, 2, 2), dtype=np.float32)) for name in _MICROPHYSICS_VARIABLES[:-1]},
+        coords={"lev": [1, 2, 3], "lat": [0, 1], "lon": [0, 1]},
+    )
+    with pytest.raises(KeyError, match="graupel"):
+        dataset._read_atmospheric_variable(partial, "Qtot")  # pyright: ignore[reportPrivateUsage]
+
+
 def test_forecast_hour_is_rejected(fake_remote):
     config = _config()
     config["source"]["GEFS"]["forecast_hour"] = 3
     with pytest.raises(ValueError, match="initialization-time"):
         GEFSDataset(config)
+
+
+# --------------------------------------------------------------------------- #
+# Non-standard calendars: the shared master clock may hand over cftime
+# --------------------------------------------------------------------------- #
+def test_member_file_paths_accepts_either_calendar():
+    """Path construction only strftime-formats the timestamp, so both types work."""
+    pandas_paths = _member_file_paths(pd.Timestamp("2024-01-01"), "c00", "/base")
+    cftime_paths = _member_file_paths(cftime.DatetimeNoLeap(2024, 1, 1), "c00", "/base")
+    assert pandas_paths == cftime_paths
+    assert pandas_paths[0] == "/base/gefs.20240101/00/atmos/init/c00/gfs_ctrl.nc"
+
+
+def test_reading_a_sample_accepts_a_cftime_timestamp(fake_remote):
+    """MultiSourceDataset resolves ONE calendar across all its sources.
+
+    A noleap source -- CESM forcing or statics, say -- promotes the shared clock
+    from pandas to cftime via most_restrictive_calendar, and every sub-dataset is
+    then handed cftime timestamps. GEFS has to read from one. Wrapping it in
+    pd.Timestamp() raised  TypeError: Cannot convert input ... DatetimeNoLeap.
+    """
+    dataset = GEFSDataset(_config())
+    from_pandas = dataset[(dataset.datetimes[0], 0)]["input"]["GEFS/prognostic/3d/t"]
+    from_cftime = dataset[(cftime.DatetimeNoLeap(2024, 1, 1), 0)]["input"]["GEFS/prognostic/3d/t"]
+
+    assert from_cftime.shape == (2, 1, 24)
+    assert torch.equal(from_pandas, from_cftime)

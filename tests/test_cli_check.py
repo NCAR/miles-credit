@@ -778,3 +778,149 @@ def test_checks_do_not_mutate_the_config(conf):
     before = copy.deepcopy(conf)
     _run(conf)
     assert conf == before
+
+
+# ===========================================================================
+# Block variable references
+# ===========================================================================
+
+
+def _with_preblock_vars(conf, variables, block_type="log_transform", section="per_step"):
+    conf["preblocks"].setdefault(section, {})["blk"] = {"type": block_type, "args": {"variables": variables}}
+    return conf
+
+
+def test_valid_variable_refs_stay_silent(conf):
+    """Full keys that every source really produces raise nothing."""
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/T", "ERA5/static/2d/lsm", "ERA5/diagnostic/2d/TP"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_partial_variable_paths_are_not_flagged(conf):
+    """`_parse_variable_selection` expands prefixes, so they are not typos."""
+    _with_preblock_vars(conf, ["ERA5/prognostic", "ERA5/prognostic/3d"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_unknown_field_type_in_variable_ref_is_an_error(conf):
+    """The gen1-style 'static_forcing' spelling of 'static' is silently skipped at runtime."""
+    _with_preblock_vars(conf, ["ERA5/static_forcing/2d/lsm"])
+    rep = _run(conf)
+    assert "preblocks.per_step.blk" in _wheres(rep)
+    text = _text(rep)
+    assert "unknown field type 'static_forcing'" in text
+    # The prefix hint must beat difflib, which ranks 'dynamic_forcing' higher.
+    assert "Did you mean 'static'?" in text
+
+
+def test_misspelled_variable_name_suggests_the_real_one(conf):
+    _with_preblock_vars(conf, ["ERA5/prognostic/2d/PS"])
+    rep = _run(conf)
+    assert "preblocks.per_step.blk" in _wheres(rep)
+    assert "Did you mean 'ERA5/prognostic/2d/SP'?" in _text(rep)
+
+
+def test_variable_ref_under_wrong_source_is_an_error(conf):
+    """A real variable name under a source that does not produce it is still dead."""
+    conf["data"]["source"]["OTHER"] = copy.deepcopy(conf["data"]["source"]["ERA5"])
+    conf["data"]["source"]["OTHER"]["variables"] = {"dynamic_forcing": {"vars_2D": ["tsi"]}}
+    _with_preblock_vars(conf, ["ERA5/dynamic_forcing/2d/tsi"])
+    assert "preblocks.per_step.blk" in _wheres(_run(conf))
+
+
+def test_postblock_variable_refs_are_checked(conf):
+    """Scalar variable args (q_var, sp_var, ...) count, not just `variables` lists."""
+    conf["postblocks"]["per_step"]["fixer"] = {
+        "type": "tracer_fixer",
+        "args": {"tracer_vars": ["ERA5/prognostic/3d/NOPE"]},
+    }
+    assert "postblocks.per_step.fixer" in _wheres(_run(conf))
+
+
+def test_rename_targets_are_valid_downstream(conf):
+    """A rename creates keys no source produces — referencing them is legitimate."""
+    conf["preblocks"]["ic_only"] = {
+        "rn": {"type": "rename", "args": {"mapping": {"ERA5/prognostic/3d/T": "ERA5/prognostic/3d/temp"}}}
+    }
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/temp"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_unresolvable_rename_mapping_file_disables_the_check(conf):
+    """A mapping_file cannot be read statically, so stay quiet rather than cry wolf."""
+    conf["preblocks"]["ic_only"] = {"rn": {"type": "rename", "args": {"mapping_file": "/some/map.yml"}}}
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/anything_at_all"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_synthesised_output_names_are_not_flagged(conf):
+    """`output_name` names a variable the block creates, and is valid downstream."""
+    conf["postblocks"]["per_step"]["mslp"] = {
+        "type": "mslp_diagnostic",
+        "args": {
+            "output_name": "ERA5/derived_diagnostic/2d/mslp",
+            "surface_pressure_var": "ERA5/prognostic/2d/SP",
+        },
+    }
+    _with_preblock_vars(conf, ["ERA5/derived_diagnostic/2d/mslp"])
+    # Not an empty error set: mslp_diagnostic also trips the BaseLoss target-twin
+    # check, which is a separate finding. Only the variable-ref check matters here.
+    assert "not produced by any configured source" not in _text(_run(conf))
+
+
+def test_file_paths_are_not_mistaken_for_variable_refs(conf):
+    """Paths have enough slashes to look like keys; the source-name test excludes them."""
+    conf["preblocks"]["per_step"]["blk"] = {
+        "type": "regrid",
+        "args": {"weight_file": "/glade/derecho/scratch/u/weights.nc", "variables": ["ERA5/prognostic/3d/T"]},
+    }
+    assert _wheres(_run(conf)) == set()
+
+
+# ===========================================================================
+# YAML numeric strings
+# ===========================================================================
+
+
+def test_unsigned_exponent_is_an_error(conf):
+    """`1.0e6` is a str in YAML 1.1 — it reaches the code and raises on first use."""
+    conf["postblocks"]["per_step"]["log_trans"] = {
+        "type": "exp_transform",
+        "args": {"variables": [], "max_output": yaml.safe_load("x: 1.0e6")["x"]},
+    }
+    rep = _run(conf)
+    where = "postblocks.per_step.log_trans.args.max_output"
+    assert where in _wheres(rep), _text(rep)
+    assert "1.0e+6" in _text(rep)
+
+
+def test_signed_exponent_is_accepted(conf):
+    """The correct spelling parses as a float and must stay silent."""
+    conf["postblocks"]["per_step"]["log_trans"] = {
+        "type": "exp_transform",
+        "args": {"variables": [], "max_output": yaml.safe_load("x: 1.0e+6")["x"]},
+    }
+    rep = _run(conf)
+    assert not any(f.where.endswith("max_output") for f in rep.findings), _text(rep)
+
+
+def test_numeric_string_found_in_a_list(conf):
+    """The walk descends into lists, which is where thresholds often live."""
+    conf["postblocks"]["per_step"]["tracer_fixer"] = {
+        "type": "tracer_fixer",
+        "args": {"tracer_vars": ["ERA5/prognostic/3d/Q"], "tracer_thres": [yaml.safe_load("x: 1e3")["x"]]},
+    }
+    rep = _run(conf)
+    assert "postblocks.per_step.tracer_fixer.args.tracer_thres[0]" in _wheres(rep), _text(rep)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["%Y", "/glade/p/1e5/run", "era5-gen2", "10", "e", "1e", "e6", "1.0e6 m"],
+    ids=["strftime", "path", "registry_key", "base_10", "base_e", "trailing_e", "leading_e", "with_units"],
+)
+def test_legitimate_strings_are_not_flagged(conf, value):
+    """Paths, registry keys and ExpTransform's `base: "10"` must not trip the check."""
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = value
+    rep = _run(conf)
+    assert not any("numeric" in f.message or "exponent" in f.message for f in rep.findings), _text(rep)

@@ -540,3 +540,122 @@ def test_preprocess_main_duplicate_scaler_path_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
     with pytest.raises(ValueError, match="distinct scaler_path"):
         preprocess.main()
+
+
+# ---------------------------------------------------------------------------
+# IC-phase handling (offline — no dataset needed)
+# ---------------------------------------------------------------------------
+
+
+class TestICPhase:
+    """`credit preprocess` must fit scalers on the batch the trainer produces at step 0.
+
+    The trainer runs ``preblocks.ic_only`` before ``preblocks.per_step`` (see
+    ``TrainerGen2``), so statistics fit on the raw batch would describe a different
+    grid, vertical coordinate or set of variable names than the scaler is later asked
+    to transform.
+    """
+
+    RAW = f"{SOURCE}/prognostic/2d/raw_name"
+    RENAMED = f"{SOURCE}/prognostic/2d/renamed"
+
+    @staticmethod
+    def _batch(var_key, value=3.0):
+        return {"input": {SOURCE: {var_key: torch.full((1, 1, 1, 2, 2), value)}}}
+
+    @staticmethod
+    def _conf(tmp_path, ic_only=None):
+        conf = {
+            "preblocks": {
+                "per_step": {
+                    "scaler": {
+                        "type": "bridgescaler_transform",
+                        "args": {"variables": [], "scaler_path": str(tmp_path / "scaler.json")},
+                    }
+                }
+            }
+        }
+        if ic_only is not None:
+            conf["preblocks"]["ic_only"] = ic_only
+        return conf
+
+    def test_ic_phase_is_applied_before_fitting(self, tmp_path):
+        """An ic_only rename reaches the fit batch — the trainer applies it before per_step."""
+        from credit.preblock import apply_preblocks
+
+        conf = self._conf(
+            tmp_path,
+            {"rename": {"type": "rename", "args": {"mapping": {self.RAW: self.RENAMED}}}},
+        )
+        ic_preblocks = build_preblocks(conf, phase="ic_only")
+        step_preblocks = build_preblocks(conf, phase="per_step")
+
+        batch = apply_preblocks(ic_preblocks, self._batch(self.RAW))
+        fit_batch = apply_preblocks_before_scaler(step_preblocks, batch, None, stop_key="scaler")
+
+        assert self.RENAMED in fit_batch["input"][SOURCE]
+        assert self.RAW not in fit_batch["input"][SOURCE]
+
+    def test_no_ic_section_is_a_passthrough(self, tmp_path):
+        """Configs without an ic_only section are untouched — the same object comes back."""
+        from credit.preblock import apply_preblocks
+
+        ic_preblocks = build_preblocks(self._conf(tmp_path), phase="ic_only")
+        assert len(ic_preblocks) == 0
+
+        batch = self._batch(self.RAW)
+        assert apply_preblocks(ic_preblocks, batch) is batch
+
+    def test_scaler_in_ic_only_is_rejected(self, tmp_path):
+        """An ic_only scaler is never fit by preprocess, so reject it with an actionable error."""
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(
+            tmp_path,
+            {
+                "scale_ic": {
+                    "type": "bridgescaler_transform",
+                    "args": {"variables": [], "scaler_path": str(tmp_path / "ic_scaler.json")},
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="not supported in the 'ic_only' phase"):
+            _validate_ic_phase(build_preblocks(conf, phase="ic_only"))
+
+    def test_concat_in_ic_only_is_rejected(self, tmp_path):
+        """concat flattens the nested dict the per_step chain needs."""
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(tmp_path, {"concat": {"type": "concat"}})
+        with pytest.raises(ValueError, match="not supported in the 'ic_only' phase"):
+            _validate_ic_phase(build_preblocks(conf, phase="ic_only"))
+
+    def test_valid_ic_phase_passes_validation(self, tmp_path):
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(tmp_path, {"rename": {"type": "rename", "args": {"mapping": {self.RAW: self.RENAMED}}}})
+        _validate_ic_phase(build_preblocks(conf, phase="ic_only"))  # must not raise
+
+
+def test_check_flags_unsupported_ic_only_blocks():
+    """`credit check` reports the same constraint statically."""
+    from credit.cli._check import _Report, _check_ic_only_phase
+
+    rep = _Report("test.yml")
+    _check_ic_only_phase(
+        {
+            "preblocks": {
+                "ic_only": {
+                    "scale_ic": {"type": "bridgescaler_transform", "args": {}},
+                    "concat": {"type": "concat"},
+                    "rename": {"type": "rename", "args": {}},
+                }
+            }
+        },
+        rep,
+    )
+    wheres = [f.where for f in rep.findings]
+    assert rep.count("error") == 2
+    assert "preblocks.ic_only.scale_ic" in wheres
+    assert "preblocks.ic_only.concat" in wheres
+    assert "preblocks.ic_only.rename" not in wheres
