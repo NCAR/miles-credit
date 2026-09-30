@@ -1,6 +1,7 @@
 import logging
 import os
 
+import numpy as np
 import torch
 from torch.amp import GradScaler
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
@@ -720,3 +721,118 @@ def load_model_states_and_optimizer(conf, model, device):
             param_group["lr"] = learning_rate
 
     return conf, model, optimizer, scheduler, scaler
+
+
+def _finite_summary(t: torch.Tensor) -> str:
+    """One-line non-finite summary of a tensor, for the NaN-loss report."""
+    t = t.detach().float()
+    nan = int(torch.isnan(t).sum())
+    inf = int(torch.isinf(t).sum())
+    finite = t[torch.isfinite(t)]
+    if finite.numel():
+        rng = f"range=[{float(finite.min()):.4g}, {float(finite.max()):.4g}]"
+    else:
+        rng = "range=[all non-finite]"
+    return f"shape={tuple(t.shape)} nan={nan} inf={inf} / {t.numel()} {rng}"
+
+
+def _walk_tensors(obj, path=()):
+    """Yield ``(label, tensor)`` for every tensor in an arbitrarily nested dict.
+
+    Handles both nesting depths the trainer carries: ``{source: {var: tensor}}``
+    (``x_raw``, ``x_physical``, ``y_processed``) and
+    ``{data_type: {source: {var: tensor}}}`` (``ic_preprocessed``). Variable keys
+    already carry their source ("E3SM_ATM/prognostic/3d/U"), so the source level
+    is dropped from the label — but the data_type level is kept, otherwise the
+    input and target copies of a variable print as indistinguishable duplicates.
+    """
+    if torch.is_tensor(obj):
+        keep = [seg for seg in path[:-1] if not path[-1].startswith(seg)]
+        yield "/".join([*keep, path[-1]]), obj
+    elif isinstance(obj, dict):
+        for key, value in obj.items():
+            yield from _walk_tensors(value, (*path, key))
+
+
+def _report_nested_stage(label: str, state, logger) -> None:
+    """Log the non-finite variables of one nested stage dict, or that it is clean."""
+    if not isinstance(state, dict):
+        return
+    entries = list(_walk_tensors(state))
+    if not entries:
+        return
+    bad = [(label, t) for label, t in entries if not torch.isfinite(t).all()]
+    if not bad:
+        logger.error("  %-20s all %d variables finite", label, len(entries))
+        return
+    logger.error("  %-20s %d of %d variables non-finite:", label, len(bad), len(entries))
+    for label, tensor in bad:
+        logger.error("      %-58s %s", label, _finite_summary(tensor))
+
+
+def _report_bad_channels(x: torch.Tensor, logger, limit: int = 40) -> None:
+    """Log which channel indices of the flat model input carry non-finite values.
+
+    Channel indices map to variable names through ``channel_schema.yaml`` in
+    ``save_loc``, so this pins the failure to a specific slice of the concat
+    output even when the named stages above all look clean.
+    """
+    if x.dim() < 2:
+        return
+    reduce_dims = tuple(d for d in range(x.dim()) if d != 1)
+    counts = (~torch.isfinite(x)).sum(dim=reduce_dims)
+    bad = torch.nonzero(counts, as_tuple=False).flatten().tolist()
+    if not bad:
+        return
+    shown = ", ".join(f"{c}({int(counts[c])})" for c in bad[:limit])
+    more = f" … and {len(bad) - limit} more" if len(bad) > limit else ""
+    logger.error("  x non-finite channels (index(count), see channel_schema.yaml): %s%s", shown, more)
+
+
+def report_nonfinite_loss(full_data_dict: dict, criterion, logger) -> None:
+    """Log where a non-finite training loss came from.
+
+    Called from a trainer's NaN/Inf guard, before it aborts the run. Walks the
+    pipeline in execution order — raw batch, post-``ic_only`` batch, the flat
+    model input, the flat prediction and target, then every variable of the
+    reconstructed ``y_processed`` / ``y_target_processed`` — and reports the
+    first stage that stops being finite, followed by the per-variable loss
+    terms. Without this the abort says only ``[nan]``, which does not
+    distinguish bad input data from a diverging model from a postblock that
+    produced NaN in physical units.
+
+    Args:
+        full_data_dict: the trainer's per-step state dict.
+        criterion: the loss; ``BaseLoss`` exposes ``last_var_losses``.
+        logger: logger to write the report to.
+    """
+    logger.error("Non-finite loss — pipeline report (stages in execution order):")
+
+    # Named nested stages, before concat flattens everything into x.
+    _report_nested_stage("x_raw (dataset)", full_data_dict.get("x_raw"), logger)
+    _report_nested_stage("ic_preprocessed", full_data_dict.get("ic_preprocessed"), logger)
+    _report_nested_stage("x_physical (t0)", full_data_dict.get("x_physical"), logger)
+
+    for key in ("x", "y_pred", "y"):
+        tensor = full_data_dict.get(key)
+        if torch.is_tensor(tensor):
+            logger.error("  %-20s %s", key, _finite_summary(tensor))
+            if key == "x" and not torch.isfinite(tensor).all():
+                _report_bad_channels(tensor, logger)
+
+    _report_nested_stage("y_processed", full_data_dict.get("y_processed"), logger)
+    _report_nested_stage("y_target_processed", full_data_dict.get("y_target_processed"), logger)
+
+    var_losses = getattr(criterion, "last_var_losses", None)
+    if not var_losses:
+        return
+    bad_losses = {k: v for k, v in var_losses.items() if not np.isfinite(v)}
+    weights = getattr(criterion, "_combination_weights", None) or {}
+    if bad_losses:
+        logger.error("  %d of %d per-variable loss terms non-finite:", len(bad_losses), len(var_losses))
+        for var_key, value in bad_losses.items():
+            logger.error("      %-58s weight=%-12.6g loss=%s", var_key, weights.get(var_key, float("nan")), value)
+    else:
+        logger.error(
+            "  all %d per-variable loss terms finite — the combination weights are the problem", len(var_losses)
+        )
