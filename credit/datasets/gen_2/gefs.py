@@ -28,6 +28,7 @@ import os
 import re
 from typing import Any
 
+import cftime
 import numpy as np
 import pandas as pd
 import torch
@@ -61,7 +62,12 @@ _ATM_3D_VARIABLES = {
     "v_s",
     "u_a",
     "v_a",
+    "Qtot",
 }
+# Total-water species summed into the derived "Qtot" variable, in gen1's order
+# (credit/gefs.py::combine_microphysics_terms). Water vapour plus the five
+# condensate species, so "Qtot" is total water, not specific humidity.
+_MICROPHYSICS_VARIABLES = ("sphum", "liq_wat", "ice_wat", "rainwat", "snowwat", "graupel")
 _SURFACE_VARIABLES = {
     "slmsk",
     "tsea",
@@ -118,17 +124,17 @@ _SURFACE_VARIABLES = {
 }
 
 
-def _run_prefix(t: pd.Timestamp) -> str:
+def _run_prefix(t: pd.Timestamp | cftime.datetime) -> str:
     return f"gefs.{t:%Y%m%d}/{t:%H}/atmos/init"
 
 
-def _member_prefix(t: pd.Timestamp, member: str, base_path: str | None = None) -> str:
+def _member_prefix(t: pd.Timestamp | cftime.datetime, member: str, base_path: str | None = None) -> str:
     prefix = f"{_run_prefix(t)}/{member}"
     return os.path.join(base_path, prefix) if base_path else prefix
 
 
 def _member_file_paths(
-    t: pd.Timestamp,
+    t: pd.Timestamp | cftime.datetime,
     member: str,
     base_path: str | None = None,
 ) -> tuple[str, list[str], list[str]]:
@@ -158,6 +164,17 @@ class GEFSDataset(BaseDataset):
     request the virtual variables ``u_a`` and ``v_a``; these are computed from
     ``u_s`` and ``v_w`` respectively. There is no ``forecast_hour`` setting:
     this class reads only the cube-sphere initialization NetCDF files.
+
+    ``Qtot`` is a third virtual variable: the elementwise sum over
+    ``_MICROPHYSICS_VARIABLES`` -- ``sphum``, ``liq_wat``, ``ice_wat``,
+    ``rainwat``, ``snowwat`` and ``graupel`` -- matching gen1's
+    ``combine_microphysics_terms``. Because water vapour is included it is
+    *total water*, not specific humidity. The sum is taken per grid point, so
+    the vertical profile is preserved. Requesting ``Qtot`` neither requires nor
+    consumes the six species: they remain independently requestable, and asking
+    for ``Qtot`` alongside any of them returns both. Note that ``Qtot`` reads
+    six variables, which in ``remote`` mode costs six times the range reads of
+    a single field.
 
     Input settings:
         dataset_type (str): Must be ``"gefs"`` when routed through
@@ -420,7 +437,7 @@ class GEFSDataset(BaseDataset):
             member_arrays = {variable: [] for variable in vars_3d + vars_2d}
             for tile in range(1, _NUM_TILES + 1):
                 base_path = self.base_path if self.mode == "local" else None
-                _, atmospheric, surface = _member_file_paths(pd.Timestamp(t), member, base_path)
+                _, atmospheric, surface = _member_file_paths(t, member, base_path)
                 atm_path = atmospheric[tile - 1]
                 sfc_path = surface[tile - 1]
                 atm_vars = [variable for variable in vars_3d if variable in _ATM_3D_VARIABLES]
@@ -489,6 +506,16 @@ class GEFSDataset(BaseDataset):
         elif variable == "zh":
             values = np.asarray(ds["zh"].values)
             values = 0.5 * (values[:-1] + values[1:])
+        elif variable == "Qtot":
+            values = None
+            for name in _MICROPHYSICS_VARIABLES:
+                if name not in ds:
+                    raise KeyError(
+                        f"GEFS variable 'Qtot' is the sum of {list(_MICROPHYSICS_VARIABLES)}, "
+                        f"but '{name}' was not found in the atmospheric file."
+                    )
+                species = np.asarray(ds[name].values)
+                values = species if values is None else values + species
         else:
             values = np.asarray(ds[variable].values)
         return values[indices]
