@@ -154,8 +154,7 @@ def find_coord_pair(ds, lon_name: str | None = None, lat_name: str | None = None
         missing = [n for n in (lon_name, lat_name) if n not in all_names]
         if missing:
             raise ValueError(
-                f"Explicitly named coordinate variable(s) {missing} not found.\n"
-                f"Available names: {sorted(all_names)}"
+                f"Explicitly named coordinate variable(s) {missing} not found.\nAvailable names: {sorted(all_names)}"
             )
         candidates = [(lon_name, lat_name)]
     else:
@@ -266,7 +265,9 @@ def resolve_source_grid(
         # Same length but on different dimensions. A size match alone proves
         # nothing -- a square rectilinear grid (n_lat == n_lon) produces one
         # trivially -- so decide from how the data is actually indexed.
-        grid_type = "unstructured" if _data_spatial_rank(ds, lat_name, lon_name, source_cfg) == 1 else infer_grid_type(lat, lon)
+        grid_type = (
+            "unstructured" if _data_spatial_rank(ds, lat_name, lon_name, source_cfg) == 1 else infer_grid_type(lat, lon)
+        )
     else:
         grid_type = infer_grid_type(lat, lon)
 
@@ -594,9 +595,7 @@ class GridSchema:
             if y.ndim != 1 or x.ndim != 1:
                 raise ValueError(f"GridSchema: y/x must be 1D, got y.ndim={y.ndim}, x.ndim={x.ndim}")
             if (y.size, x.size) != lat.shape:
-                raise ValueError(
-                    f"GridSchema: y/x sizes {(y.size, x.size)} do not match lat/lon shape {lat.shape}."
-                )
+                raise ValueError(f"GridSchema: y/x sizes {(y.size, x.size)} do not match lat/lon shape {lat.shape}.")
         self.y = y
         self.x = x
         self.xy_attrs = xy_attrs or {}
@@ -609,18 +608,32 @@ class GridSchema:
     def resolve(cls, dataset: Any, ic_preblocks=None, step_preblocks=None, save_loc: str | None = None) -> "GridSchema":
         """Resolve the effective output grid from a live dataset + preblocks.
 
-        Starts from the dataset's native grid (``static_metadata["grid"]``,
-        falling back to each source's persisted ``{source}_grid_schema.nc`` in
-        *save_loc* when the live process doesn't have it); if an active
-        ``Regridder`` preblock is found, its real destination grid is used
-        instead. When no regridder is active (the common case), the native
-        grid passes through unchanged and the returned schema's ``origin`` is
-        ``"native"``.
+        An active ``Regridder`` preblock determines the output grid by itself: it
+        puts every source onto one shared destination, so that destination *is*
+        the answer and the sources' native grids no longer describe the output.
+        Only when no regridder is active (the common case) does the dataset's
+        native grid (``static_metadata["grid"]``, falling back to each source's
+        persisted ``{source}_grid_schema.nc`` in *save_loc*) pass through
+        unchanged, with the returned schema's ``origin`` set to ``"native"``.
+
+        The regridder is consulted first for exactly that reason. Resolving the
+        native grid first would raise on sources whose native grids disagree --
+        precisely what a regridder exists to reconcile -- before anything had
+        asked whether one was configured.
 
         Raises:
-            ValueError: if no native grid is available, or if grids disagree
-                (see ``_native_grid`` / ``_find_regridder``).
+            ValueError: if multiple active regridders disagree (see
+                ``_find_regridder``); or, with no regridder active, if no native
+                grid is available or the sources' native grids disagree (see
+                ``_native_grid``).
         """
+        regridder = _find_regridder(ic_preblocks, step_preblocks)
+        if regridder is not None:
+            # A regridded grid gets no projection axes: the Regridder's destination
+            # comes from an ESMF weight file, which stores only cell centres, so the
+            # source's own x/y no longer describe the output.
+            return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")
+
         native = _native_grid(dataset, save_loc)
         if native is None:
             raise ValueError(
@@ -629,22 +642,15 @@ class GridSchema:
                 "Ensure at least one source populates static_metadata['grid']."
             )
 
-        regridder = _find_regridder(ic_preblocks, step_preblocks)
-        if regridder is None:
-            return cls(
-                native["grid_type"],
-                native["lat"],
-                native["lon"],
-                origin="native",
-                y=native.get("y"),
-                x=native.get("x"),
-                xy_attrs=native.get("xy_attrs"),
-            )
-
-        # A regridded grid gets no projection axes: the Regridder's destination
-        # comes from an ESMF weight file, which stores only cell centres, so the
-        # source's own x/y no longer describe the output.
-        return cls(regridder.dst_grid_type, regridder.dst_lat, regridder.dst_lon, origin="regridded")
+        return cls(
+            native["grid_type"],
+            native["lat"],
+            native["lon"],
+            origin="native",
+            y=native.get("y"),
+            x=native.get("x"),
+            xy_attrs=native.get("xy_attrs"),
+        )
 
     # ------------------------------------------------------------------
     # Persistence
