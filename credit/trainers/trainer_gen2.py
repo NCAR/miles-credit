@@ -28,7 +28,7 @@ from credit.preblock import apply_preblocks, attach_channel_schema, build_preblo
 from credit.scheduler import update_on_batch
 from credit.trainers.base_trainer import BaseTrainer
 from credit.trainers.rollout_utils import apply_rollout_renames, assemble_rollout_batch
-from credit.trainers.utils import accum_log, cycle
+from credit.trainers.utils import accum_log, cycle, report_nonfinite_loss
 
 logger = logging.getLogger(__name__)
 
@@ -552,7 +552,8 @@ class TrainerERA5Gen2(BaseTrainer):
                 results_dict["train_std"].append(batch_std[0].item())
 
             if not np.isfinite(np.mean(results_dict["train_loss"])):
-                print(results_dict["train_loss"])
+                logger.error("Non-finite train_loss on batch %d: %s", steps, results_dict["train_loss"])
+                report_nonfinite_loss(full_data_dict, criterion, logger)
                 if self.skip_nan_prune:
                     logger.warning("NaN/Inf loss detected but skip_nan_prune=True; continuing.")
                 else:
