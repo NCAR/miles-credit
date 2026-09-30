@@ -16,7 +16,12 @@ from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
-from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
+from credit.preblock import (
+    BridgeScalerTransform,
+    apply_preblocks,
+    apply_preblocks_before_scaler,
+    build_preblocks,
+)
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.seed import seed_everything
 from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
@@ -40,6 +45,37 @@ def _backup_existing_file(path: str) -> str | None:
     shutil.move(path, backup_path)
     logger.warning("Existing scaler moved from %s to %s.", path, backup_path)
     return backup_path
+
+
+def _validate_ic_phase(ic_preblocks) -> None:
+    """Reject ``preblocks.ic_only`` layouts that preprocess cannot run.
+
+    The IC phase is replayed here so each scaler is fit on exactly the batch it
+    sees at rollout step 0. That requires the phase to leave the nested
+    ``batch[data_type][source][var_key]`` dict intact, and to need no scaler that
+    is still being fit:
+
+      - ``bridgescaler_transform``: preprocess fits the ``per_step`` scalers only,
+        so an IC-phase scaler would be asked to transform before it has any
+        statistics. The trainer fails the same way, just later and less clearly.
+      - ``concat``: collapses the nested dict into a flat ``{"x": tensor}``, which
+        neither the per-step chain nor the trainer's IC phase can consume.
+    """
+    from credit.preblock.concat import ConcatToTensor  # local import keeps module load lazy
+
+    for name, block in ic_preblocks.items():
+        where = f"preblocks.ic_only.{name}"
+        if isinstance(block, BridgeScalerTransform):
+            raise ValueError(
+                f"{where}: bridgescaler_transform is not supported in the 'ic_only' phase. "
+                "preprocess fits only 'per_step' scalers, so this one would never be fit. "
+                "Move it to preblocks.per_step."
+            )
+        if isinstance(block, ConcatToTensor):
+            raise ValueError(
+                f"{where}: concat is not supported in the 'ic_only' phase. It flattens the nested "
+                "variable dict that the per_step chain expects. Move it to the end of preblocks.per_step."
+            )
 
 
 def _scaler_probe_range(scaler):
@@ -238,7 +274,9 @@ Examples:
     trainer_conf = conf["trainer"]
     # Build preblocks and validate the scaler layout *before* touching the dataset,
     # so a config error fails fast without waiting on (network-backed) data loading.
-    preblocks = build_preblocks(conf)
+    ic_preblocks = build_preblocks(conf, phase="ic_only")
+    _validate_ic_phase(ic_preblocks)
+    preblocks = build_preblocks(conf, phase="per_step")
     # Collect *every* scaler block, not just the first: a config may pair a
     # standard-scaled group of variables with a quantile-scaled group, which
     # requires two BridgeScalerTransform blocks (scaler_type is one value per block).
@@ -286,6 +324,12 @@ Examples:
     for i in range(batches_per_epoch):
         logger.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
         batch = next(dl)
+        # Replay the IC phase first. The trainer runs ic_only (regrid, vertical
+        # interpolation, rename, ...) before the per-step chain at step 0, so a scaler
+        # fit on the raw batch would be fit on a different grid, vertical coordinate or
+        # set of variable names than the one it is later asked to transform. This is a
+        # no-op (same object returned) for configs with no ic_only section.
+        batch = apply_preblocks(ic_preblocks, batch)
         # Fit each scaler on the batch as it exists just before that scaler in the
         # preblock chain. Re-applying the pre-scaler preblocks per scaler is safe
         # because preblocks never mutate the raw batch (see apply_preblocks_before_scaler).
