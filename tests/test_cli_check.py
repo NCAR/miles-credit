@@ -263,6 +263,41 @@ def test_two_preblock_scalers_shared_path_errors(conf, tmp_path):
     assert "distinct scaler_path" in _text(rep)
 
 
+def test_postblock_spatial_variables_matches_preblock_ok(conf):
+    """Same spatial_variables on the fitting preblock and the applying postblock: no error."""
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {
+            "scaler_path": conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"],
+            "variables": [],
+            "method": "transform",
+            "spatial_variables": ["ERA5/prognostic/2d/SP"],
+        },
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    # scaler_target shares the same scaler_path (it inverse-transforms the target twin),
+    # so it must match too, or it would trip the same check.
+    conf["postblocks"]["per_step"]["scaler_target"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    rep = _run(conf)
+    assert "postblocks.per_step.scaler" not in _wheres(rep)
+    assert "postblocks.per_step.scaler_target" not in _wheres(rep)
+
+
+def test_postblock_spatial_variables_mismatch_errors(conf):
+    """The postblock applies a variable grid-wise that the preblock never fit that way —
+    this is exactly the bug reported by Yan Xie (OU): it passes `credit check` silently
+    today and only fails once training reaches the first batch."""
+    scaler_path = conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"]
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": scaler_path, "variables": [], "method": "transform"},
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    rep = _run(conf)
+    assert "postblocks.per_step.scaler" in _wheres(rep)
+    assert "spatial_variables" in _text(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))

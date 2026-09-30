@@ -480,6 +480,54 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
     _check_scaler_paths_unique(conf, rep)
+    _check_scaler_spatial_variables_consistent(conf, rep)
+
+
+def _iter_bridgescaler_blocks(conf: dict, top: str, sections: tuple[str, ...]):
+    """Yield (where, args) for every bridgescaler_transform block under `top`."""
+    for section in sections:
+        for name, block in ((conf.get(top) or {}).get(section) or {}).items():
+            if isinstance(block, dict) and block.get("type") == "bridgescaler_transform":
+                yield f"{top}.{section}.{name}", (block.get("args") or {})
+
+
+def _resolve_scaler_path(path) -> str | None:
+    if not isinstance(path, str) or not path:
+        return None
+    return os.path.realpath(os.path.expanduser(os.path.expandvars(path)))
+
+
+def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None:
+    """A scaler's `spatial_variables` must match between its preblock (fit) and
+    postblock (apply) blocks.
+
+    `credit preprocess` fits grid-wise (per-gridpoint) statistics only for the
+    variables named in the preblock's `spatial_variables` — anything else is fit
+    per-level. If the postblock applying that same scaler names a variable under
+    `spatial_variables` that the preblock didn't, the postblock flattens it to
+    `n_lat * n_lon` columns before calling the scaler, which no longer matches
+    the fitted column count and raises at runtime on the very first batch.
+    """
+    preblock_specs: dict[str, tuple[str, set]] = {}
+    for where, args in _iter_bridgescaler_blocks(conf, "preblocks", ("ic_only", "per_step")):
+        resolved = _resolve_scaler_path(args.get("scaler_path"))
+        if resolved is not None:
+            preblock_specs[resolved] = (where, set(args.get("spatial_variables") or []))
+
+    for where, args in _iter_bridgescaler_blocks(conf, "postblocks", ("per_step", "post_rollout")):
+        resolved = _resolve_scaler_path(args.get("scaler_path"))
+        if resolved is None or resolved not in preblock_specs:
+            continue
+        pre_where, pre_spatial = preblock_specs[resolved]
+        post_spatial = set(args.get("spatial_variables") or [])
+        if pre_spatial != post_spatial:
+            rep.error(
+                where,
+                f"'spatial_variables' does not match the preblock that fits this scaler ('{pre_where}'): "
+                f"preblock has {sorted(pre_spatial)}, this block has {sorted(post_spatial)}. A variable fit "
+                "per-level but applied grid-wise (or vice versa) fails the scaler's column-count check at runtime.",
+                fix=f"Set 'spatial_variables' to match '{pre_where}': {sorted(pre_spatial)}",
+            )
 
 
 def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
