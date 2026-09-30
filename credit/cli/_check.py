@@ -21,6 +21,7 @@ import difflib
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -65,6 +66,13 @@ _KNOWN_TOP_LEVEL = frozenset(
 )
 
 _ERROR, _WARN, _INFO = "error", "warning", "info"
+
+# YAML 1.1 resolves a scalar in exponent notation to a float only when the
+# exponent carries an explicit sign: "1.0e+6" is a float, "1.0e6" is a *string*.
+# A string matching this is therefore always the unsigned-exponent spelling,
+# which reaches the code as str and either raises on the first arithmetic or
+# silently misbehaves.
+_UNSIGNED_EXPONENT = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)[eE]\d+$")
 
 
 # ---------------------------------------------------------------------------
@@ -1279,6 +1287,38 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
 
 
+def _walk_scalars(node, path=""):
+    """Yield ``(dotted_path, value)`` for every scalar in a nested config."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_scalars(value, f"{path}.{key}" if path else str(key))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk_scalars(value, f"{path}[{i}]")
+    else:
+        yield path, node
+
+
+def _check_numeric_strings(conf: dict, rep: _Report) -> None:
+    """Flag values written in exponent notation that YAML parsed as strings.
+
+    ``max_output: 1.0e6`` looks numeric but reaches the code as ``"1.0e6"``,
+    because YAML 1.1 requires a signed exponent to resolve a float. The result
+    is a ``TypeError`` on the first comparison, or worse, a silent string
+    where a number was meant.
+    """
+    for where, value in _walk_scalars(conf):
+        if isinstance(value, str) and _UNSIGNED_EXPONENT.match(value.strip()):
+            fixed = f"{float(value):.10g}"
+            mantissa, _, exponent = value.strip().partition("e" if "e" in value else "E")
+            rep.error(
+                where,
+                f"'{value}' is a string, not a number: YAML only reads exponent notation as a float "
+                "when the exponent is signed.",
+                fix=f"Write {mantissa}e+{exponent} (or {fixed}).",
+            )
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -1299,7 +1339,13 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
         rep.error("custom_objects", f"Failed to load: {type(exc).__name__}: {exc}")
 
     # A data-only fragment has nothing to say about models, losses, or training.
-    checks = [_check_data_sources, _check_validation_data, _check_paths, _check_source_grids]
+    checks = [
+        _check_numeric_strings,
+        _check_data_sources,
+        _check_validation_data,
+        _check_paths,
+        _check_source_grids,
+    ]
     if not _is_data_fragment(conf):
         checks += [
             _check_registry_keys,
