@@ -491,6 +491,8 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
     _check_scaler_paths_unique(conf, rep)
+    _check_ic_only_phase(conf, rep)
+    _check_block_variable_refs(conf, rep)
 
 
 def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
@@ -521,6 +523,145 @@ def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
                 )
             else:
                 seen[resolved] = where
+
+
+# Block types the ``ic_only`` phase cannot host, and why. The IC phase runs once at
+# t=0 and must hand the per_step chain the same nested batch dict it received;
+# `credit preprocess` replays it before fitting so scaler statistics match the batch
+# the scaler later transforms.
+_IC_ONLY_FORBIDDEN = {
+    "bridgescaler_transform": (
+        "preprocess fits only the 'per_step' scalers, so an ic_only scaler is never fit "
+        "and has no statistics to transform with."
+    ),
+    "concat": (
+        "concat flattens the nested variable dict into a single tensor, which the per_step "
+        "chain that runs after the ic_only phase cannot consume."
+    ),
+}
+
+
+def _check_ic_only_phase(conf: dict, rep: _Report) -> None:
+    """Reject preblock types that cannot run in the ``ic_only`` phase."""
+    for name, block in ((conf.get("preblocks") or {}).get("ic_only") or {}).items():
+        if not isinstance(block, dict):
+            continue
+        reason = _IC_ONLY_FORBIDDEN.get(block.get("type"))
+        if reason:
+            rep.error(
+                f"preblocks.ic_only.{name}",
+                f"'{block['type']}' is not supported in the 'ic_only' phase: {reason}",
+                fix=f"Move '{name}' into preblocks.per_step.",
+            )
+
+
+# Field type used by postblocks that synthesise a variable (mslp, geopotential,
+# pressure interpolation). It never comes from a dataset source, so a reference to
+# one is not a typo.
+_SYNTHETIC_FIELD_TYPE = "derived_diagnostic"
+
+# Args whose value NAMES a variable the block creates rather than one it reads.
+_OUTPUT_NAME_ARGS = frozenset({"output_name"})
+
+
+def _iter_block_var_refs(conf: dict, sources: set[str]):
+    """Yield ``(where, arg_name, value)`` for every pre/postblock arg that names a variable.
+
+    A value counts as a variable reference when it has at least four
+    ``"/"``-separated segments and its first segment is a configured source name.
+    That excludes file paths (whose first segment is empty, ``$VAR`` or a directory)
+    and partial selections like ``"era5/prognostic"``, which
+    ``_parse_variable_selection`` expands by prefix.
+    """
+
+    def walk(node, where, arg_name):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from walk(v, where, k)
+        elif isinstance(node, list):
+            for v in node:
+                yield from walk(v, where, arg_name)
+        elif isinstance(node, str) and node.count("/") >= 3 and node.split("/")[0] in sources:
+            yield where, arg_name, node
+
+    for top, sections in (("preblocks", ("ic_only", "per_step")), ("postblocks", ("per_step", "post_rollout"))):
+        for section in sections:
+            for name, block in ((conf.get(top) or {}).get(section) or {}).items():
+                if isinstance(block, dict):
+                    yield from walk(block.get("args") or {}, f"{top}.{section}.{name}", None)
+
+
+def _check_block_variable_refs(conf: dict, rep: _Report) -> None:
+    """Verify every variable a pre/postblock names is actually produced by a source.
+
+    A misspelled variable key is silent at config time and at block-construction
+    time: ``_parse_variable_selection`` and ``Regridder.forward`` both skip names
+    they do not find, so the block quietly does nothing. The failure surfaces much
+    later and far from its cause — an unregridded variable, for instance, reaches
+    ``concat`` with the wrong rank and raises ``Tensors must have same number of
+    dimensions``.
+    """
+    from typing import get_args
+
+    from credit.datasets.gen_2.base_dataset import VALID_FIELD_TYPES
+    from credit.datasets.gen_2.channel_utils import ChannelSchema
+
+    sources = conf.get("data", {}).get("source")
+    if not isinstance(sources, dict) or not sources:
+        return  # malformed data block — already reported by _check_data_sources
+    source_names = set(sources)
+
+    try:
+        schema = ChannelSchema.from_config(conf)
+        known = set(schema.input_channel_map()) | set(schema.target_channel_map())
+    except Exception:  # noqa: BLE001 — schema problems are reported by _check_channel_schema
+        return
+
+    field_types = set(get_args(VALID_FIELD_TYPES)) | {_SYNTHETIC_FIELD_TYPE}
+
+    # Renames rewrite variable keys mid-chain, so their targets are legitimate
+    # references even though no source produces them. A mapping_file cannot be
+    # resolved statically, so skip the check entirely rather than cry wolf.
+    for top, sections in (("preblocks", ("ic_only", "per_step")), ("postblocks", ("per_step", "post_rollout"))):
+        for section in sections:
+            for block in ((conf.get(top) or {}).get(section) or {}).values():
+                if not isinstance(block, dict) or block.get("type") != "rename":
+                    continue
+                args = block.get("args") or {}
+                if args.get("mapping_file"):
+                    return
+                known |= set((args.get("mapping") or {}).values())
+
+    # Variables a block creates are valid downstream references.
+    known |= {v for _, arg, v in _iter_block_var_refs(conf, source_names) if arg in _OUTPUT_NAME_ARGS}
+
+    bad: dict[str, list[str]] = {}
+    for where, arg, value in _iter_block_var_refs(conf, source_names):
+        if arg in _OUTPUT_NAME_ARGS or value in known:
+            continue
+        bad.setdefault(value, [])
+        if where not in bad[value]:
+            bad[value].append(where)
+
+    for value, wheres in bad.items():
+        field_type = value.split("/")[1]
+        if field_type not in field_types:
+            # A valid type that prefixes the bad one beats difflib's ranking: the
+            # common slip is a gen1-style suffix ("static_forcing" for "static"),
+            # and difflib scores the longer "dynamic_forcing" higher.
+            prefix = next((t for t in sorted(field_types) if field_type.startswith(t)), None)
+            hint = f" Did you mean '{prefix}'?" if prefix else _suggest(field_type, sorted(field_types))
+            message = (
+                f"'{value}' uses unknown field type '{field_type}'.{hint} "
+                f"Valid field types: {', '.join(sorted(field_types))}."
+            )
+        else:
+            message = f"'{value}' is not produced by any configured source.{_suggest(value, sorted(known))}"
+        rep.error(
+            wheres[0] if len(wheres) == 1 else f"{wheres[0]} (+{len(wheres) - 1} more)",
+            f"{message} The block will silently skip it.",
+            fix="Use a variable key listed under data.source, or correct the spelling.",
+        )
 
 
 def _check_model(conf: dict, rep: _Report, deep: bool) -> None:

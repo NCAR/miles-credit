@@ -295,6 +295,32 @@ The GEFS Dataset reads the raw GEFS (Global Ensemble Forecast System) initializa
 files from the public `gfs-ensemble-forecast-system` Google Cloud bucket. Each selected
 ensemble member contains atmospheric and surface fields on the six cube-sphere tiles,
 making it useful for initializing ensemble rollouts.
+
+Alongside the native GEFS variable names, three **derived variables** may be requested in
+`vars_3D`. They are computed on read and do not appear in the raw files:
+
+| Name | Derived from | Notes |
+|------|--------------|-------|
+| `u_a` | `u_s` | Unstaggered zonal wind, averaged from the staggered cell edges onto cell centers. |
+| `v_a` | `v_w` | Unstaggered meridional wind, likewise. |
+| `Qtot` | `sphum`, `liq_wat`, `ice_wat`, `rainwat`, `snowwat`, `graupel` | Total water: the elementwise sum of water vapour and the five condensate species, matching gen1's `combine_microphysics_terms`. |
+
+`Qtot` is summed per grid point, so vertical profiles are preserved. Because water vapour
+is included it is *total water*, not specific humidity — feeding it to a model whose
+humidity channel was trained on vapour alone is a physics change, not just a rename.
+
+Derived variables neither require nor consume their source fields: the raw species stay
+independently requestable, and asking for `Qtot` together with any of them returns both.
+Note that `Qtot` reads six variables, so in `mode: remote` it costs six times the range
+reads of a single field.
+
+```yaml
+variables:
+  prognostic:
+    vars_3D: [ 't', 'Qtot', 'u_a', 'v_a' ]   # combined total water
+    # vars_3D: [ 't', 'sphum', 'liq_wat' ]   # or the raw species, uncombined
+    vars_2D: [ 'ps', 't2m' ]
+```
 ## Writing Your Own Dataset
 
 To plug in a dataset CREDIT does not ship — a new data source, file layout, or
