@@ -404,7 +404,12 @@ class ForecastWriter:
         if self._group_mode == _GROUP_MONTHLY:
             return (dt.year, dt.month)
         if self._group_mode == _GROUP_DAILY:
-            return dt.date()
+            # (y, m, d) rather than dt.date(): cftime datetimes (any non-Gregorian
+            # calendar the dataset resolves, e.g. CESM's noleap) have no .date().
+            # The key is only compared for equality against _buffer_period, so the
+            # tuple gives identical bucket boundaries -- and matches how
+            # _period_fname already builds the daily filename.
+            return (dt.year, dt.month, dt.day)
         if self._group_mode == _GROUP_FULL:
             return 0  # constant — all steps share one bucket
         return dt  # step mode — each timestamp is its own bucket
