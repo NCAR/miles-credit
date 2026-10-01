@@ -1,4 +1,4 @@
-save_loc: /glade/derecho/scratch/schreck/credit_tests/smoke_tp_parity_nextgen_tp1
+save_loc: /glade/derecho/scratch/schreck/credit_tests/smoke_tp_parity_wxformer_column_tp2
 seed: 1000
 data:
   source:
@@ -82,7 +82,7 @@ preblocks:
     concat:
       type: concat
 model:
-  type: nextgen_wxformer
+  type: wxformer_column
   frames: 1
   image_height: 640
   image_width: 1280
@@ -142,7 +142,7 @@ trainer:
   type: era5-gen2
   parallelism:
     data: fsdp2
-    tensor: 1
+    tensor: 2
     domain: 1
   load_weights: false
   load_optimizer: false
@@ -182,7 +182,7 @@ trainer:
   prefetch_factor: 2
 pbs:
   conda: /glade/work/schreck/conda-envs/credit-main-derecho
-  job_name: smoke_tp_parity_tp1
+  job_name: smoke_tp_parity_tp2
   project: NAML0001
   walltime: 01:00:00
   nodes: 1

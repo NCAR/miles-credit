@@ -13,8 +13,8 @@
 # scrambled the fused qkv boundaries, so tp > 1 trained wrong outputs).
 #
 # Layout: 4 GPUs.
-#   run A: nextgen_wxformer, data=fsdp2, tensor=1, nproc=2  -> dp=2
-#   run B: nextgen_wxformer, data=fsdp2, tensor=2, nproc=4  -> dp=2, tp=2
+#   run A: wxformer_column, data=fsdp2, tensor=1, nproc=2  -> dp=2
+#   run B: wxformer_column, data=fsdp2, tensor=2, nproc=4  -> dp=2, tp=2
 # Same dp layout + fixed seed => the loss trajectories must agree. The exact
 # comparison is the goal; the rowwise all_reduce reassociates float32 sums,
 # so a 1e-4 relative-tolerance pass with an exact-print mismatch means
@@ -51,15 +51,15 @@ echo "Date : $(date)"
 
 # name:config:nproc
 RUNS=(
-  "tp1:smoke_tp_parity_nextgen_tp1_derecho.yml:2"
-  "tp2:smoke_tp_parity_nextgen_tp2_derecho.yml:4"
+  "tp1:smoke_tp_parity_wxformer_column_tp1_derecho.yml:2"
+  "tp2:smoke_tp_parity_wxformer_column_tp2_derecho.yml:4"
 )
 
 PORT=29520
 for entry in "${RUNS[@]}"; do
   name="${entry%%:*}"; rest="${entry#*:}"; cfg="${rest%%:*}"; nproc="${rest##*:}"
   log="$LOGDIR/${name}.log"
-  rm -rf "/glade/derecho/scratch/schreck/credit_tests/smoke_tp_parity_nextgen_${name}"
+  rm -rf "/glade/derecho/scratch/schreck/credit_tests/smoke_tp_parity_wxformer_column_${name}"
   echo "===================================================================="
   echo ">>> [$name] nproc=$nproc cfg=$cfg  (port $PORT)"
   echo "    log: $log"
@@ -85,7 +85,7 @@ done
 # full-state save/load must round-trip under tp=2 (the legacy TP raised here).
 if [ -f "$LOGDIR/tp2.log" ] && grep -q "PASS  tp2" "$SUMMARY"; then
   resume_cfg="$LOGDIR/tp2_resume.yml"
-  $PYCHK - "${CFGDIR}/smoke_tp_parity_nextgen_tp2_derecho.yml" "$resume_cfg" <<'PYEOF'
+  $PYCHK - "${CFGDIR}/smoke_tp_parity_wxformer_column_tp2_derecho.yml" "$resume_cfg" <<'PYEOF'
 import sys
 import yaml
 
