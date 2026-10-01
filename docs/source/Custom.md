@@ -60,13 +60,14 @@ Subclass the appropriate base class in your own installable package:
 # mypackage/preblock.py
 from credit.preblock.base import BasePreblock
 
+
 class MyPreBlock(BasePreblock):
     def __init__(self, fill_value: float = 0.0):
         super().__init__()
         self.fill_value = fill_value
 
     def forward(self, batch: dict) -> dict:
-        batch = self._copy_batch(batch)   # never mutate the caller's dict
+        batch = self._copy_batch(batch)  # never mutate the caller's dict
         # ... your transform ...
         return batch
 ```
@@ -230,10 +231,10 @@ is identical:
 from credit.preblock import register_preblock
 from credit.preblock.base import BasePreblock
 
+
 @register_preblock("my_preblock")
 class MyPreBlock(BasePreblock):
-    def forward(self, batch: dict) -> dict:
-        ...
+    def forward(self, batch: dict) -> dict: ...
 ```
 
 The equivalent decorators are `register_dataset`, `register_model`,
