@@ -3,79 +3,80 @@ from credit.data import drop_var_from_dataset, get_forward_data
 import numpy as np
 import yaml
 import pandas as pd
+import xarray as xr
 
 
 class XRSamplerByYear:
     """
-    given a conf and datetime, samples an xarray with only variables specified in conf["data"]
-    WARNING: only compatible with single zarr store for all variables
-    - excludes static variables
-    - only compatible with files with the year in their filename
+    Given a conf and datetime, samples an xarray with only variables specified in conf["data"].
+    Supports both single-file (CAM/CESM) and multi-file (ERA5) configurations where
+    different variable groups may live in different zarr/netCDF stores.
 
-    future features:
-    - keep variables based on predict.save_vars
-    - handle multiple zarr stores
+    - Excludes static variables
+    - Only compatible with files that have the year in their filename
+    - Variable groups that share the same file pattern are loaded once and merged
     """
 
     def __init__(self, config_path, conf=None):
         if not conf:
-            # Load the configuration and get the relevant variables
             with open(config_path) as cf:
                 conf = yaml.load(cf, Loader=yaml.FullLoader)
 
         data_conf = conf["data"]
 
-        # check if all source files same (cesm compatible, not compatible for era5)
-        save_keywords = [
-            "save_loc",
-            "save_loc_surface",
-            "save_loc_dynamic_forcing",
-            "save_loc_diagnostic",
-            "save_loc_forcing",
+        # Map each variable group to its source file pattern.
+        # Keys are optional — groups absent from the config are silently skipped.
+        group_keys = [
+            ("variables", "save_loc"),
+            ("surface_variables", "save_loc_surface"),
+            ("dynamic_forcing_variables", "save_loc_dynamic_forcing"),
+            ("diagnostic_variables", "save_loc_diagnostic"),
+            ("forcing_variables", "save_loc_forcing"),
         ]
-        filestr = data_conf[f"{save_keywords[0]}"]
 
-        for kw in save_keywords:
-            if filestr != data_conf[kw]:
-                raise RuntimeError("this sampler can only handle one dataset file for all vars")
-            filestr = data_conf[kw]
+        # Accumulate variables per unique file pattern so each file is loaded once.
+        path_to_vars: dict[str, list] = {}
+        for var_key, loc_key in group_keys:
+            var_list = data_conf.get(var_key, [])
+            if not var_list:
+                continue
+            loc = data_conf.get(loc_key)
+            if not loc:
+                continue
+            if loc not in path_to_vars:
+                path_to_vars[loc] = []
+            for v in var_list:
+                if v not in path_to_vars[loc]:
+                    path_to_vars[loc].append(v)
 
-        # get list of files
-        self.filenames = glob(filestr)
+        # Resolve globs once at construction time.
+        self._path_groups = [
+            {"filenames": sorted(glob(pattern)), "variables": vars_list} for pattern, vars_list in path_to_vars.items()
+        ]
 
-        # get variables to sample
-        self.variables = []
-        for data_kw in [
-            "variables",
-            "surface_variables",
-            "dynamic_forcing_variables",
-            "diagnostic_variables",
-            "forcing_variables",
-        ]:
-            self.variables += data_conf[data_kw]
+        # Flat list of all tracked variables (for external reference).
+        self.variables = [v for g in self._path_groups for v in g["variables"]]
 
-        # retain the currently loaded file's year
         self.current_file_year = -1
 
-    def __call__(self, timestamp: np.datetime64):  # np.datetime64
+    def __call__(self, timestamp: np.datetime64):
         year = timestamp.astype("datetime64[Y]").astype(int) + 1970
 
         if year != self.current_file_year:
             self.current_file_year = year
-            # load a new dataset
-            filename = [fn for fn in self.filenames if str(year) in fn]
-            if len(filename) != 1:
-                raise RuntimeError("filenames do not have unique years")
+            datasets = []
+            for group in self._path_groups:
+                matching = [fn for fn in group["filenames"] if str(year) in fn]
+                if len(matching) != 1:
+                    raise RuntimeError(f"expected exactly 1 file for year {year}, found {len(matching)}: {matching}")
+                ds = get_forward_data(matching[0])
+                ds = drop_var_from_dataset(ds, group["variables"])
+                if not isinstance(ds.time[0].values, np.datetime64):
+                    time_index = pd.DatetimeIndex(ds["time"].astype("datetime64[ns]").values)
+                    ds["time"] = time_index
+                datasets.append(ds)
 
-            self.ds = get_forward_data(filename[0])
-
-            # drop variables
-            self.ds = drop_var_from_dataset(self.ds, self.variables)
-
-            # convert to datetime index if needed (in case of cftime)
-            if not isinstance(self.ds.time[0].values, np.datetime64):
-                time_index = pd.DatetimeIndex(self.ds["time"].astype("datetime64[ns]").values)
-                self.ds["time"] = time_index
+            self.ds = datasets[0] if len(datasets) == 1 else xr.merge(datasets)
 
         return self.ds.loc[{"time": [timestamp]}]
 
