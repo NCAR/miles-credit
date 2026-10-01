@@ -11,97 +11,83 @@ CREDIT supports two primary training approaches for ensemble generation:
 
 The fine-tuning approach is currently preferred due to computational efficiency and resource requirements.
 
-### Configuration
+The rest of this page walks through the noise-injection approach in detail, called **SDL** (Stochastic Decomposition Layer) elsewhere in the codebase and docs — `crossformer-ensemble`/`crossformer-style` in `model.type`, `StochasticDecompositionLayer` in the code.
 
-```yaml
-trainer:
-    type: era5  # or era5-ensemble
-    ensemble_size: 8
-    batch_size: 4
-loss:
-    type: KCRPS
-```
+## Noise-Injection Ensembles (SDL)
 
-## Noise-Injection Ensembles
+### Architecture
 
-### Architecture Overview
+SDL wraps an already-trained `CrossFormer`/`wxformer` model (class `CrossFormerWithNoise`, `credit/models/wxformer/crossformer_ensemble.py`) with a handful of `StochasticDecompositionLayer` modules and freezes every pretrained weight. Only the new layers train. Each `StochasticDecompositionLayer`:
 
-CREDIT's noise-injection approach utilizes the `CrossFormerWithNoise` model, which extends pretrained CrossFormer models with specialized `PixelNoiseInjection` layers. The implementation introduces stochasticity at multiple stages of the encoder-decoder pipeline while preserving learned representations from the base model.
+- draws per-pixel, per-channel Gaussian noise the same shape as the feature map it's attached to
+- projects a shared latent noise vector `z` (dimension `noise_latent_dim`) through a small learned linear layer to get a per-channel "style" that modulates that noise
+- scales the result by a fixed `noise_factor` (a hyperparameter set from the config, e.g. `encoder_noise_factor`/`decoder_noise_factor` — despite living in an `nn.Parameter`, it is constructed with `requires_grad=False` and is not learned) and a learned per-channel `modulation` parameter
+- adds that to the feature map
 
-#### Key Components:
+So per injection point, what actually trains is the linear projection and the modulation parameter; `noise_factor` and `noise_latent_dim` are fixed choices you make in the config, not learned. There are three decoder injection points always, and three more in the encoder when `encoder_noise: True`.
 
-**PixelNoiseInjection Module:**
-- Injects per-pixel, per-channel noise into feature maps
-- Uses learnable modulation parameters and style transformations
-- Supports noise scheduling based on forecast step
-- Combines latent noise vectors with spatial noise patterns
+Because the base model is frozen and only these small layers train, fine-tuning SDL on top of a base checkpoint is far cheaper than training the base model was — fewer trainable parameters, fewer epochs needed, and (with `correlated: False`, the default) a fresh noise draw at every spatial injection point.
 
-**CrossFormerWithNoise Architecture:**
-- Extends base CrossFormer with noise injection capabilities
-- Supports both encoder and decoder noise injection
-- Implements learnable noise factors for different layers
-- Includes exponential decay scheduling for noise strength
+### Fine-tuning SDL on a trained wxformer checkpoint
 
-### Training Methodology
+Starting point: you already have a trained `wxformer` checkpoint (`model_checkpoint.pt` or `checkpoint.pt` under some `save_loc`). A full worked example is at
+[`config/gen_2/examples/wxformer_sdl.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/wxformer_sdl.yml).
 
-Training utilizes the Kernel Continuous Ranked Probability Score (KCRPS) as the primary loss function, optimizing the model's ability to produce well-calibrated probabilistic forecasts. The CRPS loss evaluates the entire forecast distribution against observations, encouraging both accuracy and appropriate uncertainty quantification.
+1. **Copy the base checkpoint into a new `save_loc`.** `load_weights: True` looks for a checkpoint inside the config's own `save_loc`, not somewhere else — it doesn't have a separate "warm start from" path. Use a directory different from the base run's so you don't overwrite it:
 
-#### Fine-tuning Process:
-- Pretrained CrossFormer weights are frozen (`freeze=True`)
-- Only noise-injection layers and associated parameters are trained
-- Noise factors are learnable parameters that adapt during training
-- Separate noise factors for encoder and decoder stages
+   ```bash
+   mkdir -p /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl
+   cp /glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/checkpoint.pt \
+      /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl/checkpoint.pt
+   ```
 
-#### Scaling Strategies
+2. **Copy the base model's architecture into the SDL config exactly** (`image_height`/`image_width`, `levels`, `channels`, `surface_channels`, `dim`/`depth`, window sizes, `padding_conf`, everything under `model:` the base config had). SDL loads the checkpoint by matching parameter names and shapes; a mismatch either fails to load or loads weights into the wrong place.
 
-CREDIT supports two distinct scaling approaches for multi-GPU training:
+3. **Set `model.type: "crossformer-ensemble"`** and add the SDL-specific keys on top of the base architecture:
 
-**Local Ensemble Approach (`trainer.type: era5`):**
-- Each GPU maintains its own ensemble of size `ensemble_size`
-- KCRPS is computed independently on each device
-- Final loss is averaged across all GPUs
-- Total computational cost scales linearly with GPU count
+   ```yaml
+   model:
+     type: "crossformer-ensemble"
+     # ... same architecture keys as the base model's config ...
+     freeze: True                  # freeze every pretrained weight; train only the noise layers
+     encoder_noise: True           # also inject noise in the encoder, not just the decoder
+     noise_latent_dim: 128
+     encoder_noise_factor: 0.05
+     decoder_noise_factor: 0.275
+     correlated: False             # False: a fresh z at every injection point; True: one z per forward pass
+   ```
 
-**Distributed Ensemble Approach (`trainer.type: era5-ensemble`):**
-- Ensemble members are distributed across available GPUs
-- Effective ensemble size becomes `ensemble_size × num_gpus`
-- KCRPS computation occurs across the entire distributed ensemble
-- Batch size remains constant per GPU regardless of ensemble scaling
-- Requires cross-GPU communication for loss computation
+4. **Set `trainer.load_weights: True`**, and `load_optimizer`/`load_scaler`/`load_scheduler: False` — the trainable parameter set is new and much smaller, so start its optimizer state fresh rather than resuming the base model's.
 
-*Note: Enhanced flexibility for the distributed ensemble approach is currently under development.*
+5. **Validate before submitting:**
 
-## Technical Implementation Summary
+   ```bash
+   credit check -c config/gen_2/examples/wxformer_sdl.yml
+   ```
 
-### PixelNoiseInjection Module
+   This instantiates the model with your config, which is enough to catch an architecture mismatch against the checkpoint before you burn a GPU allocation finding out.
 
-The `PixelNoiseInjection` class implements sophisticated noise injection with the following features:
+6. **Train.** Only the noise-injection layers have `requires_grad=True`; everything else stays fixed at the base checkpoint's values. A smaller learning rate and far fewer epochs than base training are typically enough:
 
-- **Multi-scale noise**: Combines per-pixel spatial noise with latent style modulation
-- **Learnable parameters**: Trainable modulation factors and noise transformations
-- **Adaptive scheduling**: Optional noise scheduling based on forecast steps
-- **Channel-wise control**: Independent noise control for each feature channel
+   ```bash
+   credit submit --cluster derecho -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --nodes 1
+   ```
 
-Key parameters:
-- `noise_dim`: Dimensionality of latent noise vectors (default: 128)
-- `feature_channels`: Number of channels in the target feature map
-- `noise_factor`: Base scaling factor for noise intensity
-- `scheduler`: Optional noise scheduling for temporal variation
+### Generating an ensemble at inference time
 
-### CrossFormerWithNoise Architecture
+Once fine-tuned, an SDL checkpoint samples a new `z` on every forward pass, so re-running rollout against the same checkpoint gives a different member each time. There are two distinct ways to build an ensemble in CREDIT, and it's worth being clear about which one you're doing:
 
-The `CrossFormerWithNoise` extends the base CrossFormer with:
+- **Perturbed-IC ensemble from a deterministic model.** Run a plain (non-SDL) trained model N times, each from a slightly perturbed initial condition (random or bred-vector perturbations). The stochasticity comes entirely from the IC, not the model.
+- **Fixed-IC ensemble from an SDL model.** Run the SDL checkpoint N times from the *same* initial condition. The stochasticity comes from the noise sampled inside the model at each call.
 
-- **Dual injection points**: Noise injection in both encoder and decoder stages
-- **Configurable noise levels**: Separate factors for encoder (0.05) and decoder (0.275) stages
-- **Learnable adaptation**: Per-layer trainable noise factors
-- **Temporal scheduling**: Exponential decay scheduling for inference rollouts
+These aren't mutually exclusive — you can perturb the IC and use an SDL model in the same rollout — but each is sufficient on its own to produce an ensemble, and conflating them makes the ensemble's uncertainty harder to interpret.
 
-Architecture highlights:
-- Three encoder noise injection layers (when enabled)
-- Three decoder noise injection layers (always active)
-- Independent noise vectors generated for each injection point
-- Preservation of skip connections and feature concatenation
+### Scaling across GPUs
+
+`ensemble_size` in the trainer config controls how many stochastic samples are drawn per input during training. Two placements of that ensemble matter for multi-GPU runs:
+
+- **Local**, one ensemble per GPU: each GPU independently draws `ensemble_size` samples and computes its own ensemble-aware loss; the loss is then averaged across GPUs the normal DDP way. Total compute scales linearly with GPU count, with no extra cross-GPU communication for the ensemble itself.
+- **Distributed**, one ensemble spread across GPUs: `ensemble_size × num_gpus` becomes the effective ensemble seen by the loss, computed jointly across ranks (see `ring-crps` in `credit/losses/crps.py`, which shares batches across the data-parallel group specifically for this). Per-GPU batch size stays fixed regardless of ensemble size, at the cost of the extra communication.
 
 ## Diffusion-Based Ensembles
 
@@ -148,10 +134,3 @@ Key characteristics:
 - More complex training dynamics
 - Latitude-weighted MSE loss for denoising optimization
 - Probabilistic calibration through sampling process
-
-
-The CREDIT ensemble framework continues to evolve, with ongoing research focused on improving both computational efficiency and forecast quality across diverse meteorological applications.
-
-Inference
-Pre-trained deterministic model run a perturbed IC to create ensemble of size N. Options: random or bred vectors
-Pre-trained stochastic model run with copies of the same IC to create ensemble of size N.
