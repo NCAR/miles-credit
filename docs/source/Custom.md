@@ -1,11 +1,11 @@
 # Custom Objects
 
-CREDIT is built around a **registry pattern**: models, datasets, preblocks,
-postblocks, losses, and metrics are all selected purely by a string key in the
-config (`model.type`, `data.source.<name>.dataset_type`, a preblock's `type`, and
-so on). This same mechanism lets you plug in **your own** classes without editing
-or forking CREDIT's source code — you write a class, point the config at it, and
-it behaves exactly like a built-in type.
+CREDIT is built around a **registry pattern**: models, trainers, datasets,
+preblocks, postblocks, losses, and metrics are all selected purely by a string key
+in the config (`model.type`, `trainer.type`, `data.source.<name>.dataset_type`, a
+preblock's `type`, and so on). This same mechanism lets you plug in **your own**
+classes without editing or forking CREDIT's source code — you write a class,
+point the config at it, and it behaves exactly like a built-in type.
 
 This page explains how that works and how to add your own objects.
 
@@ -29,7 +29,7 @@ There are two ways a class enters a registry:
    and never touch CREDIT's source. **This is the common case and the focus of
    this guide.**
 
-## The six object types
+## The seven object types
 
 Every custom class must subclass the CREDIT base class for its type. The base
 class fixes the method contract the rest of the pipeline relies on.
@@ -42,6 +42,7 @@ class fixes the method contract the rest of the pipeline relies on.
 | `postblock` | {py:obj}`credit.postblock.base.BasePostblock` | `forward(batch: dict) -> dict` |
 | `loss`      | `torch.nn.Module` | `forward(pred, target) -> loss` |
 | `metric`    | {py:obj}`credit.metrics.base.BaseVariableMetric` (recommended) | called as `metric(full_data_dict)` |
+| `trainer`   | {py:obj}`credit.trainers.base_trainer.BaseTrainer` | `__init__(model, rank, conf)`, drives the training/validation loop |
 
 Registration **validates the base class** and raises `TypeError` if it does not
 match — so a wrong base class fails loudly at startup, not deep in training.
@@ -98,7 +99,7 @@ custom_objects:
 Fields:
 
 - **`object_type`** *(required)* — one of `dataset`, `preblock`, `model`,
-  `postblock`, `loss`, `metric`.
+  `postblock`, `loss`, `metric`, `trainer`.
 - **`module_path`** *(required)* — the dotted Python module to import the class
   from.
 - **`module_name`** *(optional)* — the Python class name. It **defaults to the
@@ -161,9 +162,13 @@ metrics:
   type: combined
   args:
     metrics: {rmse: {}, MyMetric: {}}
+
+# trainer → trainer.type
+trainer:
+  type: MyTrainer
 ```
 
-## Full example — all six types
+## Full example — all seven types
 
 ```yaml
 custom_objects:
@@ -192,6 +197,10 @@ custom_objects:
   MyMetric:
     object_type: metric
     module_path: mypackage.metrics
+
+  MyTrainer:
+    object_type: trainer
+    module_path: mypackage.trainers
 ```
 
 ## Validate before you train
@@ -237,7 +246,7 @@ class MyPreBlock(BasePreblock):
 ```
 
 The equivalent decorators are `register_dataset`, `register_model`,
-`register_postblock`, `register_loss`, and `register_metric`, each importable
-from its package (`credit.datasets`, `credit.models`, …). When you add a
-built-in type, also update the matching validation in `credit check` and the
-relevant doc page.
+`register_postblock`, `register_loss`, `register_metric`, and `register_trainer`,
+each importable from its package (`credit.datasets`, `credit.models`, …,
+`credit.trainers`). When you add a built-in type, also update the matching
+validation in `credit check` and the relevant doc page.

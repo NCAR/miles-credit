@@ -94,9 +94,11 @@ Seven subsystems — models, trainers, datasets, preblocks, postblocks, losses, 
 by a string key in the config (`model.type`, `trainer.type`, `data.source.<name>.dataset_type`, etc.),
 resolved through per-package `_REGISTRY` dicts with lazy imports:
 - `credit/models/__init__.py` → `load_model(conf)`, keys like `crossformer`, `wxformer`, `unet`, `fuxi`, `swin`, `graph`
-- `credit/trainers/__init__.py` → keys like `era5-gen1`/`era5`, `gen2`/`era5-gen2`, `era5-diffusion`, `era5-ensemble`, `ic-opt`
-- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/` follow the
-  same `register_*` decorator pattern
+- `credit/trainers/__init__.py` → `load_trainer(conf)`, keys like `era5-gen1`/`era5`, `gen2`/`era5-gen2`,
+  `era5-diffusion`, `era5-ensemble`, `ic-opt`
+- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/`, `credit/trainers/`
+  all follow the same `register_*` decorator pattern (`register_trainer` mirrors `register_model`, requiring the
+  class subclass `credit.trainers.base_trainer.BaseTrainer`)
 
 `credit/registry.py` (`load_custom_objects`) is the meta-layer: a config's `custom_objects:` block lets users
 plug in their *own* classes (must subclass the relevant `Base*` class) by dotted import path, without
