@@ -98,7 +98,9 @@ resolved through per-package `_REGISTRY` dicts with lazy imports:
   `era5-diffusion`, `era5-ensemble`, `ic-opt`
 - `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/`, `credit/trainers/`
   all follow the same `register_*` decorator pattern (`register_trainer` mirrors `register_model`, requiring the
-  class subclass `credit.trainers.base_trainer.BaseTrainer`)
+  class subclass `credit.trainers.base_trainer.BaseTrainer`). Prefer a dataset/preblock/model/postblock/loss
+  over a custom trainer: `rollout_gen2.py` duplicates the trainer's inner loop rather than calling it, so a
+  changed training loop isn't reflected at inference (see "Before you write a custom trainer" in `docs/source/Custom.md`)
 
 `credit/registry.py` (`load_custom_objects`) is the meta-layer: a config's `custom_objects:` block lets users
 plug in their *own* classes (must subclass the relevant `Base*` class) by dotted import path, without
