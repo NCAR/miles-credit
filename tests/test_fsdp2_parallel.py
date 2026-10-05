@@ -447,6 +447,48 @@ class TestBlockOptInConfigurable:
 
         assert _has_fsdp2_shard(Legacy()) is True
 
+    def test_activation_checkpoint_class_names_from_conf(self):
+        from credit.parallel.fsdp2 import _activation_checkpoint_class_names
+
+        assert _activation_checkpoint_class_names(True) == frozenset()
+        assert _activation_checkpoint_class_names(False) == frozenset()
+        assert _activation_checkpoint_class_names(["Block", "Head"]) == frozenset({"Block", "Head"})
+
+    def test_activation_checkpoint_wraps_opted_in_and_named_blocks_exactly(self):
+        from credit.parallel.fsdp2 import _apply_activation_checkpointing
+
+        class OptedIn(torch.nn.Module):
+            _fsdp2_shard = True
+
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.lin(x)
+
+        class Block(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lin = torch.nn.Linear(4, 4)
+                self.norm = torch.nn.LayerNorm(4)
+
+            def forward(self, x):
+                return self.norm(self.lin(x))
+
+        model = torch.nn.Sequential(OptedIn(), Block(), torch.nn.LayerNorm(4))
+        x = torch.randn(2, 4)
+        expected = model(x)
+
+        assert _apply_activation_checkpointing(model, ["Block"]) == 2
+        wrapped = [type(m).__name__ for m in model.children()]
+        assert wrapped == ["CheckpointWrapper", "CheckpointWrapper", "LayerNorm"]
+
+        out = model(x)
+        torch.testing.assert_close(out, expected)
+        out.sum().backward()
+        assert all(p.grad is not None for p in model.parameters())
+
     def test_tp_paths_default_and_override(self):
         from credit.models.wxformer.crossformer import Attention, FeedForward
 
