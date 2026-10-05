@@ -1,5 +1,10 @@
+import logging
+from typing import Optional
+
 import torch.nn as nn
 import torch
+
+logger = logging.getLogger(__name__)
 
 
 class StochasticDecompositionLayer(nn.Module):
@@ -40,3 +45,30 @@ class StochasticDecompositionLayer(nn.Module):
 
         # Combine style-modulated per-pixel noise with features
         return feature_map + pixel_noise * style * self.modulation
+
+
+def scale_sdl_noise(model: nn.Module, noise_scale: Optional[float]) -> int:
+    """Multiply every StochasticDecompositionLayer ``noise_factor`` in ``model`` by ``noise_scale``, in place.
+
+    ``noise_scale: 0.0`` collapses an SDL ensemble model to its deterministic mean;
+    ``None`` or ``1.0`` leaves the trained noise amplitude unchanged.
+
+    Args:
+        model: Model to modify (may be wrapped; all submodules are searched).
+        noise_scale: Factor applied to each layer's noise amplitude.
+
+    Returns:
+        int: Number of SDL layers scaled (0 for a no-op).
+    """
+    if noise_scale is None or noise_scale == 1.0:
+        return 0
+    n_scaled = 0
+    for m in model.modules():
+        if isinstance(m, StochasticDecompositionLayer):
+            m.noise_factor.data.mul_(noise_scale)
+            n_scaled += 1
+    if n_scaled:
+        logger.info(f"noise_scale={noise_scale}: scaled {n_scaled} SDL noise layers")
+    else:
+        logger.warning(f"noise_scale={noise_scale} set but no StochasticDecompositionLayer found in model")
+    return n_scaled

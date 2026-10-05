@@ -40,6 +40,7 @@ from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.datasets.gen_2.channel_utils import ChannelSchema
 from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, select_device, setup
+from credit.models.wxformer.stochastic_decomposition_layer import scale_sdl_noise
 from credit.output_gen2 import ForecastWriter
 from credit.postblock import build_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks
@@ -60,23 +61,6 @@ warnings.filterwarnings("ignore")
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
-
-
-def _apply_sdl_noise_scale(model: torch.nn.Module, noise_scale) -> None:
-    """Scale every SDL noise_factor in-place. No-op when noise_scale is None or 1.0."""
-    if noise_scale is None or noise_scale == 1.0:
-        return
-    from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
-
-    n_scaled = 0
-    for m in model.modules():
-        if isinstance(m, StochasticDecompositionLayer):
-            m.noise_factor.data.mul_(noise_scale)
-            n_scaled += 1
-    if n_scaled:
-        logger.info(f"noise_scale={noise_scale}: scaled {n_scaled} SDL noise layers")
-    else:
-        logger.warning(f"noise_scale={noise_scale} set but no StochasticDecompositionLayer found in model")
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +214,7 @@ Examples:
     # ── Model ────────────────────────────────────────────────────────────────
     model = load_model_for_inference(conf, device)
     model.eval()
-    _apply_sdl_noise_scale(model, noise_scale)
+    scale_sdl_noise(model, noise_scale)
 
     # ── Dataset + DataLoader ─────────────────────────────────────────────────
     dataset_conf = {

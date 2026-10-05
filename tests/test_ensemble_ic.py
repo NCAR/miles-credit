@@ -524,6 +524,13 @@ class TestBredVectorInit:
         # When hemispheric_rescale=False the attribute is set to False (not the fn)
         assert bv.hemispheric_rescale is False
 
+    @pytest.mark.parametrize("terrain_file", [None, "/nonexistent/terrain.nc"])
+    def test_hemispheric_rescale_without_terrain_file_raises(self, terrain_file):
+        from credit.ensemble.bred_vector import BredVector
+
+        with pytest.raises(FileNotFoundError):
+            BredVector(model=self._identity_model, hemispheric_rescale=True, terrain_file=terrain_file)
+
     def test_perturb_output_shape(self):
         """perturb() returns a perturbation for dynamic channels only (C - input_static_dim)."""
         from credit.ensemble.bred_vector import BredVector

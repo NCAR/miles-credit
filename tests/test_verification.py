@@ -3,7 +3,7 @@ import os
 import numpy as np
 import xarray as xr
 
-from credit.verification.ensemble import binned_spread_skill, crps, rank_histogram_apply, spread_error
+from credit.verification.ensemble import binned_spread_skill, crps, rank_histogram, rank_histogram_apply, spread_error
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
 CONFIG_FILE_DIR = os.path.join("/".join(os.path.abspath(__file__).split("/")[:-2]), "config")
@@ -177,6 +177,49 @@ def test_rank_histogram_length():
     rank_hist = rank_histogram_apply(da_pred, da_true)
 
     assert len(rank_hist) == ensemble_size + 1
+
+
+def test_rank_histogram_matches_brute_force_without_ties():
+    rng = np.random.default_rng(0)
+    pred = rng.standard_normal((5, 200))
+    truth = rng.standard_normal(200)
+
+    expected = np.zeros(6, dtype=int)
+    for j in range(truth.size):
+        expected[np.sum(pred[:, j] < truth[j])] += 1
+
+    np.testing.assert_array_equal(rank_histogram(pred, truth), expected)
+
+
+def test_rank_histogram_spreads_ties_uniformly():
+    """Truth equal to every member: rank is uniform over all n_members + 1 bins."""
+    pred = np.zeros((4, 50_000))
+    truth = np.zeros(50_000)
+
+    counts = rank_histogram(pred, truth, rng=np.random.default_rng(0))
+
+    assert counts.sum() == truth.size
+    np.testing.assert_allclose(counts / counts.sum(), np.full(5, 0.2), atol=0.01)
+
+
+def test_rank_histogram_skips_non_finite_points():
+    pred = np.array([[0.0, np.nan, 0.0], [1.0, 1.0, 1.0]])
+    truth = np.array([2.0, 2.0, np.inf])
+
+    counts = rank_histogram(pred, truth)
+
+    np.testing.assert_array_equal(counts, [0, 0, 1])
+
+
+def test_rank_histogram_calibrated_ensemble_is_flat():
+    """Truth drawn from the same distribution as the members gives a flat histogram."""
+    rng = np.random.default_rng(1)
+    pred = rng.standard_normal((9, 100_000))
+    truth = rng.standard_normal(100_000)
+
+    counts = rank_histogram(pred, truth)
+
+    np.testing.assert_allclose(counts / counts.sum(), np.full(10, 0.1), atol=0.01)
 
 
 # ---------------------------------------------------------------------------

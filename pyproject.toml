@@ -45,7 +45,6 @@ dependencies = [
     "tensorboard",
     "fastapi",
     "overrides",
-    "pysteps",
     "properscoring"
 ]
 

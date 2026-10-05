@@ -193,8 +193,7 @@ class MRMSDataset(BaseDataset):
 
             tensor = torch.tensor(arr, dtype=torch.float32).unsqueeze(0).unsqueeze(0)
             key = self._get_field_name(field_type, "2d", vname)
-            # Crop to match the ERA5 grid (640, 1280) under domain-parallel training.
-            sample[key] = tensor[:, :, 0:640, 0:1280]
+            sample[key] = tensor
 
     def _load_local_var(self, field_type: str, vname: str, t: pd.Timestamp):
         """Load a single variable from a local NetCDF or Zarr file.
