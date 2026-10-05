@@ -335,6 +335,5 @@ torchrun --nproc_per_node=4 applications/rollout_metrics_noisy_ic.py -c model.ym
 | `{datetime}_ensemble.csv` | Per-member RMSE and MAE for every channel and forecast step |
 | `{datetime}_average.csv`  | Ensemble-mean RMSE, spread (std), and CRPS per channel/step |
 
-To aggregate and plot these CSVs, use `ensemble_eval.py` (see `config/example_ensemble_eval.yml`).
 To compute WeatherBench-style CRPS/RMSE in the standardized NetCDF format, run
 `ensemble_wb2_verif.py` on the saved NetCDF outputs from `rollout_to_netcdf.py`.

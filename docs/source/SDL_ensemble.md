@@ -154,7 +154,7 @@ credit rollout-ensemble --cluster derecho -c ensemble_6hr.yml --jobs 4
 
 ```bash
 cd /glade/work/schreck/repos/miles-credit
-python applications/rollout_to_netcdf_v2.py -c ensemble_6hr.yml
+python applications/rollout_gen2.py -c ensemble_6hr.yml
 ```
 
 ---
@@ -207,12 +207,6 @@ To reproduce the rollout from scratch using the same checkpoint and config:
 cp /glade/campaign/cisl/aiml/credit/models/sdl_camulator/model.yml ./paper_model.yml
 # edit save_forecast path in paper_model.yml
 credit rollout-ensemble --cluster casper -c paper_model.yml --jobs 10
-```
-
-Then run `ensemble_eval.py` against the output:
-
-```bash
-python applications/ensemble_eval.py -c config/applications/ensemble/example_ensemble_eval.yml
 ```
 
 ---
