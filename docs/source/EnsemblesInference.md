@@ -8,21 +8,23 @@ the perturbation method chosen.
 1.  Perturbing initial conditions with deterministic models
 2.  Utilizing stochastic models with identical initial conditions
 
-The inference scripts (`rollout_metrics_noisy_ics.py`, `rollout_metrics_noisy_models.py`) will compute and save **ensemble metrics only**. To **save forecast outputs to NetCDF**, use `credit rollout` with `ensemble_size > 1` — either set it in the `predict` block of the config file or pass `--ensemble-size N` at the CLI. The two scripts presented here compute the CRPS score for each variable and keep track of the ensemble member scores, means and standard deviations.
+The inference scripts (`rollout_metrics_noisy_ic.py` for perturbed initial conditions,
+`rollout_metrics_noisy_model.py` for stochastic models) compute and save **ensemble metrics
+only**: the CRPS for each variable, plus each member's scores and the ensemble mean and
+standard deviation. Neither writes the ensemble members to NetCDF, and `credit rollout` does not
+apply IC perturbations, so there is currently no NetCDF output for these ensembles.
 
-For SDL (Stochastic Decoder Layer) ensembles where spread comes from learned model noise
+For SDL (Stochastic Decomposition Layer) ensembles where spread comes from learned model noise
 rather than IC perturbations, see [SDL Ensemble](SDL_ensemble.md).
 
 ---
 
-## Two use cases
+## Scripts
 
-| Goal | Script | Output |
+| Ensemble source | Script | Output |
 |------|--------|--------|
-| Compute CRPS / spread / RMSE metrics | `rollout_metrics_noisy_ic.py` | per-init CSV files |
-| Save full ensemble NetCDF forecasts | `rollout_to_netcdf.py` with `ensemble_size > 1` | NetCDF with ensemble dim |
-
-Both read the same config file. The only difference is which script you invoke.
+| Perturbed initial conditions, deterministic model | `rollout_metrics_noisy_ic.py` | per-init CSV files |
+| Identical initial conditions, stochastic model | `rollout_metrics_noisy_model.py` | per-init CSV files |
 
 ---
 
@@ -40,9 +42,6 @@ python applications/rollout_metrics_noisy_ic.py -c model.yml
 
 # submit to PBS cluster
 python applications/rollout_metrics_noisy_ic.py -c model.yml -l 1
-
-# save full NetCDF ensemble output instead
-python applications/rollout_to_netcdf.py -c model.yml
 ```
 
 ---
@@ -291,24 +290,15 @@ python applications/rollout_metrics_noisy_ic.py -c model.yml
 
 ### Batch Job Submission
 
-To submit ensemble rollout jobs to the cluster use `credit submit --rollout`:
+To submit to PBS, add a `pbs:` block to the config and pass `-l 1`:
 
 ```bash
-# Submit 10 parallel PBS jobs, ensemble_size set in config
-credit submit --cluster derecho -c config.yml --rollout --jobs 10
-
-# Override ensemble size at submission time
-credit submit --cluster derecho -c config.yml --rollout --jobs 10 --ensemble-size 50
+python applications/rollout_metrics_noisy_ic.py -c model.yml -l 1
+python applications/rollout_metrics_noisy_model.py -c model.yml -l 1
 ```
 
-`--jobs` splits init times across N independent PBS jobs. `ensemble_size` (config or `--ensemble-size`) sets members per init time.
-
-For the legacy metric-only scripts, use the `-l 1` flag:
-
-```
-python rollout_metrics_noisy_ics.py --config model.yml -l 1
-python rollout_metrics_noisy_models.py --config model.yml -l 1
-```
+`credit submit --mode rollout` runs the Gen 2 deterministic rollout and does not apply
+`predict.ensemble` perturbations.
 
 ### Multi-GPU (DDP)
 
@@ -328,12 +318,9 @@ torchrun --nproc_per_node=4 applications/rollout_metrics_noisy_ic.py -c model.ym
 ## Output files
 
 `rollout_metrics_noisy_ic.py` writes two CSV files per initialization date to
-`{predict.save_forecast}/metrics/`:
+`{predict.save_forecast}/`:
 
 | File | Content |
 |------|---------|
 | `{datetime}_ensemble.csv` | Per-member RMSE and MAE for every channel and forecast step |
 | `{datetime}_average.csv`  | Ensemble-mean RMSE, spread (std), and CRPS per channel/step |
-
-To compute WeatherBench-style CRPS/RMSE in the standardized NetCDF format, run
-`ensemble_wb2_verif.py` on the saved NetCDF outputs from `rollout_to_netcdf.py`.

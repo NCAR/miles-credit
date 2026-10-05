@@ -19,26 +19,30 @@ same initial condition gives an N-member ensemble.
 > **Note:** Only the deterministic models are on HuggingFace. The SDL ensemble checkpoint lives
 > on NCAR campaign storage and requires access to NCAR systems.
 
+The SDL checkpoint was trained with a Generation 1 (flat-schema) config, so the ensemble
+workflow below uses the Gen 1 `predict:` block and the `credit_rollout_metrics` script.
+
 ---
 
 ## Turning noise injection on and off
 
-The SDL model's noise amplitude is set by `decoder_noise_factor` in the model config. The
-`noise_scale` key in the `predict:` block lets you override it at runtime without editing the
-checkpoint or the model config:
+The SDL model's noise amplitude is set by `decoder_noise_factor` in the model config. A
+`noise_scale` key lets you override it at runtime without editing the checkpoint or the model
+config. It goes in the `predict:` block for Gen 1 rollouts and in the `inference:` block for
+Gen 2 rollouts (`credit rollout`):
 
 ```yaml
-predict:
+predict:             # Gen 1 (credit_rollout_metrics); use inference: for Gen 2
   noise_scale: 1.0   # default — use the trained noise factors as-is
   # noise_scale: 0.0 # disable noise entirely → deterministic run from SDL checkpoint
   # noise_scale: 0.5 # halve the noise amplitude
 ```
 
-`noise_scale` multiplies all three decoder `noise_factor` parameters before the rollout starts.
-Setting it to `0.0` effectively turns the SDL model into a deterministic model while keeping all
-other learned weights intact.
+`noise_scale` multiplies every SDL `noise_factor` parameter in the model (the three decoder
+injection points) before the rollout starts. Setting it to `0.0` turns the SDL model into a
+deterministic model while keeping all other learned weights intact.
 
-To answer Greg Hakim's question directly:
+In short:
 - **Using a deterministic checkpoint** (HuggingFace models above) → noise is never present.
 - **Using the SDL checkpoint with `noise_scale: 0.0`** → same model weights, noise disabled.
 - **Using the SDL checkpoint with `noise_scale: 1.0` and `ensemble_size: N`** → N independent
@@ -48,11 +52,11 @@ To answer Greg Hakim's question directly:
 
 ## Minimal config for ensemble rollout (NCAR systems)
 
-Save the following as `ensemble_6hr.yml` and edit the `predict:` paths. All data paths point to
-readable campaign storage — no downloads needed on Derecho/Casper.
+Save the following as `ensemble_6hr.yml` and replace `<you>` in the output paths. All data
+paths point to readable campaign storage — no downloads needed on Derecho/Casper.
 
 ```yaml
-save_loc: '/glade/scratch/<you>/CREDIT_runs/my_ensemble/'
+save_loc: '/glade/derecho/scratch/<you>/CREDIT_runs/my_ensemble/'
 seed: 1000
 
 data:
@@ -117,45 +121,44 @@ predict:
   mode: none
   ensemble_size: 10          # number of independent noise realizations per init time
   noise_scale: 1.0           # set to 0.0 for a deterministic run
-  save_forecast: '/glade/scratch/<you>/CREDIT_runs/my_ensemble/netcdf/'
+  save_forecast: '/glade/derecho/scratch/<you>/CREDIT_runs/my_ensemble/netcdf/'
   forecasts:
     type: "custom"
     start_year: 2022
     start_month: 1
     start_day: 1
     start_hours: [0]
-    end_year: 2022
-    end_month: 1
-    end_day: 7
-    duration: 40             # 40 × 6 hr = 10-day forecast
+    duration: 7              # number of initialization days (2022-01-01 to 2022-01-07)
+    days: 10                 # forecast length in days (40 × 6 hr steps)
 ```
 
 ---
 
 ## Running the rollout
 
-### On Casper (single GPU, 10 members)
+Activate your CREDIT environment, then run from a GPU node:
 
 ```bash
-conda activate /glade/work/schreck/conda-envs/credit-main-casper
-credit rollout-ensemble --cluster casper -c ensemble_6hr.yml --jobs 4
+credit_rollout_metrics -c ensemble_6hr.yml
 ```
 
-This splits the init times across 4 parallel Casper jobs. Each job runs all 10 ensemble members
-for its slice of init times sequentially.
+For each initialization time, the script rolls out all `ensemble_size` members together and
+writes per-variable, per-step verification of the ensemble mean (ACC, RMSE, MSE, MAE) and
+the ensemble spread (`std_<var>`) to `{save_loc}/metrics/{init_time}.csv`.
 
-### On Derecho (single GPU, any size ensemble)
+To run on several GPUs, set `predict.mode: ddp` (or pass `-m ddp`) and launch with `torchrun`;
+the number of initialization times must be divisible by the number of GPUs:
 
 ```bash
-credit rollout-ensemble --cluster derecho -c ensemble_6hr.yml --jobs 4
+torchrun --standalone --nproc-per-node=4 applications/rollout_metrics.py -c ensemble_6hr.yml -m ddp
 ```
 
-### Manually (one init time, no PBS)
+To submit as a PBS job instead, add a `pbs:` block to the config and pass `-l 1`.
 
-```bash
-cd /glade/work/schreck/repos/miles-credit
-python applications/rollout_gen2.py -c ensemble_6hr.yml
-```
+> **NetCDF output:** none of the current rollout scripts write all members of an SDL ensemble
+> to NetCDF in one run. With a Gen 2 config, `credit rollout` writes one realization per init
+> time; run it again with a different `seed` and `inference.save_forecast` for each additional
+> member.
 
 ---
 
@@ -168,7 +171,7 @@ predict:
   mode: none
   ensemble_size: 1
   noise_scale: 0.0           # disables all SDL noise injection
-  save_forecast: '/glade/scratch/<you>/CREDIT_runs/deterministic/'
+  save_forecast: '/glade/derecho/scratch/<you>/CREDIT_runs/deterministic/'
   forecasts: ...             # same as above
 ```
 
@@ -201,12 +204,12 @@ The analysis notebooks are versioned in the repo at `notebooks/ensemble/`:
 Each notebook has a `# === CONFIGURATION ===` cell at the top — edit `SCHEDULER_DIR` to point to
 your data and run from top to bottom.
 
-To reproduce the rollout from scratch using the same checkpoint and config:
+To regenerate the per-init metrics CSVs with the same checkpoint and config:
 
 ```bash
 cp /glade/campaign/cisl/aiml/credit/models/sdl_camulator/model.yml ./paper_model.yml
-# edit save_forecast path in paper_model.yml
-credit rollout-ensemble --cluster casper -c paper_model.yml --jobs 10
+# edit save_loc and predict.save_forecast in paper_model.yml
+credit_rollout_metrics -c paper_model.yml
 ```
 
 ---
@@ -242,3 +245,7 @@ wrapper.set_noise_factors([f * 2.0 for f in factors])
 
 `set_noise_factors` accepts a single float (applied to all layers) or a list of three floats
 (one per decoder noise injection point: coarse, medium, fine scale).
+
+To scale the noise in place without a wrapper, call
+`credit.models.wxformer.stochastic_decomposition_layer.scale_sdl_noise(model, 0.5)`. This is
+what the rollout scripts use for `noise_scale`.
