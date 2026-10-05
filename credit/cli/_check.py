@@ -41,7 +41,15 @@ _DIAGNOSTIC_POSTBLOCKS = frozenset({"geopotential_diagnostic", "mslp_diagnostic"
 # must also run on the target twin or the loss compares mismatched units.
 _UNIT_POSTBLOCKS = frozenset({"bridgescaler_transform", "exp_transform", "square_transform"})
 
-_GEN1_TRAINERS = frozenset({"era5", "era5-gen1"})
+_GEN1_TRAINERS = frozenset({"era5", "era5-gen1", "era5-ensemble", "ensemble-gen1"})
+
+# Trainer types that were removed, mapped to the replacement to suggest.
+_REMOVED_TRAINERS = {
+    "ensemble-gen2": (
+        "trainer.type: gen2 with loss: {type: base, args: {training_loss: ring-crps, validation_loss: mae}} "
+        "and trainer.ensemble_size set to the number of data-parallel ranks"
+    ),
+}
 
 _KNOWN_TOP_LEVEL = frozenset(
     {
@@ -296,6 +304,8 @@ def _check_registry_keys(conf: dict, rep: _Report) -> None:
     ):
         if value is None:
             rep.error(where, f"'{where}' is not set.", fix=f"Add one of: {', '.join(sorted(registry))}")
+        elif where == "trainer.type" and value in _REMOVED_TRAINERS:
+            rep.error(where, f"Trainer type '{value}' was removed.", fix=f"Use {_REMOVED_TRAINERS[value]}.")
         elif value not in registry:
             rep.error(
                 where,
@@ -952,6 +962,21 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
                     f"'{stype}' does not accept {unknown}.",
                     fix=f"Accepted: {', '.join(p for p in _accepted_params(cls) if p != 'optimizer')}",
                 )
+
+    ac = _get(conf, "trainer", "activation_checkpoint", default=False)
+    if not isinstance(ac, bool) and not (isinstance(ac, list) and all(isinstance(n, str) for n in ac)):
+        rep.error(
+            "trainer.activation_checkpoint",
+            f"Expected true/false or a list of block class names, got {ac!r}.",
+            fix="activation_checkpoint: true          # blocks that opt in via _fsdp2_shard\n"
+            "activation_checkpoint: [Transformer]  # or exact block class names",
+        )
+    if _get(conf, "trainer", "gradient_checkpointing") is not None:
+        rep.warn(
+            "trainer.gradient_checkpointing",
+            "gradient_checkpointing is not read by the gen2 trainer; it is ignored.",
+            fix="Use trainer.activation_checkpoint (true, or a list of exact block class names).",
+        )
 
     epochs = _get(conf, "trainer", "epochs")
     num_epoch = _get(conf, "trainer", "num_epoch")

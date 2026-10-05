@@ -583,6 +583,39 @@ def test_num_epoch_exceeding_epochs_warns(conf):
     assert "trainer.num_epoch" in _wheres(_run(conf), "warning")
 
 
+def test_removed_ensemble_gen2_trainer_points_to_ring_crps(conf):
+    conf["trainer"]["type"] = "ensemble-gen2"
+    rep = _run(conf)
+    assert "trainer.type" in _wheres(rep)
+    assert "ring-crps" in _text(rep)
+
+
+def test_ensemble_gen1_is_treated_as_gen1(conf):
+    conf["trainer"]["type"] = "ensemble-gen1"
+    rep = _run(conf)
+    assert "trainer.type" in _wheres(rep, "warning")
+    assert _wheres(rep) == set()
+
+
+@pytest.mark.parametrize("value", [True, False, ["Transformer", "UpBlock"]])
+def test_activation_checkpoint_accepts_bool_or_class_names(conf, value):
+    conf["trainer"]["activation_checkpoint"] = value
+    assert "trainer.activation_checkpoint" not in _wheres(_run(conf))
+
+
+@pytest.mark.parametrize("value", ["Transformer", [1, 2]])
+def test_activation_checkpoint_rejects_other_values(conf, value):
+    conf["trainer"]["activation_checkpoint"] = value
+    assert "trainer.activation_checkpoint" in _wheres(_run(conf))
+
+
+def test_gradient_checkpointing_key_warns(conf):
+    conf["trainer"]["gradient_checkpointing"] = True
+    rep = _run(conf)
+    assert "trainer.gradient_checkpointing" in _wheres(rep, "warning")
+    assert "activation_checkpoint" in _text(rep, "warning")
+
+
 # ===========================================================================
 # Channel schema drift
 # ===========================================================================
