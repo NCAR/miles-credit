@@ -54,7 +54,7 @@ def apply_fsdp2(model: nn.Module, dp_mesh, conf: dict) -> nn.Module:
 
     # AC must come before fully_shard so the CheckpointWrapper is what gets sharded.
     if ac_conf:
-        _apply_activation_checkpointing(model)
+        _apply_activation_checkpointing(model, _activation_checkpoint_class_names(ac_conf))
 
     count = 0
     for module in model.modules():
@@ -162,12 +162,35 @@ def _has_fsdp2_shard(module: nn.Module) -> bool:
     return bool(getattr(module, "_fsdp2_shard", False))
 
 
-def _apply_activation_checkpointing(model: nn.Module) -> None:
-    """Apply no-reentrant AC to all modules that declared ``_fsdp2_shard = True``.
+def _activation_checkpoint_class_names(ac_conf) -> frozenset:
+    """Extra block class names to checkpoint from ``trainer.activation_checkpoint``.
 
-    Uses apply_activation_checkpointing so replacements happen in-place in parent
+    ``True`` checkpoints only the blocks that declared ``_fsdp2_shard = True``;
+    a list of class names additionally checkpoints every module whose class
+    name matches one of them exactly, for models whose blocks do not opt in.
+    Exact matching avoids catching unrelated modules such as ``LayerNorm`` by
+    substring.
+    """
+    if isinstance(ac_conf, (list, tuple)):
+        return frozenset(str(name) for name in ac_conf)
+    return frozenset()
+
+
+def _apply_activation_checkpointing(model: nn.Module, block_class_names=()) -> int:
+    """Apply no-reentrant AC to opted-in and explicitly named blocks.
+
+    Wraps every module that declared ``_fsdp2_shard = True`` plus every module
+    whose class name is in ``block_class_names`` (exact match). Uses
+    apply_activation_checkpointing so replacements happen in-place in parent
     modules. Must be called before fully_shard so the CheckpointWrapper is what
     gets sharded.
+
+    Args:
+        model: Model to wrap in place.
+        block_class_names: Additional class names to checkpoint.
+
+    Returns:
+        int: Number of modules wrapped.
     """
     import functools
     from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -176,13 +199,30 @@ def _apply_activation_checkpointing(model: nn.Module) -> None:
         checkpoint_wrapper,
     )
 
+    block_class_names = frozenset(block_class_names)
+
+    def check_fn(module: nn.Module) -> bool:
+        return _has_fsdp2_shard(module) or type(module).__name__ in block_class_names
+
+    n_wrapped = sum(1 for m in model.modules() if check_fn(m))
     wrapper = functools.partial(checkpoint_wrapper, checkpoint_impl=CheckpointImpl.NO_REENTRANT)
     apply_activation_checkpointing(
         model,
         checkpoint_wrapper_fn=wrapper,
-        check_fn=_has_fsdp2_shard,
+        check_fn=check_fn,
     )
-    logger.info("FSDP2: activation checkpointing applied to _fsdp2_shard blocks")
+    if block_class_names:
+        found = {type(m).__name__ for m in model.modules()}
+        missing = sorted(block_class_names - found)
+        if missing:
+            logger.warning(f"activation_checkpoint: no modules of class {missing} found in the model")
+    if n_wrapped == 0:
+        logger.warning(
+            "activation_checkpoint is enabled but no blocks were wrapped: this model declares no "
+            "_fsdp2_shard blocks. List block class names instead, e.g. activation_checkpoint: [MyBlock]."
+        )
+    logger.info(f"Activation checkpointing applied to {n_wrapped} blocks")
+    return n_wrapped
 
 
 def _is_shardable(module: nn.Module, ac_enabled: bool) -> bool:

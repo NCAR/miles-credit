@@ -654,7 +654,8 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
 
 
 def _apply_activation_checkpointing_gen2(model, conf):
-    """Apply no-reentrant AC to blocks that opt in via _fsdp2_shard = True (non-FSDP2 path)."""
-    from credit.parallel.fsdp2 import _apply_activation_checkpointing
+    """Apply no-reentrant AC to opted-in (_fsdp2_shard) and config-listed blocks (non-FSDP2 path)."""
+    from credit.parallel.fsdp2 import _activation_checkpoint_class_names, _apply_activation_checkpointing
 
-    _apply_activation_checkpointing(model)
+    ac_conf = conf.get("trainer", {}).get("activation_checkpoint", False)
+    _apply_activation_checkpointing(model, _activation_checkpoint_class_names(ac_conf))

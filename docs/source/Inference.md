@@ -30,6 +30,7 @@ inference:
   run_mode: batch                   # batch (many init times) | single (one init time)
   mode: ddp                         # none | ddp | fsdp
   save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_run/rollout'
+  # noise_scale: 0.0                # optional, SDL ensemble models only (see below)
 
   # Wholesale-replaces the top-level data: block for inference only (the
   # training config's ERA5 source is untouched). Here it points initial
@@ -101,6 +102,11 @@ Key behaviors:
   or `single` (one init time from `single_forecast.start_datetime`). The CLI flags
   `--run-mode`, `--init-time`, and `--save-dir` override the corresponding config
   entries; `--init-time` implies `run_mode: single`.
+- **`noise_scale`** (optional) multiplies the learned noise amplitude of every
+  Stochastic Decomposition Layer in an SDL ensemble model before the rollout:
+  `0.0` gives the deterministic mean member, and leaving it unset (or `1.0`) keeps
+  the trained amplitude. `--noise-scale` overrides it when running
+  `rollout_gen2.py` directly. Models without SDL layers ignore it and log a warning.
 - **`inference.data` / `inference.preblocks` / `inference.postblocks`** (each
   optional) wholesale-replace the matching top-level block for rollout only —
   training is unaffected. A present block must be complete on its own (it is a
@@ -320,7 +326,7 @@ head_node_ip=$(ssh $head_node hostname -i | awk '{print $1}')
 export NUM_RANKS=32
 MASTER_ADDR=$head_node_ip
 MASTER_PORT=1234
-mpiexec -n $NUM_RANKS -ppn 4 --cpu-bind none python applications/rollout_to_netcdf_v2.py -c config.yml
+mpiexec -n $NUM_RANKS -ppn 4 --cpu-bind none python applications/rollout_gen2.py -c config.yml
 ```
 
 ### Interpolation to constant pressure and height above ground levels

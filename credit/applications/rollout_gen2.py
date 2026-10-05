@@ -8,7 +8,12 @@ flows through preblocks → model → postblocks → assemble_rollout_batch at e
 No manual denormalization, no flat-tensor surgery (update_x / build_channel_layout).
 
 Config key:  inference.run_mode   (batch | single)
-CLI override: --run-mode, --init-time, --save-dir
+CLI override: --run-mode, --init-time, --save-dir, --noise-scale
+
+Optional ``inference.noise_scale`` multiplies the learned noise amplitude of every
+StochasticDecompositionLayer (SDL) in an ensemble model before rollout: ``0.0``
+collapses it to its deterministic mean member; absent or ``1.0`` keeps the trained
+amplitude. Ignored by models without SDL layers (a warning is logged).
 
 Usage
 -----
@@ -17,6 +22,9 @@ Usage
 
 # Single forecast (overrides inference.single_forecast.start_datetime):
     python rollout_gen2.py -c config/example-end-to-end.yml --init-time 2020-06-01T00
+
+# SDL ensemble member with half the trained noise amplitude:
+    python rollout_gen2.py -c config.yml --noise-scale 0.5
 
 # Multi-GPU DDP:
     torchrun --standalone --nproc-per-node=4 rollout_gen2.py -c config.yml
@@ -38,6 +46,7 @@ from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.datasets.gen_2.channel_utils import ChannelSchema
 from credit.datasets.gen_2._utils import to_calendar  # pyright: ignore[reportPrivateUsage]
 from credit.distributed import get_rank_info, select_device, setup
+from credit.models.wxformer.stochastic_decomposition_layer import scale_sdl_noise
 from credit.output_gen2 import ForecastWriter
 from credit.postblock import build_postblocks
 from credit.preblock import attach_channel_schema, build_preblocks
@@ -99,6 +108,13 @@ Examples:
         "--save-dir", type=str, default=None, help="Output directory. Overrides inference.save_forecast."
     )
     parser.add_argument(
+        "--noise-scale",
+        type=float,
+        default=None,
+        help="Scale every SDL noise_factor before rollout (0.0 = deterministic mean member). "
+        "Overrides inference.noise_scale.",
+    )
+    parser.add_argument(
         "-p", "--procs", dest="num_cpus", type=int, default=4, help="CPU workers for async output pool."
     )
     parser.add_argument(
@@ -134,6 +150,8 @@ Examples:
     if args.init_time is not None:
         inf_conf.setdefault("single_forecast", {})["start_datetime"] = args.init_time
         inf_conf["run_mode"] = "single"  # --init-time implies single mode
+    if args.noise_scale is not None:
+        inf_conf["noise_scale"] = args.noise_scale
 
     run_mode = inf_conf.get("run_mode", "batch")
     assert run_mode in ("batch", "single"), f"inference.run_mode must be 'batch' or 'single', got {run_mode!r}"
@@ -214,6 +232,7 @@ Examples:
     # ── Model ────────────────────────────────────────────────────────────────
     model = load_model_for_inference(conf, device)
     model.eval()
+    scale_sdl_noise(model, inf_conf.get("noise_scale"))
 
     # ── Dataset + DataLoader ─────────────────────────────────────────────────
     # Inject desired init times into dataset_conf so _build_master_clock uses

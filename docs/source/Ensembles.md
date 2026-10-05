@@ -61,6 +61,61 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
 
 5. **Validate before submitting:**
 
+**Distributed Ensemble Approach (gen 1: `trainer.type: ensemble-gen1`, alias `era5-ensemble`):**
+- Ensemble members are distributed across available GPUs
+- Effective ensemble size becomes `ensemble_size × num_gpus`
+- KCRPS computation occurs across the entire distributed ensemble
+- Batch size remains constant per GPU regardless of ensemble scaling
+- Requires cross-GPU communication for loss computation
+
+### Gen 2: ring-CRPS ensemble training
+
+Gen 2 configs train distributed ensembles with the standard gen2 trainer
+(`trainer.type: gen2`). There is no separate ensemble trainer. Set `ring-crps` as
+the `BaseLoss` training loss and run one ensemble member per data-parallel GPU:
+
+```yaml
+trainer:
+    type: gen2
+    parallelism:
+        data: ddp
+        tensor: 1
+        domain: 1
+    ensemble_size: 4            # must equal the number of data-parallel GPUs
+    activation_checkpoint: True # optional; see Training > Trainer configuration
+loss:
+    type: base
+    args:
+        training_loss: "ring-crps"
+        validation_loss: "mae"  # deterministic validation loss (recommended)
+        var_weighting: "inverse_variance"
+        scaler_path: "/path/scaler.json"
+```
+
+Launch with as many data-parallel GPUs as `ensemble_size`, e.g.
+`credit submit --cluster derecho -c config.yml --gpus 4`.
+
+- Every data-parallel rank receives the same batch. Each rank's model produces one
+  member, and its stochastic components (SDL / noise-injection layers) are seeded
+  differently on each rank.
+- `ring_crps_loss` computes the fair CRPS across ranks with K−1 ring exchanges,
+  so the full ensemble is never held on a single GPU.
+- The training log adds `train_std`: the standard deviation of member errors,
+  used as a proxy for ensemble spread.
+- Data clamping, `backprop_on_timestep`, `retain_graph`, `skip_nan_prune`, and the
+  dynamic gradient-norm clip all work as in any gen2 run.
+- Configure mass, water, and energy conservation as gen2 postblocks
+  (`global_mass_fixer`, `global_water_fixer`, `global_energy_fixer`; see
+  [Postblocks](postblocks_gen2.md)), not with the gen1 `model.post_conf` block.
+
+`credit check` verifies the config-side requirements: `ensemble_size > 1`, and a
+deterministic `validation_loss` (it warns if one is missing). See
+[Losses](Losses.md) for the full ring-CRPS caveats.
+
+Running several members on each GPU (a local `ensemble_size` per rank) is not
+supported with ring-CRPS. Use the local ensemble approach with an in-tensor CRPS
+loss instead.
+
    ```bash
    credit check -c config/gen_2/examples/wxformer_sdl.yml
    ```
