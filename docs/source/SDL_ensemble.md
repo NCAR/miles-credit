@@ -230,7 +230,7 @@ model = load_model(conf, load_weights=True)
 wrapper = SDLWrapper(model)
 
 # Check the current noise factors (three decoder layers)
-print(wrapper.get_noise_factors())       # e.g. [0.235, 0.235, 0.235]
+print(wrapper.get_noise_factors())  # e.g. [0.235, 0.235, 0.235]
 
 # Disable noise entirely
 wrapper.set_noise_factors(0.0)
