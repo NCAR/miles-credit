@@ -127,11 +127,11 @@ def _plot(args) -> None:
         print(f"Checkpoint not found: {ckpt_path}", file=sys.stderr)
         sys.exit(1)
 
-    from credit.models import load_model
+    from credit.models import build_trained_shapes, load_model
     from credit.models.checkpoint import load_state_dict_error_handler
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model(conf, load_weights=False)
+    model = build_trained_shapes(load_model(conf, load_weights=False), conf)
     model = model.to(device)
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     load_msg = model.load_state_dict(ckpt["model_state_dict"], strict=False)

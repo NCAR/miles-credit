@@ -232,6 +232,9 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
     Input channel count is inferred from the model config:
         frames × (channels × levels + surface_channels + input_only_channels)
 
+    Models that measured their shapes from the data (``model.data_shape``, e.g.
+    wxformer_simple) use those measured shapes instead.
+
     Skips silently if:
       - rank != 0 (only report from rank 0)
       - CUDA is not available
@@ -262,6 +265,13 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
     surface_ch = model_conf.get("surface_channels", 0)
     input_only_ch = model_conf.get("input_only_channels", 0)
     C_in = frames * (channels_3d * levels + surface_ch + input_only_ch)
+
+    # Models that measured their shapes from the data (wxformer_simple) know them
+    # better than the config does.
+    data_shape = getattr(getattr(model, "module", model), "data_shape", None)
+    if data_shape:
+        H, W = data_shape["image_height"], data_shape["image_width"]
+        C_in = data_shape["input_channels"] * data_shape["frames"]
 
     if C_in == 0:
         logger.warning("check_model_gpu_memory: cannot infer input channels from model config; skipping GPU check.")

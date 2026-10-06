@@ -749,3 +749,46 @@ def test_checks_do_not_mutate_the_config(conf):
     before = copy.deepcopy(conf)
     _run(conf)
     assert conf == before
+
+
+# ===========================================================================
+# wxformer_simple: data-derived model shapes
+# ===========================================================================
+
+
+def _simple_conf(conf, **model):
+    conf["model"] = {"type": "wxformer_simple", "dim": [32, 64, 128, 256], "depth": [1, 1, 1, 1], **model}
+    return conf
+
+
+def test_wxformer_simple_without_channel_keys_is_clean(conf):
+    rep = _run(_simple_conf(conf))
+    assert _wheres(rep) == set(), _text(rep)
+    assert "model" not in _wheres(rep, "warning")
+    info = _text(rep, "info")
+    # T, Q x 2 levels + SP + tisr + lsm = 7 in; T, Q x 2 levels + SP + TP = 6 out
+    assert "7 input channel(s) x 1 frame(s) -> 6 output channel(s)" in info
+    assert "multiple of 64" in info
+
+
+def test_wxformer_simple_deep_builds_and_runs(conf):
+    rep = _run(_simple_conf(conf), deep=True)
+    assert "model" not in _wheres(rep), _text(rep)
+
+
+def test_wxformer_simple_warns_about_redundant_keys(conf):
+    rep = _run(_simple_conf(conf, image_height=721, image_width=1440))
+    assert "model" in _wheres(rep, "warning")
+    assert "image_height, image_width" in _text(rep, "warning")
+    assert "768x1472" in _text(rep, "info")
+
+
+def test_wxformer_simple_bad_architecture_is_an_error(conf):
+    rep = _run(_simple_conf(conf, dim=[64, 64, 128, 256]))
+    assert "model" in _wheres(rep)
+    assert "[32, 64, 128, 256]" in _text(rep)
+
+
+def test_wxformer_simple_unpaddable_grid_is_an_error(conf):
+    rep = _run(_simple_conf(conf, image_height=20, image_width=64))
+    assert "model.padding" in _wheres(rep)

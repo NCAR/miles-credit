@@ -47,6 +47,11 @@ _MODEL_REGISTRY = {
         "CrossFormer",
         "Loading WXFormer base (CrossFormer U-Net backbone) ...",
     ),
+    "wxformer_simple": (
+        "credit.models.wxformer.wxformer_simple",
+        "WXFormerSimple",
+        "Loading WXFormer-Simple (sizes itself from the first batch) ...",
+    ),
     "crossformer-ensemble": (
         "credit.models.wxformer.crossformer_ensemble",
         "CrossFormerWithNoise",
@@ -96,6 +101,7 @@ _CLASS_SOURCES = {
     "GraphResTransfGRU": ("credit.models.graph", "GraphResTransfGRU"),
     "DebuggerModel": ("credit.models.debugger_model", "DebuggerModel"),
     "WXFormer": ("credit.models.wxformer.crossformer", "CrossFormer"),
+    "WXFormerSimple": ("credit.models.wxformer.wxformer_simple", "WXFormerSimple"),
     "CrossFormerWithNoise": ("credit.models.wxformer.crossformer_ensemble", "CrossFormerWithNoise"),
     "DownscalingCrossFormer": ("credit.models.wxformer.crossformer_downscaling", "DownscalingCrossFormer"),
     "DownscalingSegmentationModel": ("credit.models.unet_downscaling", "DownscalingSegmentationModel"),
@@ -385,6 +391,19 @@ def load_model(conf, load_weights=False, model_name=False):
         msg = f"Model type {model_type} not supported. Exiting."
         logger.warning(msg)
         raise ValueError(msg)
+
+
+def build_trained_shapes(model, conf):
+    """Give a data-sized model the shapes of the run saved in ``save_loc``.
+
+    Models such as ``wxformer_simple`` build their layers from the data, so an
+    instance from ``load_model(conf)`` has no weights for ``load_state_dict`` to
+    fill. Call this before loading a checkpoint into such an instance: it rebuilds
+    the model from ``save_loc/model_hparams.yml``. Other models are returned as is.
+    """
+    if getattr(model, "needs_materialize", False):
+        return type(model)._build_for_loading(conf)
+    return model
 
 
 def load_model_name(conf, model_name, load_weights=False):

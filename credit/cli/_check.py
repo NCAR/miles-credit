@@ -41,6 +41,9 @@ _DIAGNOSTIC_POSTBLOCKS = frozenset({"geopotential_diagnostic", "mslp_diagnostic"
 # must also run on the target twin or the loss compares mismatched units.
 _UNIT_POSTBLOCKS = frozenset({"bridgescaler_transform", "exp_transform", "square_transform"})
 
+# Model type that measures its channel counts and grid from the data.
+_SIMPLE_MODEL = "wxformer_simple"
+
 _GEN1_TRAINERS = frozenset({"era5", "era5-gen1", "era5-ensemble", "ensemble-gen1"})
 
 # Trainer types that were removed, mapped to the replacement to suggest.
@@ -589,9 +592,31 @@ def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
         return
     if deep:
         try:
-            cls(**mconf)
+            model = cls(**mconf)
+            if getattr(model, "needs_materialize", False):
+                _materialize_for_check(conf, model)
         except Exception as exc:  # noqa: BLE001
             rep.error("model", f"'{mtype}' failed to construct: {type(exc).__name__}: {exc}")
+
+
+def _materialize_for_check(conf: dict, model) -> None:
+    """Build and run a data-sized model on zeros shaped like the configured data.
+
+    The real grid is unknown without reading data, so use the configured
+    ``image_height``/``image_width`` if present, else one padding multiple.
+    """
+    import torch
+
+    shapes = _simple_model_shapes(conf)
+    if shapes is None:
+        return
+    n_in, frames, n_out = shapes
+    mconf = conf.get("model") or {}
+    height = mconf.get("image_height") or model.divisor
+    width = mconf.get("image_width") or model.divisor
+    with torch.no_grad():
+        model.materialize(torch.zeros(1, n_in, frames, height, width), torch.zeros(1, n_out, 1, height, width))
+        model(torch.zeros(1, n_in, frames, height, width))
 
 
 def _check_model_geometry(conf: dict, rep: _Report) -> None:
@@ -603,6 +628,9 @@ def _check_model_geometry(conf: dict, rep: _Report) -> None:
     opaque reshape error, so it is worth catching here.
     """
     mconf = conf.get("model") or {}
+    if mconf.get("type") == _SIMPLE_MODEL:
+        _check_simple_model_geometry(conf, rep)
+        return
     height, width = mconf.get("image_height"), mconf.get("image_width")
     strides = mconf.get("cross_embed_strides")
     if not strides:
@@ -704,6 +732,72 @@ def _check_model_geometry(conf: dict, rep: _Report) -> None:
         "floor((n + 2*((k-s)//2) - k)/s) + 1, not an exact halving.)",
         fix=fix,
     )
+
+
+def _simple_model_shapes(conf: dict) -> tuple[int, int, int] | None:
+    """``(input channels per frame, frames, output channels)`` derived from ``data``.
+
+    Mirrors what ``wxformer_simple`` measures from the first preprocessed batch.
+    """
+    from credit.datasets.gen_2.channel_utils import ChannelSchema
+
+    try:
+        schema = ChannelSchema.from_config(conf)
+    except (KeyError, ValueError):
+        return None  # _check_channel_schema reports why
+    frames = max((e["n_time"] for e in schema.input_layout), default=1)
+    n_in = sum(e["n_levels"] for e in schema.input_layout)
+    n_out = sum(e["n_levels"] for e in schema.target_layout)
+    return n_in, frames, n_out
+
+
+def _check_simple_model_geometry(conf: dict, rep: _Report) -> None:
+    """wxformer_simple: validate the architecture and report what it will measure.
+
+    The grid size is unknown until the first batch, so the useful static facts are
+    whether the architecture constructs at all, which multiple the padded grid must
+    reach, and — when the grid size is known from leftover keys — the padding it
+    will pick.
+    """
+    from credit.models.wxformer.wxformer_simple import DATA_DERIVED_KEYS, WXFormerSimple, resolve_padding
+
+    mconf = {k: v for k, v in (conf.get("model") or {}).items() if k not in ("type", "post_conf")}
+    sources = _get(conf, "data", "source", default={}) or {}
+    levels_used = any(not (src or {}).get("levels") for src in sources.values())
+    legacy = sorted(k for k in mconf if k in DATA_DERIVED_KEYS and not (k == "levels" and levels_used))
+    if legacy:
+        rep.warn(
+            "model",
+            f"wxformer_simple measures {', '.join(legacy)} from the data; these keys are ignored "
+            "(apart from being checked against the data when the model is built).",
+            fix="Delete them from the model block.",
+        )
+    try:
+        model = WXFormerSimple(**{k: v for k, v in mconf.items() if k not in DATA_DERIVED_KEYS})
+    except (TypeError, ValueError) as exc:
+        rep.error("model", str(exc))
+        return
+
+    shapes = _simple_model_shapes(conf)
+    if shapes:
+        n_in, frames, n_out = shapes
+        rep.info(
+            "model",
+            f"wxformer_simple will measure {n_in} input channel(s) x {frames} frame(s) -> {n_out} output "
+            f"channel(s), and pad the grid to a multiple of {model.divisor}.",
+        )
+    height, width = mconf.get("image_height"), mconf.get("image_width")
+    if isinstance(height, int) and isinstance(width, int):
+        try:
+            pad_lat, pad_lon = resolve_padding(height, width, model.divisor, model.arch["padding"])
+        except ValueError as exc:
+            rep.error("model.padding", str(exc))
+        else:
+            rep.info(
+                "model.padding",
+                f"A {height}x{width} grid will be padded by lat {pad_lat} / lon {pad_lon} to "
+                f"{height + sum(pad_lat)}x{width + sum(pad_lon)}.",
+            )
 
 
 def _first_indivisible_stage(height, width, strides, kernels, global_ws, local_ws):

@@ -46,6 +46,8 @@ _WB2_GRIDS = {
     "full": (721, 1440, [90, -90, 721], [0, 359.75, 1440]),
 }
 _WB2_LEVELS = [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 850, 925, 1000]
+_MODEL_TYPES = ("wxformer", "wxformer_simple")
+
 _MODEL_LEVELS = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 115, 120, 125, 127]
 _SECTION_COMMENTS = {
     "save_loc": "# ---- Experiment output and reproducibility ----",
@@ -728,9 +730,28 @@ def _build_config(state: dict) -> dict:
             },
             **config["preblocks"]["per_step"],
         }
+    if state.get("model_type") == "wxformer_simple":
+        config["model"] = _simple_model_block(config["model"], has_source_levels=bool(state["preset"].get("levels")))
     if state["system"] != "local":
         config["pbs"] = state["pbs"]
     return config
+
+
+def _simple_model_block(wxformer_block: dict, has_source_levels: bool) -> dict:
+    """The wxformer block minus everything wxformer_simple measures from the data.
+
+    ``levels`` stays only when no source lists its levels: the data pipeline then
+    reads the level count from ``model.levels``.
+    """
+    from credit.models.wxformer.wxformer_simple import DATA_DERIVED_KEYS
+
+    block = {"type": "wxformer_simple"}
+    for key, value in wxformer_block.items():
+        if key == "type" or (key in DATA_DERIVED_KEYS and not (key == "levels" and not has_source_levels)):
+            continue
+        block[key] = value
+    block["padding"] = {"mode": "earth"}
+    return block
 
 
 def _quote_data_variable_names(config: dict) -> None:
@@ -752,6 +773,13 @@ def _add_section_comments(text: str) -> str:
                 lines.append(_SECTION_COMMENTS[key])
         lines.append(line)
     return "\n".join(lines) + "\n"
+
+
+def _model_type() -> str:
+    value = _prompt("Model (wxformer, or wxformer_simple to size it from the data)", "wxformer").lower()
+    while value not in _MODEL_TYPES:
+        value = _prompt("Choose wxformer or wxformer_simple", "wxformer").lower()
+    return value
 
 
 def _parallelism_data() -> str:
@@ -850,6 +878,7 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
     start, end, timestep, valid_start, valid_end = _date_range(preset)
     vars_3d = _prompt_list("Prognostic 3D variables", preset["vars_3D"])
     vars_2d = _prompt_list("Prognostic 2D variables", preset["vars_2D"])
+    model_type = _model_type()
     batch_size = _prompt_int("Batch size", 4)
     batches_per_epoch = _prompt_int("Batches per epoch", 5)
     parallelism_data = _parallelism_data()
@@ -873,6 +902,7 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
         "valid_end": valid_end,
         "vars_3D": vars_3d,
         "vars_2D": vars_2d,
+        "model_type": model_type,
         "batch_size": batch_size,
         "batches_per_epoch": batches_per_epoch,
         "parallelism_data": parallelism_data,
