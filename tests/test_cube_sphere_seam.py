@@ -22,6 +22,8 @@ places ghost cells up to ~2 cells away from the face's continued grid lines.
 ne120 uses the shipped ``se_index_ne120.npy``; ne30 and ne16 build their index
 from the CESM SCRIP file with ``_build_se_index`` (a parameterized port of
 credit-mesaclip's ``build_se_index.py``, checked against the shipped ne120 one).
+Where the CESM SCRIP files are not available (e.g. CI), ne30 and ne16 fall back
+to a synthetic SCRIP file holding the analytic ``neXXnp4`` node layout.
 """
 
 import os
@@ -87,11 +89,52 @@ def _build_se_index(scrip_path, ne):
     return se_index
 
 
+def _gll_angles(ne):
+    """Analytic node angles along one face edge of an neXXnp4 grid: ne
+    equiangular elements, 4 GLL nodes each with shared endpoints (3*ne + 1)."""
+    gll = np.array([-1.0, -1.0 / np.sqrt(5.0), 1.0 / np.sqrt(5.0)])
+    theta = (-np.pi / 4 + (np.pi / 2 / ne) * (np.arange(ne)[:, None] + (1.0 + gll) / 2.0)).ravel()
+    return np.append(theta, np.pi / 4)
+
+
+def _write_synthetic_scrip(path, ne):
+    """SCRIP file with the analytic neXXnp4 node centers (shuffled order),
+    standing in for the CESM file.  Each shared cube-edge node is emitted once,
+    from the face that owns it under the se_index convention (faces 0/1 own all
+    their cells, 2/3 their interior columns, 4/5 their interior)."""
+    import xarray as xr
+
+    t = np.tan(_gll_angles(ne))
+    inner = slice(1, -1)
+    owned = [(slice(None), slice(None))] * 2 + [(slice(None), inner)] * 2 + [(inner, inner)] * 2  # (rows, cols)
+    xyz = []
+    for f, (rows, cols) in enumerate(owned):
+        beta, alpha = np.meshgrid(t[rows], t[cols], indexing="ij")
+        xyz.append(
+            np.stack(HaloExchange._face_alpha_beta_to_xyz(np.full(alpha.size, f), alpha.ravel(), beta.ravel()), -1)
+        )
+    xyz = np.concatenate(xyz)
+    xyz /= np.linalg.norm(xyz, axis=1, keepdims=True)
+    assert len(xyz) == 54 * ne * ne + 2
+    xyz = xyz[np.random.default_rng(0).permutation(len(xyz))]
+    lat = np.rad2deg(np.arcsin(np.clip(xyz[:, 2], -1.0, 1.0)))
+    lon = np.rad2deg(np.arctan2(xyz[:, 1], xyz[:, 0])) % 360.0
+    xr.Dataset(
+        {
+            "grid_center_lat": ("grid_size", lat, {"units": "degrees"}),
+            "grid_center_lon": ("grid_size", lon, {"units": "degrees"}),
+        }
+    ).to_netcdf(path)
+    return path
+
+
 def _grid(ne, tmp_path):
     """(se_index_path, adjacency_path, scrip_path, face edge) for one grid, or skip."""
     scrip_path = _scrip_path(ne)
     if not scrip_path.exists():
-        pytest.skip(f"CESM SCRIP file for ne{ne} is not available")
+        if ne == 120:
+            pytest.skip(f"CESM SCRIP file for ne{ne} is not available")
+        scrip_path = _write_synthetic_scrip(tmp_path / f"ne{ne}np4_synthetic_scrip.nc", ne)
     if ne == 120:
         se_index_path = _static_dir() / "se_index_ne120.npy"
         adjacency_path = _static_dir() / "se_face_adjacency_ne120.npz"
@@ -161,9 +204,7 @@ def _analytic_padded_xyz(ne, padded):
     each face's grid lines past the edge by mirroring the node angles about it.
     Built independently of the SCRIP file the module reads.
     """
-    gll = np.array([-1.0, -1.0 / np.sqrt(5.0), 1.0 / np.sqrt(5.0)])
-    theta = (-np.pi / 4 + (np.pi / 2 / ne) * (np.arange(ne)[:, None] + (1.0 + gll) / 2.0)).ravel()
-    theta = np.append(theta, np.pi / 4)
+    theta = _gll_angles(ne)
 
     j = np.arange(padded) - CROP
     last = 3 * ne

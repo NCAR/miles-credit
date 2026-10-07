@@ -269,3 +269,34 @@ def test_scrip_halo_model_runs_on_ne30(tmp_path):
         y = model(x)
     assert tuple(y.shape) == (1, 2 * 3 + 4 + 1, 1, ncol)
     assert torch.isfinite(y).all()
+
+
+def test_pre_seam_fix_checkpoint_loads_with_old_halo(tmp_path):
+    """Checkpoints saved before the seam fix store a single (1, 1, p, p)
+    native-window mask. They must still load (strict), and keep the old halo:
+    the whole native window passes through, unowned seam cells included."""
+    se_index_path, adjacency_path, scrip_path, edge = _grid(30, tmp_path)
+    model = _make_model(se_index_path, adjacency_path=str(adjacency_path), scrip_path=str(scrip_path), **_SMALL_WINDOWS)
+    halo = model.halo_exchange
+    p, crop = halo.padded_size, halo.crop_top
+
+    old_mask = torch.zeros(1, 1, p, p, dtype=torch.bool)
+    old_mask[..., crop : crop + edge, crop : crop + edge] = True
+    state = model.state_dict()
+    state["halo_exchange.native_mask"] = old_mask
+
+    restored = _make_model(
+        se_index_path, adjacency_path=str(adjacency_path), scrip_path=str(scrip_path), **_SMALL_WINDOWS
+    )
+    restored.load_state_dict(state)
+    assert tuple(restored.halo_exchange.native_mask.shape) == (1, NFACE, 1, p, p)
+
+    # Constant field scattered onto owned nodes; unowned seam cells stay 0.
+    cube = torch.zeros(NFACE * edge * edge)
+    cube[torch.from_numpy(np.load(se_index_path).astype(np.int64))] = 1.0
+    x6 = cube.reshape(NFACE, 1, edge, edge)
+    with torch.no_grad():
+        native = restored.halo_exchange(x6)[:, :, crop : crop + edge, crop : crop + edge]
+        fixed = halo(x6)[:, :, crop : crop + edge, crop : crop + edge]
+    torch.testing.assert_close(native, x6)  # old behavior: window passed through verbatim
+    assert (x6 == 0).any() and not (fixed == 0).any()  # new halo fills the seam cells

@@ -209,6 +209,19 @@ class HaloExchange(nn.Module):
             "native_mask", torch.from_numpy(native_mask).view(1, NFACE, 1, self.padded_size, self.padded_size)
         )
 
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        # Checkpoints saved before the seam fix carry a single (1, 1, p, p)
+        # native-window mask shared by all faces. Broadcast it to the per-face
+        # (1, NFACE, 1, p, p) layout so they still load, and keep their old
+        # behavior exactly: the whole native window passes through, alongside
+        # the old ghost tables restored from the same checkpoint.
+        key = prefix + "native_mask"
+        mask = state_dict.get(key)
+        if mask is not None and mask.dim() == 4:
+            p = self.padded_size
+            state_dict[key] = mask.reshape(1, 1, 1, p, p).expand(1, NFACE, 1, p, p).contiguous()
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
     # ------------------------------------------------------------------
 
     @staticmethod
