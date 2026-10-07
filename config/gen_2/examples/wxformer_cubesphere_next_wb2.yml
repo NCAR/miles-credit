@@ -32,6 +32,10 @@ data:
   end_datetime: '2018-12-31'
 trainer:
   type: era5-gen2
+  parallelism:
+    data: ddp               # ddp | fsdp2 | none
+    tensor: 1
+    domain: 1
   use_ema: true
   ema_decay: 0.9999
   use_tensorboard: true
@@ -66,6 +70,8 @@ model:
 validation_data:
   start_datetime: '2019-01-01'
   end_datetime: '2022-12-31'
+  timestep: 6h
+  forecast_len: 1
 preblocks:
   per_step:
     scaler:

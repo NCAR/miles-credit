@@ -84,3 +84,11 @@ def test_zero_init_head_gives_persistence(input_only_channels, output_only_chann
     assert tuple(y.shape) == (1, model.output_channels, 1, 32, 64)
     expected = _expected_residual(x[:, :, 0], c_prog, model.output_channels)
     assert torch.allclose(y[:, :, 0], expected, atol=0.0)
+
+
+def test_nextgen_wxformer_alias_loads_wxformer_column():
+    """Configs written before the rename (model.type: nextgen_wxformer) still resolve."""
+    from credit.models import _load_model_entry
+
+    assert _load_model_entry("nextgen_wxformer")[0] is WXFormerColumn
+    assert _load_model_entry("wxformer_column")[0] is WXFormerColumn

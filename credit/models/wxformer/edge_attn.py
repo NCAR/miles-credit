@@ -30,6 +30,8 @@ the face occupies positions h//s : (h+361)//s (approximately).
 
 Usage
 -----
+::
+
     edge_attn = FaceEdgeAttention(
         adj_npz_path = "mesaclip/static/se_face_adjacency_ne120.npz",
         dims         = (64, 128, 256, 512),

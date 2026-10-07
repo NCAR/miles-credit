@@ -7,7 +7,8 @@ weight matrix.
 
 Despite the class name, the implementation is grid-agnostic — it works for
 any source grid (lat-lon, tripole, Gaussian reduced) given the right weight
-file.  For 0.25° lat-lon (721×1440) → ne120 SE use the pre-built weights at:
+file.  For 0.25° lat-lon (721×1440) → ne120 SE use the pre-built weights at::
+
   /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/latlon721x1440_to_se_ne120.nc
 
 Registered in the preblock registry as ``"tripole_to_se"`` so configs can use::
