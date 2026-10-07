@@ -587,6 +587,22 @@ def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
     if err:
         rep.error("model", f"'{mtype}' {err}", fix=f"Accepted keys: {', '.join(_accepted_params(cls))}")
         return
+    # cubed_wxformer builds its HaloExchange when halo_size > 0 and the adjacency
+    # file resolves (explicit path, or auto-detected next to se_index_path); the
+    # halo then needs the SE grid's SCRIP file for its ghost-cell geometry.
+    if mtype == "cubed_wxformer" and mconf.get("halo_size", 6) > 0 and not mconf.get("scrip_path"):
+        se_index = os.path.expandvars(str(mconf.get("se_index_path") or ""))
+        adjacency = mconf.get("adjacency_path") or os.path.join(
+            os.path.dirname(se_index), "se_face_adjacency_ne120.npz"
+        )
+        if os.path.exists(os.path.expandvars(str(adjacency))):
+            rep.error(
+                "model.scrip_path",
+                "cubed_wxformer's halo exchange needs the SE grid's SCRIP file to place ghost cells, "
+                "but scrip_path is unset.",
+                fix="Set model.scrip_path to the SCRIP file se_index was built from "
+                "(ne120: .../inputdata/share/scripgrids/ne120np4_pentagons_100310.nc), or set halo_size: 0.",
+            )
     if deep:
         try:
             cls(**mconf)
@@ -1050,6 +1066,9 @@ def _iter_config_paths(conf: dict):
             value = _get(conf, top, "args", key)
             if isinstance(value, str) and value:
                 yield f"{top}.args.{key}", value
+    value = _get(conf, "model", "scrip_path")
+    if isinstance(value, str) and value:
+        yield "model.scrip_path", value
 
 
 def _check_channel_schema(conf: dict, rep: _Report) -> None:

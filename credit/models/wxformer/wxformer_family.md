@@ -92,7 +92,10 @@ reshaped into six cube faces inside the model:
    padded encoder tile (361 → 384 for ne120 with the default windows). If
    `adjacency_path` and `se_index_path` are available, the non-native padded
    cells are populated from physically equivalent SE-owned cells before the
-   CrossFormer encoder sees the tensor. Each face is then encoded by a
+   CrossFormer encoder sees the tensor. The halo requires `scrip_path` (the SE
+   grid's SCRIP file): grid index is not linear in the gnomonic coordinate on
+   the equiangular/GLL ne120 grid, so ghost cells are placed from the true node
+   angles. Each face is then encoded by a
    CrossFormer stage, mixed across faces by attention, and decoded back.
 4. **cube → SE → lat/lon**. The cube is gathered back to SE columns. For
    verification on the native lat/lon grid, the `se_to_latlon` postblock
@@ -213,6 +216,7 @@ model:
   type: cubed_wxformer
   se_index_path: ".../se_index_ne120.npy"
   adjacency_path: ".../se_face_adjacency_ne120.npz"   # omit to disable halo/edge attn
+  scrip_path: ".../ne120np4_pentagons_100310.nc"      # required when the halo is enabled
   frames: 1
   channels: 9
   surface_channels: 16
@@ -248,6 +252,7 @@ model:
   type: cubed_wxformer
   se_index_path: ".../se_index_ne120.npy"
   adjacency_path: ".../se_face_adjacency_ne120.npz"
+  scrip_path: ".../ne120np4_pentagons_100310.nc"
   frames: 1
   channels: 9
   surface_channels: 16
@@ -300,6 +305,10 @@ in the credit-mesaclip repo under `mesaclip/static/`):
 | `se_ne120_to_latlon721x1440.nc` | reverse regrid weights (SE → lat/lon), `se_to_latlon` |
 | `se_index_ne120.npy` | SE ↔ cube reindex |
 | `se_face_adjacency_ne120.npz` | face-edge adjacency for halo exchange / edge attention |
+
+The halo exchange also needs the SCRIP grid file `se_index` was built from
+(`model.scrip_path`). It ships with CESM inputdata rather than credit-mesaclip; on
+NCAR systems: `/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc`.
 
 Conservative variants of the regrid weights (`*_conserve.nc`) are available for
 budget-sensitive evaluation.

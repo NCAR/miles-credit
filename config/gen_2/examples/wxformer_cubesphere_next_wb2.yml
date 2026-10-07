@@ -39,6 +39,7 @@ model:
   type: cubed_wxformer
   se_index_path: /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_index_ne120.npy
   adjacency_path: /glade/work/schreck/repos/credit-mesaclip/mesaclip/static/se_face_adjacency_ne120.npz
+  scrip_path: /glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc
   frames: 1
   channels: 9
   surface_channels: 16

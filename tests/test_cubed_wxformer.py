@@ -197,8 +197,14 @@ def test_ne120_full_ghost_halo_map_uses_only_owned_cells():
     )
     se_index_path = static_dir / "se_index_ne120.npy"
     adjacency_path = static_dir / "se_face_adjacency_ne120.npz"
-    if not se_index_path.exists() or not adjacency_path.exists():
-        pytest.skip("ne120 cubed-sphere static files are not available")
+    scrip_path = Path(
+        os.environ.get(
+            "NE120_SCRIP",
+            "/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc",
+        )
+    )
+    if not se_index_path.exists() or not adjacency_path.exists() or not scrip_path.exists():
+        pytest.skip("ne120 cubed-sphere static files or SCRIP grid file are not available")
 
     face_edge = 361
     padded_size = 384
@@ -206,6 +212,7 @@ def test_ne120_full_ghost_halo_map_uses_only_owned_cells():
     halo = HaloExchange(
         adjacency_path=adjacency_path,
         se_index_path=se_index_path,
+        scrip_path=scrip_path,
         padded_size=padded_size,
         crop_top=crop,
         crop_left=crop,

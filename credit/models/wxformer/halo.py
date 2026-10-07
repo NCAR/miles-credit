@@ -19,9 +19,17 @@ This fills duplicated face edges, missing native face cells, and corner/vertex
 ghost regions from physically equivalent owned cells.
 
 Ghost cells are filled by **bilinear interpolation** of the owning face's four
-bracketing grid cells (the continuous alpha/beta reprojection is only rounded
-to the nearest cell for the legacy ``source_flat_index`` map, kept for
-validation/tests). Nearest-neighbor rounding leaves a small but systematic
+bracketing grid cells (the continuous reprojection is only rounded to the
+nearest cell for the legacy ``source_flat_index`` map, kept for
+validation/tests).
+
+Grid geometry comes from the SE grid's SCRIP file, the same one ``se_index``
+was built from. ``se_index`` assigns rows/cols by *rank* of the gnomonic
+coordinate, and the ne120 grid is equiangular with GLL nodes inside each
+element, so grid index is not linear in alpha/beta: a linear map puts ghost
+cells up to ~2 cells off the face's continued grid lines. The node angle of
+every grid line is read from the SCRIP node coordinates; ghost cells continue
+each face's grid lines past the edge by mirroring those angles about it. Nearest-neighbor rounding leaves a small but systematic
 discretization mismatch at every ghost cell relative to the true value the
 neighboring face would report at that exact location; compounded over long
 autoregressive rollouts this shows up as blur at the face seams. Every
@@ -66,7 +74,7 @@ All index buffers are registered as nn.Buffers so .to(device) moves them.
 
 Usage
 -----
-    halo = HaloExchange(adj_path, se_index_path, padded_size=384, crop_top=11, crop_left=11)
+    halo = HaloExchange(adj_path, se_index_path, scrip_path, padded_size=384, crop_top=11, crop_left=11)
     x_pad = halo(x6)   # (B*6, C, 361, 361) -> (B*6, C, 384, 384)
 """
 
@@ -95,6 +103,10 @@ class HaloExchange(nn.Module):
     se_index_path : str | Path
         Path to ``se_index_ne120.npy``.  Used to determine which logical cube
         cells are SE-owned.
+    scrip_path : str | Path
+        Required. SCRIP grid file of the SE grid ``se_index`` was built from
+        (e.g. ``ne120np4_pentagons_100310.nc``). Its node coordinates give the
+        true angle of every grid line, used to place ghost cells.
     padded_size : int
         Final per-face encoder size.
     crop_top, crop_left : int
@@ -108,6 +120,7 @@ class HaloExchange(nn.Module):
         self,
         adjacency_path: str | Path,
         se_index_path: str | Path | None = None,
+        scrip_path: str | Path | None = None,
         padded_size: int | None = None,
         crop_top: int | None = None,
         crop_left: int | None = None,
@@ -120,11 +133,16 @@ class HaloExchange(nn.Module):
 
         if se_index_path is None:
             raise ValueError("HaloExchange requires se_index_path for full ghost-cell exchange")
+        if scrip_path is None:
+            raise ValueError(
+                "HaloExchange requires scrip_path (the SE grid's SCRIP file) for the true ghost-cell geometry"
+            )
 
         self.halo_size = halo_size
         self.padded_size = int(padded_size or (NFACE_EDGE + 2 * halo_size))
         self.crop_top = int(halo_size if crop_top is None else crop_top)
         self.crop_left = int(halo_size if crop_left is None else crop_left)
+        self.theta_col, self.theta_row = self._build_angle_tables(se_index_path, scrip_path)
 
         # Legacy nearest-neighbor map: kept only so existing ghost-map validation
         # (tests/test_cubed_wxformer.py) can still check every ghost cell
@@ -224,43 +242,100 @@ class HaloExchange(nn.Module):
         alpha[m], beta[m] = -x[m] / z[m], y[m] / z[m]
         return alpha, beta
 
-    def _owner_geometry(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """For every padded coordinate on every face, find the owning face and
-        the continuous (unrounded) local (alpha, beta) coordinate on it.
-
-        Shared by the legacy nearest-neighbor map and the bilinear interpolation
-        map below -- both need the same reprojection, they only differ in how
-        the continuous (owner_alpha, owner_beta) is turned into cube indices.
+    @classmethod
+    def _build_angle_tables(cls, se_index_path: str | Path, scrip_path: str | Path) -> tuple[np.ndarray, np.ndarray]:
+        """Angle (arctan of the gnomonic coordinate) of every grid column and
+        row on every face, read from the SCRIP node coordinates.
 
         Returns
         -------
-        owner_face, owner_alpha, owner_beta : each (NFACE, padded_size, padded_size)
+        theta_col, theta_row : each (NFACE, NFACE_EDGE)
+        """
+        import xarray as xr
+
+        se_idx = np.load(str(se_index_path)).astype(np.int64)
+        with xr.open_dataset(scrip_path) as ds:
+            lat = ds["grid_center_lat"].values.astype(np.float64)
+            lon = ds["grid_center_lon"].values.astype(np.float64)
+            if not ds["grid_center_lat"].attrs.get("units", "degrees").startswith("rad"):
+                lat, lon = np.deg2rad(lat), np.deg2rad(lon)
+        if lat.size != se_idx.size:
+            raise ValueError(f"SCRIP file {scrip_path} has {lat.size} nodes but se_index has {se_idx.size}")
+
+        x, y, z = np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)
+        face = se_idx // (NFACE_EDGE * NFACE_EDGE)
+        row = (se_idx // NFACE_EDGE) % NFACE_EDGE
+        col = se_idx % NFACE_EDGE
+        alpha, beta = cls._xyz_to_face_alpha_beta(face, x, y, z)
+
+        tables = []
+        for line, angle in ((face * NFACE_EDGE + col, np.arctan(alpha)), (face * NFACE_EDGE + row, np.arctan(beta))):
+            count = np.bincount(line, minlength=NFACE * NFACE_EDGE)
+            theta = np.bincount(line, weights=angle, minlength=NFACE * NFACE_EDGE) / np.maximum(count, 1)
+            if np.abs(angle - theta[line]).max() > 1e-6:
+                raise ValueError(
+                    f"SCRIP file {scrip_path} does not match se_index {se_index_path}: "
+                    "nodes on the same grid line disagree on its angle"
+                )
+            theta = theta.reshape(NFACE, NFACE_EDGE)
+            # Edge lines with no owned node (faces 2-5) lie exactly on the cube edge.
+            empty = count.reshape(NFACE, NFACE_EDGE) == 0
+            theta[:, 0] = np.where(empty[:, 0], -np.pi / 4, theta[:, 0])
+            theta[:, -1] = np.where(empty[:, -1], np.pi / 4, theta[:, -1])
+            tables.append(theta)
+        return tables[0], tables[1]
+
+    def _owner_geometry(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """For every padded coordinate on every face, find the owning face and
+        the continuous (unrounded) row/col position on it.
+
+        Cells inside the native window sit at their grid line's true angle;
+        ghost cells continue the face's grid lines past each edge by mirroring
+        the node angles about it (the next equiangular element, with the same
+        symmetric GLL spacing). Shared by the legacy nearest-neighbor map and
+        the bilinear interpolation map below -- they only differ in how
+        (owner_row, owner_col) is turned into cube indices.
+
+        Returns
+        -------
+        owner_face, owner_row, owner_col : each (NFACE, padded_size, padded_size)
         """
         p = self.padded_size
-        rr, cc = np.meshgrid(np.arange(p), np.arange(p), indexing="ij")
-        rr = rr.reshape(-1)
-        cc = cc.reshape(-1)
+        last = NFACE_EDGE - 1
+        grid_index = np.arange(NFACE_EDGE, dtype=np.float64)
+
+        def extend(theta: np.ndarray, crop: int) -> np.ndarray:
+            j = np.arange(p) - crop
+            return np.where(
+                j < 0,
+                2 * theta[0] - theta[np.clip(-j, 0, last)],
+                np.where(j > last, 2 * theta[last] - theta[np.clip(2 * last - j, 0, last)], theta[np.clip(j, 0, last)]),
+            )
 
         owner_face = np.empty((NFACE, p * p), dtype=np.int64)
-        owner_alpha = np.empty((NFACE, p * p), dtype=np.float64)
-        owner_beta = np.empty((NFACE, p * p), dtype=np.float64)
+        owner_row = np.empty((NFACE, p * p), dtype=np.float64)
+        owner_col = np.empty((NFACE, p * p), dtype=np.float64)
 
         for f in range(NFACE):
-            face = np.full(rr.shape, f, dtype=np.int64)
-            row = rr.astype(np.float64) - self.crop_top
-            col = cc.astype(np.float64) - self.crop_left
-            alpha = 2.0 * col / (NFACE_EDGE - 1) - 1.0
-            beta = 2.0 * row / (NFACE_EDGE - 1) - 1.0
-
-            x, y, z = self._face_alpha_beta_to_xyz(face, alpha, beta)
+            beta, alpha = np.meshgrid(
+                np.tan(extend(self.theta_row[f], self.crop_top)),
+                np.tan(extend(self.theta_col[f], self.crop_left)),
+                indexing="ij",
+            )
+            face = np.full(p * p, f, dtype=np.int64)
+            x, y, z = self._face_alpha_beta_to_xyz(face, alpha.reshape(-1), beta.reshape(-1))
             owner = self._assign_faces(x, y, z)
             oa, ob = self._xyz_to_face_alpha_beta(owner, x, y, z)
-            owner_face[f], owner_alpha[f], owner_beta[f] = owner, oa, ob
+            for g in range(NFACE):
+                m = owner == g
+                owner_col[f, m] = np.interp(np.arctan(oa[m]), self.theta_col[g], grid_index)
+                owner_row[f, m] = np.interp(np.arctan(ob[m]), self.theta_row[g], grid_index)
+            owner_face[f] = owner
 
         return (
             owner_face.reshape(NFACE, p, p),
-            owner_alpha.reshape(NFACE, p, p),
-            owner_beta.reshape(NFACE, p, p),
+            owner_row.reshape(NFACE, p, p),
+            owner_col.reshape(NFACE, p, p),
         )
 
     def _build_source_flat_index(self, se_index_path: str | Path) -> np.ndarray:
@@ -274,9 +349,9 @@ class HaloExchange(nn.Module):
         owned_cube = owned.reshape(NFACE, NFACE_EDGE, NFACE_EDGE)
         identity = np.arange(cube_flat, dtype=np.int64).reshape(NFACE, NFACE_EDGE, NFACE_EDGE)
 
-        owner_face, owner_alpha, owner_beta = self._owner_geometry()
-        owner_col = np.rint((owner_alpha + 1.0) * (NFACE_EDGE - 1) / 2.0).astype(np.int64)
-        owner_row = np.rint((owner_beta + 1.0) * (NFACE_EDGE - 1) / 2.0).astype(np.int64)
+        owner_face, owner_row_f, owner_col_f = self._owner_geometry()
+        owner_col = np.rint(owner_col_f).astype(np.int64)
+        owner_row = np.rint(owner_row_f).astype(np.int64)
         owner_row = np.clip(owner_row, 0, NFACE_EDGE - 1)
         owner_col = np.clip(owner_col, 0, NFACE_EDGE - 1)
 
@@ -300,7 +375,7 @@ class HaloExchange(nn.Module):
         """Bilinear ghost map: 4 bracketing owned cells + weights per padded coordinate.
 
         Same reprojection as ``_build_source_flat_index``, but the continuous
-        (owner_alpha, owner_beta) is bracketed by its 4 neighboring grid cells
+        (owner_row, owner_col) is bracketed by its 4 neighboring grid cells
         instead of rounded to the nearest one, so ghost cells get an interpolated
         value rather than a discretized nearest-neighbor one.
 
@@ -320,10 +395,7 @@ class HaloExchange(nn.Module):
         owned = np.zeros(cube_flat, dtype=bool)
         owned[se_idx] = True
 
-        owner_face, owner_alpha, owner_beta = self._owner_geometry()
-
-        col_f = np.clip((owner_alpha + 1.0) * (NFACE_EDGE - 1) / 2.0, 0.0, NFACE_EDGE - 1)
-        row_f = np.clip((owner_beta + 1.0) * (NFACE_EDGE - 1) / 2.0, 0.0, NFACE_EDGE - 1)
+        owner_face, row_f, col_f = self._owner_geometry()
 
         col0 = np.floor(col_f).astype(np.int64)
         row0 = np.floor(row_f).astype(np.int64)

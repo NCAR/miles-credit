@@ -410,6 +410,41 @@ def test_model_levels_mismatch(conf):
     assert "model.levels" in _wheres(rep)
 
 
+def _cubed_model(conf, tmp_path, **overrides):
+    """Swap in a cubed_wxformer whose adjacency file auto-detects next to se_index."""
+    se_index = tmp_path / "se_index_ne120.npy"
+    se_index.touch()
+    (tmp_path / "se_face_adjacency_ne120.npz").touch()
+    model = {k: conf["model"][k] for k in ("frames", "levels", "channels", "surface_channels")}
+    model.update(input_only_channels=2, output_only_channels=1)
+    model.update(type="cubed_wxformer", se_index_path=str(se_index), **overrides)
+    conf["model"] = model
+    return conf
+
+
+def test_cubed_wxformer_halo_requires_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_must_exist(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(tmp_path / "missing_scrip.nc")))
+    assert "model.scrip_path" in _wheres(rep)
+    assert "File not found" in _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_present_is_clean(conf, tmp_path):
+    scrip = tmp_path / "ne120np4_scrip.nc"
+    scrip.touch()
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(scrip)))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_without_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_size=0))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
 def test_three_dimensional_input_only_vars_count_per_level(conf):
     """A 3D static variable contributes n_levels channels, not one."""
     conf["data"]["source"]["ERA5"]["variables"]["static"]["vars_3D"] = ["soil"]
