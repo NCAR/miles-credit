@@ -410,11 +410,11 @@ def test_model_levels_mismatch(conf):
     assert "model.levels" in _wheres(rep)
 
 
-def _cubed_model(conf, tmp_path, **overrides):
+def _cubed_model(conf, tmp_path, grid="ne120", **overrides):
     """Swap in a cubed_wxformer whose adjacency file auto-detects next to se_index."""
-    se_index = tmp_path / "se_index_ne120.npy"
+    se_index = tmp_path / f"se_index_{grid}.npy"
     se_index.touch()
-    (tmp_path / "se_face_adjacency_ne120.npz").touch()
+    (tmp_path / f"se_face_adjacency_{grid}.npz").touch()
     model = {k: conf["model"][k] for k in ("frames", "levels", "channels", "surface_channels")}
     model.update(input_only_channels=2, output_only_channels=1)
     model.update(type="cubed_wxformer", se_index_path=str(se_index), **overrides)
@@ -443,6 +443,23 @@ def test_cubed_wxformer_scrip_path_present_is_clean(conf, tmp_path):
 def test_cubed_wxformer_without_halo_needs_no_scrip_path(conf, tmp_path):
     rep = _run(_cubed_model(conf, tmp_path, halo_size=0))
     assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_linear_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="linear"))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+    assert "model.halo_geometry" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_unknown_halo_geometry(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="bilinear"))
+    assert "model.halo_geometry" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_required_on_other_resolutions(conf, tmp_path):
+    """Adjacency auto-detect follows the se_index name, so ne30 is caught too."""
+    rep = _run(_cubed_model(conf, tmp_path, grid="ne30"))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
 
 
 def test_three_dimensional_input_only_vars_count_per_level(conf):

@@ -18,6 +18,7 @@ from credit.models.wxformer.cubed_wxformer import (
     CubedWXFormer,
 )
 from credit.models.wxformer.halo import HaloExchange
+from tests.test_cube_sphere_seam import _grid, _scrip_path
 
 
 def _write_full_cube_index(tmp_path, edge):
@@ -197,12 +198,7 @@ def test_ne120_full_ghost_halo_map_uses_only_owned_cells():
     )
     se_index_path = static_dir / "se_index_ne120.npy"
     adjacency_path = static_dir / "se_face_adjacency_ne120.npz"
-    scrip_path = Path(
-        os.environ.get(
-            "NE120_SCRIP",
-            "/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc",
-        )
-    )
+    scrip_path = _scrip_path(120)
     if not se_index_path.exists() or not adjacency_path.exists() or not scrip_path.exists():
         pytest.skip("ne120 cubed-sphere static files or SCRIP grid file are not available")
 
@@ -236,3 +232,40 @@ def test_ne120_full_ghost_halo_map_uses_only_owned_cells():
     assert owned[src[:, :crop, crop + face_edge :]].all()
     assert owned[src[:, crop + face_edge :, :crop]].all()
     assert owned[src[:, crop + face_edge :, crop + face_edge :]].all()
+
+
+_SMALL_WINDOWS = dict(local_window_size=3, global_window_size=(3, 3, 3, 3), edge_attn_heads=2, tile_attn_heads=2)
+
+
+@pytest.mark.parametrize("edge", [30, 50])
+def test_linear_halo_runs_on_any_face_edge(tmp_path, edge):
+    """Halo + edge/tile attention are not tied to ne120: a synthetic full cube
+    of any edge length runs end to end with the linear (SCRIP-free) halo, and
+    the adjacency file is auto-detected from the se_index file name."""
+    si, ncol = _write_full_cube_index(tmp_path, edge)
+    np.savez(tmp_path / f"se_face_adjacency_e{edge}.npz")
+    model = _make_model(si, adjacency_path=None, halo_geometry="linear", **_SMALL_WINDOWS)
+
+    assert model.halo_exchange is not None and model.halo_exchange.nface_edge == edge
+    assert model.face_edge_attn is not None and model.cross_face_tile_attn is not None
+    x = torch.randn(1, 2 * 3 + 4 + 5, 1, ncol)
+    with torch.no_grad():
+        y = model(x)
+    assert tuple(y.shape) == (1, 2 * 3 + 4 + 1, 1, ncol)
+    assert torch.isfinite(y).all()
+
+
+def test_scrip_halo_model_runs_on_ne30(tmp_path):
+    """Full model on the real ne30 grid with the SCRIP-geometry halo."""
+    se_index_path, adjacency_path, scrip_path, edge = _grid(30, tmp_path)
+    model = _make_model(se_index_path, adjacency_path=str(adjacency_path), scrip_path=str(scrip_path), **_SMALL_WINDOWS)
+    model.eval()
+    assert model.nface_edge == edge == 91
+    assert model.halo_exchange is not None and model.halo_exchange.geometry == "scrip"
+
+    ncol = model.se_index.numel()
+    x = torch.randn(1, 2 * 3 + 4 + 5, 1, ncol)
+    with torch.no_grad():
+        y = model(x)
+    assert tuple(y.shape) == (1, 2 * 3 + 4 + 1, 1, ncol)
+    assert torch.isfinite(y).all()

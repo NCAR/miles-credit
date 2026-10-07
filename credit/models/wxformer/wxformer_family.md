@@ -92,10 +92,12 @@ reshaped into six cube faces inside the model:
    padded encoder tile (361 → 384 for ne120 with the default windows). If
    `adjacency_path` and `se_index_path` are available, the non-native padded
    cells are populated from physically equivalent SE-owned cells before the
-   CrossFormer encoder sees the tensor. The halo requires `scrip_path` (the SE
-   grid's SCRIP file): grid index is not linear in the gnomonic coordinate on
-   the equiangular/GLL ne120 grid, so ghost cells are placed from the true node
-   angles. Each face is then encoded by a
+   CrossFormer encoder sees the tensor. `halo_geometry` picks how ghost cells
+   are placed: `scrip` (default) reads the true node angles from `scrip_path`
+   (the SE grid's SCRIP file) -- grid index is not linear in the gnomonic
+   coordinate on the equiangular/GLL grids; `linear` assumes it is, needs no
+   SCRIP file, and reproduces the pre-SCRIP halo (ghost cells up to ~2 cells off
+   on ne120). See "Supported cubed-sphere grids" below. Each face is then encoded by a
    CrossFormer stage, mixed across faces by attention, and decoded back.
 4. **cube → SE → lat/lon**. The cube is gathered back to SE columns. For
    verification on the native lat/lon grid, the `se_to_latlon` postblock
@@ -216,7 +218,8 @@ model:
   type: cubed_wxformer
   se_index_path: ".../se_index_ne120.npy"
   adjacency_path: ".../se_face_adjacency_ne120.npz"   # omit to disable halo/edge attn
-  scrip_path: ".../ne120np4_pentagons_100310.nc"      # required when the halo is enabled
+  scrip_path: ".../ne120np4_pentagons_100310.nc"      # required for halo_geometry: scrip
+  halo_geometry: scrip                                  # or linear (no SCRIP file)
   frames: 1
   channels: 9
   surface_channels: 16
@@ -306,9 +309,35 @@ in the credit-mesaclip repo under `mesaclip/static/`):
 | `se_index_ne120.npy` | SE ↔ cube reindex |
 | `se_face_adjacency_ne120.npz` | face-edge adjacency for halo exchange / edge attention |
 
-The halo exchange also needs the SCRIP grid file `se_index` was built from
-(`model.scrip_path`). It ships with CESM inputdata rather than credit-mesaclip; on
-NCAR systems: `/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc`.
+The halo exchange (with the default `halo_geometry: scrip`) also needs the SCRIP
+grid file `se_index` was built from (`model.scrip_path`). It ships with CESM
+inputdata rather than credit-mesaclip; on NCAR systems:
+`/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc`
+(`ne30np4_091226_pentagons.nc`, `ne16np4_110512_pentagons.nc`, ... for other resolutions).
+
+### Supported cubed-sphere grids
+
+`CubedWXFormer`, `HaloExchange`, `FaceEdgeAttention` and `CrossFaceTileAttention`
+read the face edge length from `se_index`, so other resolutions work -- the halo
+is tested on CESM ne16, ne30 and ne120 -- but only within these limits:
+
+- **Uniform equiangular `neXXnp4`-style SE grids only.** Rows/cols must be lines
+  of constant gnomonic coordinate. `halo_geometry: scrip` checks this against the
+  SCRIP file and raises otherwise. Stretched (Schmidt) cubed spheres, regionally
+  refined meshes (RRM) and physics grids (`pgN`) are not supported.
+- **`se_index` must follow credit-mesaclip's `build_se_index.py` conventions**
+  (face order and orientation, dominant-axis ownership with ties to the lower
+  face, faces 0/1 own their edges). That script hard-codes ne120 (`NE`,
+  `NCOL_EXPECTED`); edit both to build another resolution's index.
+- **Static file names:** with `adjacency_path` omitted, the adjacency file is
+  auto-detected as `se_index` -> `se_face_adjacency`, `.npz` (e.g.
+  `se_index_ne30.npy` -> `se_face_adjacency_ne30.npz`).
+- **Halo narrower than half a face.** The padded tile is set by the strides and
+  attention windows; each side of the padding must be `< (E - 1) / 2`. The default
+  windows give a 192 tile for ne30 (E=91, padding 50), which is rejected -- use
+  smaller windows (e.g. `local_window_size: 3`, `global_window_size: 3` -> 96).
+- **Regrid weights** (`tripole_to_se`, `se_to_latlon`) are per grid and must be
+  generated for the new resolution.
 
 Conservative variants of the regrid weights (`*_conserve.nc`) are available for
 budget-sensitive evaluation.

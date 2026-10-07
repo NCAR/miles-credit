@@ -95,6 +95,7 @@ Usage
         output_only_channels = 5,
         adjacency_path       = "/path/to/se_face_adjacency_ne120.npz",
         scrip_path           = "/path/to/ne120np4_pentagons_100310.nc",
+        halo_geometry        = "scrip",  # or "linear" (no SCRIP file needed)
         halo_size            = 6,
         edge_attn_heads      = 4,
     )
@@ -250,14 +251,21 @@ class CubedWXFormer(nn.Module):
         Passed to CrossEmbedLayer at each stage.
     attn_dropout, ff_dropout : float
     adjacency_path : str | Path | None
-        Path to ``se_face_adjacency_ne120.npz``.  If None (default), the
-        script auto-detects a file named ``se_face_adjacency_ne120.npz`` in
-        the same directory as ``se_index_path``.  If the file does not exist,
+        Path to the face adjacency file (e.g. ``se_face_adjacency_ne120.npz``).
+        If None (default), auto-detects the file named like ``se_index_path``
+        with ``se_index`` replaced by ``se_face_adjacency`` and a ``.npz``
+        suffix, in the same directory.  If the file does not exist,
         both HaloExchange and FaceEdgeAttention are silently disabled.
     scrip_path : str | Path | None
         SCRIP grid file of the SE grid ``se_index`` was built from (e.g.
-        ``ne120np4_pentagons_100310.nc``). Required whenever HaloExchange is
-        enabled: its node coordinates place the ghost cells.
+        ``ne120np4_pentagons_100310.nc``). Required when HaloExchange is
+        enabled with ``halo_geometry="scrip"``: its node coordinates place the
+        ghost cells.
+    halo_geometry : {"scrip", "linear"}
+        Ghost-cell geometry for HaloExchange (default ``"scrip"``).
+        ``"linear"`` assumes grid index is linear in the gnomonic coordinate,
+        needs no SCRIP file, and reproduces the pre-SCRIP halo exactly. See
+        ``credit.models.wxformer.halo`` for the grids each option supports.
     halo_size : int
         Number of neighbor rows/cols to copy into face-edge padding (default 6).
         Used by HaloExchange (Approach 1).  Set to 0 to disable halo exchange
@@ -341,6 +349,7 @@ class CubedWXFormer(nn.Module):
         # Face-boundary improvements
         adjacency_path: Optional[str | Path] = None,
         scrip_path: Optional[str | Path] = None,
+        halo_geometry: str = "scrip",
         halo_size: int = 6,
         edge_attn_heads: int = 4,
         edge_attn_width: int = 2,
@@ -382,7 +391,10 @@ class CubedWXFormer(nn.Module):
         # ── Resolve adjacency file ────────────────────────────────────────
         if adjacency_path is None:
             # Auto-detect next to the SE index file
-            adj_candidate = Path(se_index_path).parent / "se_face_adjacency_ne120.npz"
+            se_index_file = Path(se_index_path)
+            adj_candidate = se_index_file.with_name(
+                se_index_file.stem.replace("se_index", "se_face_adjacency") + ".npz"
+            )
             adjacency_path = adj_candidate if adj_candidate.exists() else None
         elif not Path(adjacency_path).exists():
             logger.warning(
@@ -492,6 +504,7 @@ class CubedWXFormer(nn.Module):
                 adjacency_path=adjacency_path,
                 se_index_path=se_index_path,
                 scrip_path=scrip_path,
+                geometry=halo_geometry,
                 padded_size=self.padded_size,
                 crop_top=self.crop_top,
                 crop_left=self.crop_left,
@@ -511,6 +524,7 @@ class CubedWXFormer(nn.Module):
                 halo_size=self.crop_top,
                 strides=tuple(cum_strides),
                 padded_size=self.padded_size,
+                nface_edge=self.nface_edge,
                 dropout=attn_dropout,
             )
         else:
@@ -527,6 +541,7 @@ class CubedWXFormer(nn.Module):
                 halo_size=self.crop_top,
                 strides=tuple(cum_strides),
                 padded_size=self.padded_size,
+                nface_edge=self.nface_edge,
                 dropout=attn_dropout,
             )
         else:
@@ -752,8 +767,8 @@ class CubedWXFormer(nn.Module):
 # __main__: forward-pass smoke test
 #
 # Requires static files (se_index_ne120.npy, se_face_adjacency_ne120.npz) and
-# the ne120 SCRIP grid file. Set MESACLIP_STATIC to the static directory and,
-# if not on Casper/Derecho, NE120_SCRIP to the SCRIP file:
+# the ne120 SCRIP grid file (CESM inputdata path on NCAR systems). Set
+# MESACLIP_STATIC to the static directory:
 #   export MESACLIP_STATIC=/glade/work/schreck/repos/credit-mesaclip/mesaclip/static
 #   conda activate credit-main-casper
 #   python credit/models/wxformer/cubed_wxformer.py
@@ -789,10 +804,7 @@ if __name__ == "__main__":
     logger.info("Device: %s  (%s)", device, torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU")
 
     adj_path = static_dir / "se_face_adjacency_ne120.npz"
-    scrip_path = os.environ.get(
-        "NE120_SCRIP",
-        "/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc",
-    )
+    scrip_path = "/glade/campaign/cesm/cesmdata/inputdata/share/scripgrids/ne120np4_pentagons_100310.nc"
 
     def run_test(
         label: str,
