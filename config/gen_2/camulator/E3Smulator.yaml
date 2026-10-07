@@ -8,7 +8,7 @@
 #   post: /glade/derecho/scratch/schreck/credit_tests/camulator_gen2/camulator_post_scaler.json
 # ===================================================================================================================== #
 
-save_loc: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/'
+save_loc: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/'
 seed: 1000
 # ---- Training/validation data ---- #
 # Paths under each variable group are TRAINING-ONLY (ignored by Quick_Climate inference).
@@ -264,10 +264,22 @@ preblocks:
             - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    fillnan_pre:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+        scaler_path: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
 #        data_types: ['input', 'target']
         variables:
             - 'E3SM_ATM/static/2d/PHIS'
@@ -308,16 +320,14 @@ preblocks:
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         spatial_variables:
-#            - 'E3SM_ATM/prognostic/2d/PS'
-#            - 'E3SM_OCN/prognostic/2d/SSS'
-#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
-#            - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'
-#            - 'E3SM_ICE/prognostic/2d/sithick'
-#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+           - 'E3SM_ATM/prognostic/2d/PS'
+           - 'E3SM_OCN/prognostic/2d/SSS'
+           - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+           - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+           - 'E3SM_LND/prognostic/2d/SNOWDP'
+           - 'E3SM_OCN/diagnostic/2d/dMLD'
+           - 'E3SM_ICE/prognostic/2d/sithick'
+           - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
         scaler_type: "standard"
         scaler_params:
           channels_last: False
@@ -331,22 +341,27 @@ preblocks:
     #               fill: 0.0
     #         variables:               # optional — defaults to all variables
     #             - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-    fillnan:
+    fillnan_post:
         type: "fill_values"
         args:
             rules:
                 - search: nan        # NaN       → 0
                   fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
             variables:               # optional — defaults to all variables
-                - 'E3SM_OCN/prognostic/2d/SSS'
-                - 'E3SM_ATM/prognostic/2d/SST'
                 - 'E3SM_ATM/static/2d/landfrac'   # ocean cells are NaN; 0 = no land, the physically correct fill
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
                 - 'E3SM_LND/prognostic/2d/TSOI_2m'
                 - 'E3SM_LND/diagnostic/2d/QRUNOFF'
                 - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
                 - 'E3SM_LND/prognostic/2d/SNOWDP'
-                - 'E3SM_OCN/diagnostic/2d/dMLD'
-                - 'E3SM_ICE/prognostic/2d/sithick'
                 - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
                 - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
                 - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
@@ -415,7 +430,7 @@ postblocks:
     scaler:
       type: bridgescaler_transform
       args:
-        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+        scaler_path: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
 #        data_types: ['input', 'target']
         variables:
             - 'E3SM_ATM/static/2d/PHIS'
@@ -456,16 +471,16 @@ postblocks:
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         spatial_variables:
-#            - 'E3SM_ATM/prognostic/2d/PS'
-#            - 'E3SM_OCN/prognostic/2d/SSS'
-#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
-#            - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'
-#            - 'E3SM_ICE/prognostic/2d/sithick'
-#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+           - 'E3SM_ATM/prognostic/2d/PS'
+           - 'E3SM_OCN/prognostic/2d/SSS'
+           - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+           - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+           - 'E3SM_LND/prognostic/2d/SNOWDP'
+           - 'E3SM_OCN/diagnostic/2d/dMLD'
+           - 'E3SM_ICE/prognostic/2d/sithick'
+           - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+           - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+           - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         method: inverse_transform
     log_trans:
       type: "exp_transform"
@@ -511,7 +526,7 @@ postblocks:
     scaler_target:
       type: bridgescaler_transform
       args:
-        scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+        scaler_path: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
         key: 'y_target_processed'
         variables:
             - 'E3SM_ATM/static/2d/PHIS'
@@ -552,16 +567,16 @@ postblocks:
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         spatial_variables:
-#            - 'E3SM_ATM/prognostic/2d/PS'
-#            - 'E3SM_OCN/prognostic/2d/SSS'
-#            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-#            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
-#            - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'
-#            - 'E3SM_ICE/prognostic/2d/sithick'
-#            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-#            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-#            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+           - 'E3SM_ATM/prognostic/2d/PS'
+           - 'E3SM_OCN/prognostic/2d/SSS'
+           - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+           - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+           - 'E3SM_LND/prognostic/2d/SNOWDP'
+           - 'E3SM_OCN/diagnostic/2d/dMLD'
+           - 'E3SM_ICE/prognostic/2d/sithick'
+           - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+           - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+           - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         method: inverse_transform
 
     log_trans_target:
@@ -749,7 +764,7 @@ loss:
     # file (approximates normalized-space training). Options:
     # inverse_variance | manual | learnable | none
     var_weighting: "inverse_variance"
-    scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+    scaler_path: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
     variable_weights: {}              # manual multipliers per var_key (all modes)
     normalize_weights: true           # rescale combination weights to mean 1
 
@@ -779,7 +794,7 @@ metrics:
     # (which ignore the scaler entirely).
     # Options: inverse_variance | manual | none (no learnable for metrics).
     var_weighting: "inverse_variance"
-    scaler_path: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
+    scaler_path: '/global/cfs/cdirs/m5388/kjmayer/CREDIT_runs/subE3SMulator/E3SM_6h_bridgescaler_pre.json'
     variable_weights: {}              # manual multipliers per var_key (all modes)
     normalize_weights: true           # rescale combination weights to mean 1
 
@@ -795,7 +810,7 @@ metrics:
 inference:
   run_mode: single
   mode: none                          # none | ddp | fsdp
-  save_forecast: '/global/common/software/m5388/cbecker/CREDIT_runs/subE3SMulator/rollout/'
+  save_forecast: '/global/common/software/m5388/kjmayer/CREDIT_runs/subE3SMulator/rollout/'
 
   batch_forecast:
     forecast_length: "45d"                    # 1 no-leap year
