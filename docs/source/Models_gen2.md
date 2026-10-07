@@ -53,7 +53,7 @@ Two more concepts recur in every architecture:
 
 **AutoAPI:** {py:obj}`credit.models.wxformer.crossformer.CrossFormer`
 
-**Config type:** `wxformer_base` (`wxformer` is kept as a backward-compatibility alias; prefer `wxformer_base` in new configs, since plain `wxformer` is ambiguous now that `nextgen_wxformer` also exists)
+**Config type:** `wxformer_base` (`wxformer` is kept as a backward-compatibility alias; prefer `wxformer_base` in new configs, since plain `wxformer` is ambiguous now that `wxformer_column` and `cubed_wxformer` also exist)
 
 WXFormer is the flagship MILES/NCAR model. It is a hierarchical
 **encoder–decoder** built on the **CrossFormer** attention backbone:
@@ -93,9 +93,9 @@ controlled from the config:
 - **Physics moved to postblocks** — conservation and diagnostics are now
   composable postblock stages rather than being hard-wired into the model.
 
-### NextGen WXFormer
+### WXFormerColumn
 
-**AutoAPI:** {py:obj}`credit.models.wxformer.wxformer_next.NextGenWXFormer` &nbsp;·&nbsp; **Config type:** `nextgen_wxformer`
+**AutoAPI:** {py:obj}`credit.models.wxformer.wxformer_column.WXFormerColumn` &nbsp;·&nbsp; **Config type:** `wxformer_column` (formerly `nextgen_wxformer`, still accepted as an alias)
 
 An experimental next-generation variant keeps the same CrossFormer U-Net but
 adds three physically motivated pieces:
@@ -110,7 +110,45 @@ adds three physically motivated pieces:
 
 It accepts the same core arguments as WXFormer plus `num_spectral_nodes`,
 `col_attn_heads`, and `col_attn_stride` (set `col_attn_stride: 8` on large grids
-like 640×1280 to keep attention memory bounded).
+like 640×1280 to keep attention memory bounded). It is also the model family
+that supports native tensor parallelism (`trainer.parallelism.tensor > 1`).
+
+### CubedWXFormer (cubed-sphere grid)
+
+**AutoAPI:** {py:obj}`credit.models.wxformer.cubed_wxformer.CubedWXFormer` &nbsp;·&nbsp; **Config type:** `cubed_wxformer`
+
+WXFormer rebuilt to run on a CESM cubed-sphere spectral-element (SE) grid instead
+of lat/lon. The cubed sphere has near-uniform resolution and no polar
+singularity, where a 0.25° lat/lon grid heavily oversamples the poles.
+
+- **Data flow.** A `tripole_to_se` preblock regrids lat/lon inputs onto the SE
+  columns; inside the model the columns are scattered into six cube faces, each
+  face is encoded by a CrossFormer stage, the faces exchange information through
+  cross-face attention, and the result is gathered back to SE columns. A
+  `se_to_latlon` postblock maps predictions back to lat/lon for verification.
+- **Halo exchange.** Before encoding, each face is padded with *ghost cells*
+  taken from its neighboring faces, so the encoder sees continuous data across
+  face seams. With `halo_geometry: scrip` (the default) ghost cells are placed
+  from the grid's real node coordinates, read from the SE grid's SCRIP file
+  (`scrip_path`); `halo_geometry: linear` needs no SCRIP file but places them
+  less accurately. `halo_size: 0` turns the halo off.
+- **Static files.** `se_index_path` (SE → cube reindex), `adjacency_path`
+  (face adjacency; auto-detected next to `se_index_path` when omitted) and
+  `scrip_path`. For ne120 the first two live in credit-mesaclip under
+  `mesaclip/static/`, and the SCRIP file ships with CESM inputdata
+  (`share/scripgrids/ne120np4_pentagons_100310.nc`). `credit check` reports a
+  missing `scrip_path`.
+- **Column attention.** `use_column_attn: true` adds the same level embeddings,
+  column attention and spectral bottleneck as WXFormerColumn.
+- **Grids.** The face size is read from `se_index`, so uniform `neXXnp4` grids
+  other than ne120 work, but each side of the halo padding must be less than half
+  a face. On coarse grids such as ne30, use smaller attention windows (e.g.
+  `local_window_size: 3`, `global_window_size: 3`). Stretched and regionally
+  refined grids are not supported.
+
+A complete config is in `config/gen_2/examples/wxformer_cubesphere_next_wb2.yml`.
+The design notes, including the full list of grid requirements, are in
+[`credit/models/wxformer/wxformer_family.md`](https://github.com/NCAR/miles-credit/blob/main/credit/models/wxformer/wxformer_family.md).
 
 ### Example config with pointers
 
@@ -331,8 +369,10 @@ stable time-stepping scheme at extra cost.
 
 - **WXFormer** — the default choice for weather forecasting; best skill, most
   actively developed.
-- **NextGen WXFormer** — experimental; try it when global teleconnections or
+- **WXFormerColumn** — experimental; try it when global teleconnections or
   vertical coupling matter and you can afford the extra cost.
+- **CubedWXFormer** — experimental; WXFormer on a CESM cubed-sphere SE grid,
+  for uniform resolution without polar oversampling.
 - **CAMulator** — climate emulation with conservation constraints.
 - **Swin** — a lighter transformer backbone for comparison or constrained
   hardware.

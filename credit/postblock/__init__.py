@@ -27,6 +27,7 @@ _POSTBLOCK_REGISTRY = {
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
+    "se_to_latlon": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -46,6 +47,7 @@ _CLASS_SOURCES = {
     "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
+    "SEToLatLonPostBlock": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
 }
 
 
