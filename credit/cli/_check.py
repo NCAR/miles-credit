@@ -41,7 +41,15 @@ _DIAGNOSTIC_POSTBLOCKS = frozenset({"geopotential_diagnostic", "mslp_diagnostic"
 # must also run on the target twin or the loss compares mismatched units.
 _UNIT_POSTBLOCKS = frozenset({"bridgescaler_transform", "exp_transform", "square_transform"})
 
-_GEN1_TRAINERS = frozenset({"era5", "era5-gen1"})
+_GEN1_TRAINERS = frozenset({"era5", "era5-gen1", "era5-ensemble", "ensemble-gen1"})
+
+# Trainer types that were removed, mapped to the replacement to suggest.
+_REMOVED_TRAINERS = {
+    "ensemble-gen2": (
+        "trainer.type: gen2 with loss: {type: base, args: {training_loss: ring-crps, validation_loss: mae}} "
+        "and trainer.ensemble_size set to the number of data-parallel ranks"
+    ),
+}
 
 _KNOWN_TOP_LEVEL = frozenset(
     {
@@ -296,6 +304,8 @@ def _check_registry_keys(conf: dict, rep: _Report) -> None:
     ):
         if value is None:
             rep.error(where, f"'{where}' is not set.", fix=f"Add one of: {', '.join(sorted(registry))}")
+        elif where == "trainer.type" and value in _REMOVED_TRAINERS:
+            rep.error(where, f"Trainer type '{value}' was removed.", fix=f"Use {_REMOVED_TRAINERS[value]}.")
         elif value not in registry:
             rep.error(
                 where,
@@ -480,6 +490,54 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
     _check_scaler_paths_unique(conf, rep)
+    _check_scaler_spatial_variables_consistent(conf, rep)
+
+
+def _iter_bridgescaler_blocks(conf: dict, top: str, sections: tuple[str, ...]):
+    """Yield (where, args) for every bridgescaler_transform block under `top`."""
+    for section in sections:
+        for name, block in ((conf.get(top) or {}).get(section) or {}).items():
+            if isinstance(block, dict) and block.get("type") == "bridgescaler_transform":
+                yield f"{top}.{section}.{name}", (block.get("args") or {})
+
+
+def _resolve_scaler_path(path) -> str | None:
+    if not isinstance(path, str) or not path:
+        return None
+    return os.path.realpath(os.path.expanduser(os.path.expandvars(path)))
+
+
+def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None:
+    """A scaler's `spatial_variables` must match between its preblock (fit) and
+    postblock (apply) blocks.
+
+    `credit preprocess` fits grid-wise (per-gridpoint) statistics only for the
+    variables named in the preblock's `spatial_variables` — anything else is fit
+    per-level. If the postblock applying that same scaler names a variable under
+    `spatial_variables` that the preblock didn't, the postblock flattens it to
+    `n_lat * n_lon` columns before calling the scaler, which no longer matches
+    the fitted column count and raises at runtime on the very first batch.
+    """
+    preblock_specs: dict[str, tuple[str, set]] = {}
+    for where, args in _iter_bridgescaler_blocks(conf, "preblocks", ("ic_only", "per_step")):
+        resolved = _resolve_scaler_path(args.get("scaler_path"))
+        if resolved is not None:
+            preblock_specs[resolved] = (where, set(args.get("spatial_variables") or []))
+
+    for where, args in _iter_bridgescaler_blocks(conf, "postblocks", ("per_step", "post_rollout")):
+        resolved = _resolve_scaler_path(args.get("scaler_path"))
+        if resolved is None or resolved not in preblock_specs:
+            continue
+        pre_where, pre_spatial = preblock_specs[resolved]
+        post_spatial = set(args.get("spatial_variables") or [])
+        if pre_spatial != post_spatial:
+            rep.error(
+                where,
+                f"'spatial_variables' does not match the preblock that fits this scaler ('{pre_where}'): "
+                f"preblock has {sorted(pre_spatial)}, this block has {sorted(post_spatial)}. A variable fit "
+                "per-level but applied grid-wise (or vice versa) fails the scaler's column-count check at runtime.",
+                fix=f"Set 'spatial_variables' to match '{pre_where}': {sorted(pre_spatial)}",
+            )
 
 
 def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
@@ -904,6 +962,21 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
                     f"'{stype}' does not accept {unknown}.",
                     fix=f"Accepted: {', '.join(p for p in _accepted_params(cls) if p != 'optimizer')}",
                 )
+
+    ac = _get(conf, "trainer", "activation_checkpoint", default=False)
+    if not isinstance(ac, bool) and not (isinstance(ac, list) and all(isinstance(n, str) for n in ac)):
+        rep.error(
+            "trainer.activation_checkpoint",
+            f"Expected true/false or a list of block class names, got {ac!r}.",
+            fix="activation_checkpoint: true          # blocks that opt in via _fsdp2_shard\n"
+            "activation_checkpoint: [Transformer]  # or exact block class names",
+        )
+    if _get(conf, "trainer", "gradient_checkpointing") is not None:
+        rep.warn(
+            "trainer.gradient_checkpointing",
+            "gradient_checkpointing is not read by the gen2 trainer; it is ignored.",
+            fix="Use trainer.activation_checkpoint (true, or a list of exact block class names).",
+        )
 
     epochs = _get(conf, "trainer", "epochs")
     num_epoch = _get(conf, "trainer", "num_epoch")
