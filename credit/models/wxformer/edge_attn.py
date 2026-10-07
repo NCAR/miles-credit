@@ -50,24 +50,24 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# ne120 constants
 NFACE = 6
-NFACE_EDGE = 361
 
 # 12 face-edge pairs, same topology as HaloExchange
 TOPOLOGY = [
     # (fi, edge, f_nb, nb_fixed_val, nb_axis, is_reversed)
+    # nb_fixed_val is the neighbour's first interior line: 1, or -2 for the
+    # second line from its far edge (E-2, e.g. 359 on ne120's E=361).
     (0, "right", 2, 1, "col", False),
-    (0, "left", 3, 359, "col", False),
+    (0, "left", 3, -2, "col", False),
     (1, "right", 3, 1, "col", False),
-    (1, "left", 2, 359, "col", False),
-    (0, "top", 5, 359, "col", True),
-    (0, "bottom", 4, 359, "col", False),
+    (1, "left", 2, -2, "col", False),
+    (0, "top", 5, -2, "col", True),
+    (0, "bottom", 4, -2, "col", False),
     (1, "top", 5, 1, "col", False),
     (1, "bottom", 4, 1, "col", True),
     (2, "top", 5, 1, "row", True),
-    (2, "bottom", 4, 359, "row", True),
-    (3, "top", 5, 359, "row", False),
+    (2, "bottom", 4, -2, "row", True),
+    (3, "top", 5, -2, "row", False),
     (3, "bottom", 4, 1, "row", False),
 ]
 
@@ -83,6 +83,7 @@ def _edge_indices_at_resolution(
     halo_size: int,
     stride: int,
     padded_size: int,
+    nface_edge: int = 361,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Compute (rows, cols) index arrays into the downsampled feature map.
 
@@ -91,14 +92,15 @@ def _edge_indices_at_resolution(
     src_a_rows, src_a_cols : (M,) int64 — border strip from face fi
     src_b_rows, src_b_cols : (M,) int64 — border strip from face f_nb
     """
+    nb_fixed_val = nb_fixed_val % nface_edge
     h = halo_size
     # At the downsampled resolution, the padded image has size padded_size // stride
-    # Face fi occupies [h:h+NFACE_EDGE] in the original padded space,
-    # which maps to [h//stride : (h+NFACE_EDGE)//stride] after downsampling (approx)
+    # Face fi occupies [h:h+nface_edge] in the original padded space,
+    # which maps to [h//stride : (h+nface_edge)//stride] after downsampling (approx)
     # But CrossEmbedLayer uses strided conv; simpler to just compute the
     # face start pixel at each resolution.
     face_start = h // stride  # where face pixel 0 appears in downsampled map
-    face_size = NFACE_EDGE // stride  # approx face size in downsampled map
+    face_size = nface_edge // stride  # approx face size in downsampled map
     # Use floor division; face_size may be 90, 45, 22, 11 (not exactly 361/stride)
     # Actually 361//4=90, 361//8=45, 361//16=22, 361//32=11
     # The padded size is 384, so 384//4=96, 384//8=48, etc.
@@ -107,9 +109,9 @@ def _edge_indices_at_resolution(
     # FACE A border strip: the edge_width rows/cols just inside the face edge
     # In the ORIGINAL face coordinate system (0..360):
     #   top edge: rows 0..edge_width-1
-    #   bottom edge: rows (NFACE_EDGE-edge_width)..(NFACE_EDGE-1)
+    #   bottom edge: rows (nface_edge-edge_width)..(nface_edge-1)
     #   left edge: cols 0..edge_width-1
-    #   right edge: cols (NFACE_EDGE-edge_width)..(NFACE_EDGE-1)
+    #   right edge: cols (nface_edge-edge_width)..(nface_edge-1)
     # After downsampling by stride, these roughly correspond to
     #   face pixel row r -> padded row (h + r) -> downsampled row (h + r) // stride
     # We compute the unique downsampled positions.
@@ -119,9 +121,9 @@ def _edge_indices_at_resolution(
         return (h + p) // stride
 
     if edge == "top":
-        face_rows = np.arange(0, min(edge_width, NFACE_EDGE))
+        face_rows = np.arange(0, min(edge_width, nface_edge))
         # Determine along-edge length (359 or 361 depending on face)
-        along = 361 if fi in (0, 1) else 359
+        along = nface_edge if fi in (0, 1) else nface_edge - 2
         along_offset = 0 if fi in (0, 1) else 1  # col offset for face interior
         face_cols = np.arange(along_offset, along_offset + along)
         a_rows = face_to_down(face_rows)
@@ -134,8 +136,8 @@ def _edge_indices_at_resolution(
         src_a_cols = src_a_c.ravel()
 
     elif edge == "bottom":
-        face_rows = np.arange(NFACE_EDGE - edge_width, NFACE_EDGE)
-        along = 361 if fi in (0, 1) else 359
+        face_rows = np.arange(nface_edge - edge_width, nface_edge)
+        along = nface_edge if fi in (0, 1) else nface_edge - 2
         along_offset = 0 if fi in (0, 1) else 1
         face_cols = np.arange(along_offset, along_offset + along)
         a_rows = face_to_down(face_rows)
@@ -147,9 +149,9 @@ def _edge_indices_at_resolution(
         src_a_cols = src_a_c.ravel()
 
     elif edge == "left":
-        face_cols = np.arange(0, min(edge_width, NFACE_EDGE))
+        face_cols = np.arange(0, min(edge_width, nface_edge))
         # Left/right edges only appear on faces 0 and 1 (row full range)
-        face_rows = np.arange(0, NFACE_EDGE)
+        face_rows = np.arange(0, nface_edge)
         a_rows = face_to_down(face_rows)
         a_cols = face_to_down(face_cols)
         a_r_unique = np.unique(a_rows)
@@ -159,8 +161,8 @@ def _edge_indices_at_resolution(
         src_a_cols = src_a_c.ravel()
 
     elif edge == "right":
-        face_cols = np.arange(NFACE_EDGE - edge_width, NFACE_EDGE)
-        face_rows = np.arange(0, NFACE_EDGE)
+        face_cols = np.arange(nface_edge - edge_width, nface_edge)
+        face_rows = np.arange(0, nface_edge)
         a_rows = face_to_down(face_rows)
         a_cols = face_to_down(face_cols)
         a_r_unique = np.unique(a_rows)
@@ -176,9 +178,9 @@ def _edge_indices_at_resolution(
     # The neighbor strip for layer 0 is at nb_fixed_val (col or row),
     # going inward for edge_width layers.
     if nb_axis == "col":
-        direction = +1 if nb_fixed_val <= NFACE_EDGE // 2 else -1
+        direction = +1 if nb_fixed_val <= nface_edge // 2 else -1
         nb_cols_range = [nb_fixed_val + k * direction for k in range(edge_width)]
-        along = 359 if f_nb in (4, 5) else 361
+        along = nface_edge - 2 if f_nb in (4, 5) else nface_edge
         along_offset = 1 if f_nb in (4, 5) else 0
         nb_rows_range = list(range(along_offset, along_offset + along))
         if is_reversed:
@@ -186,9 +188,9 @@ def _edge_indices_at_resolution(
         b_rows = face_to_down(np.array(nb_rows_range))
         b_cols = face_to_down(np.array(nb_cols_range))
     else:  # nb_axis == 'row'
-        direction = +1 if nb_fixed_val <= NFACE_EDGE // 2 else -1
+        direction = +1 if nb_fixed_val <= nface_edge // 2 else -1
         nb_rows_range = [nb_fixed_val + k * direction for k in range(edge_width)]
-        along = 359 if f_nb in (4, 5) else 361
+        along = nface_edge - 2 if f_nb in (4, 5) else nface_edge
         along_offset = 1 if f_nb in (4, 5) else 0
         nb_cols_range = list(range(along_offset, along_offset + along))
         if is_reversed:
@@ -235,6 +237,8 @@ class FaceEdgeAttention(nn.Module):
         Cumulative downsampling stride at each stage (4, 8, 16, 32).
     padded_size : int
         Size of the padded face (384).
+    nface_edge : int
+        Native face edge length E (361 for ne120).
     dropout : float
         Attention dropout.
     """
@@ -247,6 +251,7 @@ class FaceEdgeAttention(nn.Module):
         halo_size: int = 6,
         strides: tuple = (4, 8, 16, 32),
         padded_size: int = 384,
+        nface_edge: int = 361,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -285,6 +290,7 @@ class FaceEdgeAttention(nn.Module):
                     halo_size,
                     stride,
                     padded_size,
+                    nface_edge,
                 )
                 pfx = f"_s{si}_t{ti}"
                 self.register_buffer(f"{pfx}_fi", torch.tensor(fi, dtype=torch.int64))

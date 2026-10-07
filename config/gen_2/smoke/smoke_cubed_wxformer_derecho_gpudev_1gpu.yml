@@ -1,4 +1,4 @@
-save_loc: /glade/derecho/scratch/schreck/credit_tests/smoke_cubed_wxformer
+save_loc: /glade/derecho/scratch/ajanney/credit_tests/smoke_cubed_wxformer_1gpu
 seed: 1000
 data:
   source:
@@ -174,3 +174,19 @@ trainer:
     thread_workers: 2
     valid_thread_workers: 1
     prefetch_factor: 2
+pbs:
+  project: P93300012
+  job_name: smoke_cubed_gpudev
+  walltime: '01:00:00'
+  conda: /glade/work/ajanney/conda-envs/credit-derecho
+  nodes: 1
+  ngpus: 1
+  ncpus: 16
+  mem: 128GB
+  # 'develop' is Derecho's ROUTING queue; the gpudev execution queue is
+  # from_route_only=True and rejects direct submission. PBS routes a develop
+  # job to gpudev when it asks for GPUs, cpudev when it does not.
+  queue: develop
+  # Every Derecho GPU node carries the same A100, so a gpu_type constraint buys
+  # nothing and risks a select that never matches. 'any' drops the fragment.
+  gpu_type: any

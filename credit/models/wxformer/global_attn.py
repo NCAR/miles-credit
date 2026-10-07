@@ -22,24 +22,24 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-# ne120 constants
 NFACE = 6
-NFACE_EDGE = 361
 
 # 12 directed face-edge pairs (same topology as HaloExchange / FaceEdgeAttention)
 TOPOLOGY = [
     # (fi, edge, f_nb, nb_fixed_val, nb_axis, is_reversed)
+    # nb_fixed_val is the neighbour's first interior line: 1, or -2 for the
+    # second line from its far edge (E-2, e.g. 359 on ne120's E=361).
     (0, "right", 2, 1, "col", False),
-    (0, "left", 3, 359, "col", False),
+    (0, "left", 3, -2, "col", False),
     (1, "right", 3, 1, "col", False),
-    (1, "left", 2, 359, "col", False),
-    (0, "top", 5, 359, "col", True),
-    (0, "bottom", 4, 359, "col", False),
+    (1, "left", 2, -2, "col", False),
+    (0, "top", 5, -2, "col", True),
+    (0, "bottom", 4, -2, "col", False),
     (1, "top", 5, 1, "col", False),
     (1, "bottom", 4, 1, "col", True),
     (2, "top", 5, 1, "row", True),
-    (2, "bottom", 4, 359, "row", True),
-    (3, "top", 5, 359, "row", False),
+    (2, "bottom", 4, -2, "row", True),
+    (3, "top", 5, -2, "row", False),
     (3, "bottom", 4, 1, "row", False),
 ]
 
@@ -122,6 +122,7 @@ def _tile_boundary_indices(
     halo_size: int,
     cum_stride: int,
     padded_size: int,
+    nface_edge: int = 361,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray] | None:
     """Compute tile-level boundary indices for one face-edge pair at one stage.
 
@@ -143,6 +144,7 @@ def _tile_boundary_indices(
     T = number of tile positions along the edge at this stage.
     Returns None if T == 0.
     """
+    nb_fixed_val = nb_fixed_val % nface_edge
     h = halo_size
     s = cum_stride
     ts = tile_size
@@ -150,7 +152,7 @@ def _tile_boundary_indices(
 
     # Face start and extent in downsampled coordinates
     face_start = h // s  # first pixel of face fi in ds map
-    face_end = (h + NFACE_EDGE) // s  # one past last pixel
+    face_end = (h + nface_edge) // s  # one past last pixel
     face_size_ds = face_end - face_start  # number of tiles fit into face extent
 
     # Number of complete tile positions along the edge
@@ -222,7 +224,7 @@ def _tile_boundary_indices(
     # The neighbor face has its own face_start in the ds map (same geometry
     # since all faces are embedded in the same padded space after halo).
     nb_face_start = h // s
-    nb_face_end = (h + NFACE_EDGE) // s
+    nb_face_end = (h + nface_edge) // s
     nb_first_tile = nb_face_start // ts
     nb_last_tile = (nb_face_end - 1) // ts
     Tnb = nb_last_tile - nb_first_tile + 1
@@ -231,7 +233,7 @@ def _tile_boundary_indices(
     if nb_axis == "col":
         # nb_fixed_val is a pixel column in the ORIGINAL face (0..360)
         # direction: inward from the boundary col
-        direction = +1 if nb_fixed_val <= NFACE_EDGE // 2 else -1
+        direction = +1 if nb_fixed_val <= nface_edge // 2 else -1
         # The boundary col in original face coords; tile index = (h + nb_fixed_val) // (s * ts)
         nb_bnd_px = nb_fixed_val
         nb_bnd_ds = (h + nb_bnd_px) // s  # pixel in ds map
@@ -330,6 +332,8 @@ class CrossFaceTileAttention(nn.Module):
         Cumulative downsampling stride at each stage (4, 8, 16, 32).
     padded_size : int
         Padded spatial size (384).
+    nface_edge : int
+        Native face edge length E (361 for ne120).
     dropout : float
         Attention dropout.
     """
@@ -342,6 +346,7 @@ class CrossFaceTileAttention(nn.Module):
         halo_size: int = 6,
         strides: tuple = (4, 8, 16, 32),
         padded_size: int = 384,
+        nface_edge: int = 361,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -390,6 +395,7 @@ class CrossFaceTileAttention(nn.Module):
                     halo_size,
                     cum_stride,
                     padded_size,
+                    nface_edge,
                 )
                 if result is None:
                     self.register_buffer(f"{pfx}_valid", torch.tensor(False))
