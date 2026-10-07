@@ -94,9 +94,13 @@ Seven subsystems — models, trainers, datasets, preblocks, postblocks, losses, 
 by a string key in the config (`model.type`, `trainer.type`, `data.source.<name>.dataset_type`, etc.),
 resolved through per-package `_REGISTRY` dicts with lazy imports:
 - `credit/models/__init__.py` → `load_model(conf)`, keys like `crossformer`, `wxformer`, `unet`, `fuxi`, `swin`, `graph`
-- `credit/trainers/__init__.py` → keys like `era5-gen1`/`era5`, `gen2`/`era5-gen2`, `era5-diffusion`, `era5-ensemble`, `ic-opt`
-- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/` follow the
-  same `register_*` decorator pattern
+- `credit/trainers/__init__.py` → `load_trainer(conf)`, keys like `era5-gen1`/`era5`, `gen2`/`era5-gen2`,
+  `era5-diffusion`, `era5-ensemble`, `ic-opt`
+- `credit/datasets/`, `credit/preblock/`, `credit/postblock/`, `credit/losses/`, `credit/metrics/`, `credit/trainers/`
+  all follow the same `register_*` decorator pattern (`register_trainer` mirrors `register_model`, requiring the
+  class subclass `credit.trainers.base_trainer.BaseTrainer`). Prefer a dataset/preblock/model/postblock/loss
+  over a custom trainer: `rollout_gen2.py` duplicates the trainer's inner loop rather than calling it, so a
+  changed training loop isn't reflected at inference (see "Before you write a custom trainer" in `docs/source/Custom.md`)
 
 `credit/registry.py` (`load_custom_objects`) is the meta-layer: a config's `custom_objects:` block lets users
 plug in their *own* classes (must subclass the relevant `Base*` class) by dotted import path, without
@@ -130,10 +134,12 @@ denormalize and enforce physical constraints (`conservation.py`, `mslp.py`, `pre
 `wind_filter.py`). Every gen2 preblock chain must end with `concat`; every gen2 postblock chain starts
 with `reconstruct` (its inverse).
 
-Gotcha when writing configs: a `bridgescaler_transform` preblock that will **fit a new scaler**
-(via `credit preprocess`) must set `scaler_params: {channels_last: False}` — bridgescaler defaults to
-`channels_last=True`, but CREDIT tensors are channels-first, so omitting it silently fits statistics
-over the wrong axis. Transform-only use of an already-fitted scaler is unaffected.
+Gotcha when writing configs: bridgescaler defaults to `channels_last=True`, but CREDIT tensors are
+channels-first, so `BridgeScalerTransform` defaults `scaler_params.channels_last` to `False` when it
+**fits a new scaler** (via `credit preprocess`) — override it explicitly only if you have a reason to.
+Transform-only use of an already-fitted scaler is unaffected. Separately, a scaler's `spatial_variables`
+(grid-wise scaling) must match between the preblock that fits it and the postblock that applies it, or
+the postblock's column-count check fails on the first training batch — `credit check` validates this.
 
 ### Applications vs CLI vs top-level `applications/`
 
