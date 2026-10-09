@@ -24,7 +24,7 @@ from credit.postblock.gen1 import (
 from credit.postblock.scaler import BridgeScalerTransform as PostScaler
 from credit.preblock._utils import _flatten_spatial_tensors
 from credit.postblock.exp import ExpTransform
-from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.reconstruct import FlattenToTensor, Reconstruct
 from credit.postblock.square import SquareTransform
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
@@ -336,6 +336,23 @@ class TestReconstruct:
         shape_5d = result_5d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
         assert shape_4d == shape_5d == (B, 4, 1, H, W)
 
+    def test_1d_spatial_grid_no_extra_dim(self):
+        """A cube-sphere/SE-grid model returns (B, C, 1, ncol) -- 4D, since its
+        spatial dim is 1D, not the 2D (H, W) of a lat-lon grid. The frame axis
+        at dim=2 must still be folded into channels, or it survives as a
+        spurious extra dimension (this broke SEToLatLonPostBlock + netCDF
+        writing for CubedWXFormer/WXFormerColumn, see PR #478 review)."""
+        B, ncol = 2, 100
+        y_pred_3d = torch.randn(B, 5, ncol)  # what a 2D-grid model of equal rank would give
+        y_pred_4d = y_pred_3d.unsqueeze(2)  # (B, 5, 1, ncol) -- what cube-sphere models return
+
+        result_3d = Reconstruct()(self._batch_dict(y_pred_3d))
+        result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
+
+        shape_3d = result_3d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        shape_4d = result_4d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        assert shape_3d == shape_4d == (B, 4, 1, ncol)
+
     def test_values_match_input_channels(self):
         """Reconstructed tensors contain exactly the channels sliced from y_pred."""
         B, H, W = 1, 4, 4
@@ -366,6 +383,21 @@ class TestReconstruct:
         original_meta = batch["metadata"]
         result = Reconstruct()(batch)
         assert result["metadata"] is original_meta
+
+    @pytest.mark.parametrize("spatial_shape", [(8, 8), (100,)], ids=["2d_latlon", "1d_se_grid"])
+    def test_flatten_to_tensor_round_trips_reconstruct(self, spatial_shape):
+        """FlattenToTensor(Reconstruct(y_pred)) recovers the original flat tensor,
+        for both a 2D lat-lon grid and a 1D SE/cube-sphere grid -- the nested
+        y_processed dict always carries (n_levels, n_time) as dims 1 and 2
+        regardless of spatial rank, so FlattenToTensor's own flatten(1, 2) must
+        not be gated on a hardcoded total rank either."""
+        B = 2
+        y_pred = torch.randn(B, 5, *spatial_shape)
+        batch = self._batch_dict(y_pred)
+        reconstructed = Reconstruct()(batch)
+
+        flattened = FlattenToTensor()(reconstructed)
+        assert torch.equal(flattened["y_pred"], y_pred)
 
 
 # ---------------------------------------------------------------------------

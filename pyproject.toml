@@ -44,7 +44,8 @@ dependencies = [
     "numba",
     "tensorboard",
     "fastapi",
-    "overrides"
+    "overrides",
+    "properscoring"
 ]
 
 [project.optional-dependencies]

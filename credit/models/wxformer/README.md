@@ -3,6 +3,9 @@
 This directory contains the WXFormer v1 family of hierarchical encoder-decoder
 weather prediction models built on the CrossFormer attention backbone.
 
+The next-generation variants (WXFormerColumn and the cubed-sphere models) are
+documented separately in [wxformer_family.md](wxformer_family.md).
+
 ---
 
 ## Files
@@ -15,6 +18,8 @@ weather prediction models built on the CrossFormer attention backbone.
 | `crossformer_downscaling.py` | Active | Downscaling variant of v1. |
 | `stochastic_decomposition_layer.py` | Active | SDL module used by ensemble classes. |
 | `sdl_inference_wrapper.py` | Active | Inference wrapper for SDL ensemble models. |
+| `wxformer_column.py` | Active (next) | WXFormerColumn: CrossFormer U-Net + level embed + column attn + spectral GNN. See [wxformer_family.md](wxformer_family.md). |
+| `cubed_wxformer.py` | Active (next) | CubedWXFormer: WXFormer on a cubed-sphere SE grid, with optional `use_column_attn` (level embed + column attn + spectral GNN). See [wxformer_family.md](wxformer_family.md). |
 
 ---
 

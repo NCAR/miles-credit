@@ -108,7 +108,22 @@ trainer:
         warmup_steps: 1000
         total_steps: 500000
         min_lr: 1.0e-5
+    activation_checkpoint: True   # recompute block activations in backward to save memory
 ```
+
+`activation_checkpoint: True` checkpoints every block that opts in through a
+`_fsdp2_shard = True` attribute (the CrossFormer/WXFormer `Transformer` and
+`UpBlock` blocks do by default). For a model whose blocks do not opt in, list the
+block class names instead. Names must match exactly, so `Block` does not also
+catch `UpBlock`, and `Layer` does not catch `LayerNorm`:
+
+```yaml
+trainer:
+    activation_checkpoint: [MyEncoderBlock, MyDecoderBlock]
+```
+
+Opted-in blocks are still checkpointed when a list is given. Training logs how
+many blocks were wrapped, and warns if checkpointing is on but nothing matched.
 
 When `use_tensorboard: True`, metrics are written to `<save_loc>/tensorboard/` after each epoch.
 Launch the viewer from any machine with access to the filesystem:

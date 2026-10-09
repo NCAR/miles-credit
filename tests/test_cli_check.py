@@ -263,6 +263,41 @@ def test_two_preblock_scalers_shared_path_errors(conf, tmp_path):
     assert "distinct scaler_path" in _text(rep)
 
 
+def test_postblock_spatial_variables_matches_preblock_ok(conf):
+    """Same spatial_variables on the fitting preblock and the applying postblock: no error."""
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {
+            "scaler_path": conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"],
+            "variables": [],
+            "method": "transform",
+            "spatial_variables": ["ERA5/prognostic/2d/SP"],
+        },
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    # scaler_target shares the same scaler_path (it inverse-transforms the target twin),
+    # so it must match too, or it would trip the same check.
+    conf["postblocks"]["per_step"]["scaler_target"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    rep = _run(conf)
+    assert "postblocks.per_step.scaler" not in _wheres(rep)
+    assert "postblocks.per_step.scaler_target" not in _wheres(rep)
+
+
+def test_postblock_spatial_variables_mismatch_errors(conf):
+    """The postblock applies a variable grid-wise that the preblock never fit that way —
+    this is exactly the bug reported by Yan Xie (OU): it passes `credit check` silently
+    today and only fails once training reaches the first batch."""
+    scaler_path = conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"]
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": scaler_path, "variables": [], "method": "transform"},
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = ["ERA5/prognostic/2d/SP"]
+    rep = _run(conf)
+    assert "postblocks.per_step.scaler" in _wheres(rep)
+    assert "spatial_variables" in _text(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
@@ -373,6 +408,58 @@ def test_model_levels_mismatch(conf):
     conf["model"]["levels"] = 7
     rep = _run(conf)
     assert "model.levels" in _wheres(rep)
+
+
+def _cubed_model(conf, tmp_path, grid="ne120", **overrides):
+    """Swap in a cubed_wxformer whose adjacency file auto-detects next to se_index."""
+    se_index = tmp_path / f"se_index_{grid}.npy"
+    se_index.touch()
+    (tmp_path / f"se_face_adjacency_{grid}.npz").touch()
+    model = {k: conf["model"][k] for k in ("frames", "levels", "channels", "surface_channels")}
+    model.update(input_only_channels=2, output_only_channels=1)
+    model.update(type="cubed_wxformer", se_index_path=str(se_index), **overrides)
+    conf["model"] = model
+    return conf
+
+
+def test_cubed_wxformer_halo_requires_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_must_exist(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(tmp_path / "missing_scrip.nc")))
+    assert "model.scrip_path" in _wheres(rep)
+    assert "File not found" in _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_present_is_clean(conf, tmp_path):
+    scrip = tmp_path / "ne120np4_scrip.nc"
+    scrip.touch()
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(scrip)))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_without_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_size=0))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_linear_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="linear"))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+    assert "model.halo_geometry" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_unknown_halo_geometry(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="bilinear"))
+    assert "model.halo_geometry" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_required_on_other_resolutions(conf, tmp_path):
+    """Adjacency auto-detect follows the se_index name, so ne30 is caught too."""
+    rep = _run(_cubed_model(conf, tmp_path, grid="ne30"))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
 
 
 def test_three_dimensional_input_only_vars_count_per_level(conf):
@@ -546,6 +633,39 @@ def test_num_epoch_exceeding_epochs_warns(conf):
     conf["trainer"]["epochs"] = 2
     conf["trainer"]["num_epoch"] = 5
     assert "trainer.num_epoch" in _wheres(_run(conf), "warning")
+
+
+def test_removed_ensemble_gen2_trainer_points_to_ring_crps(conf):
+    conf["trainer"]["type"] = "ensemble-gen2"
+    rep = _run(conf)
+    assert "trainer.type" in _wheres(rep)
+    assert "ring-crps" in _text(rep)
+
+
+def test_ensemble_gen1_is_treated_as_gen1(conf):
+    conf["trainer"]["type"] = "ensemble-gen1"
+    rep = _run(conf)
+    assert "trainer.type" in _wheres(rep, "warning")
+    assert _wheres(rep) == set()
+
+
+@pytest.mark.parametrize("value", [True, False, ["Transformer", "UpBlock"]])
+def test_activation_checkpoint_accepts_bool_or_class_names(conf, value):
+    conf["trainer"]["activation_checkpoint"] = value
+    assert "trainer.activation_checkpoint" not in _wheres(_run(conf))
+
+
+@pytest.mark.parametrize("value", ["Transformer", [1, 2]])
+def test_activation_checkpoint_rejects_other_values(conf, value):
+    conf["trainer"]["activation_checkpoint"] = value
+    assert "trainer.activation_checkpoint" in _wheres(_run(conf))
+
+
+def test_gradient_checkpointing_key_warns(conf):
+    conf["trainer"]["gradient_checkpointing"] = True
+    rep = _run(conf)
+    assert "trainer.gradient_checkpointing" in _wheres(rep, "warning")
+    assert "activation_checkpoint" in _text(rep, "warning")
 
 
 # ===========================================================================
