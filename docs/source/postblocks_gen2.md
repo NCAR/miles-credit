@@ -353,9 +353,9 @@ args:
 
 Conserves global total energy using an explicit up/down flux decomposition: the
 column total-energy tendency is forced to match the net TOA + surface energy
-fluxes, with temperature carrying the correction. The TOA downwelling shortwave
-(SOLIN) is an input-only forcing absent from the prediction, so it is read from
-the input dict by name. Both registry keys map to the same class.
+fluxes (instantaneous or mean rate over the step), with temperature carrying the correction. 
+The TOA downwelling shortwave (SOLIN) is an input-only forcing absent from the prediction, 
+so it is read from the input dict by name. Both registry keys map to the same class.
 
 ```yaml
 type: "global_energy_fixer_updown"
