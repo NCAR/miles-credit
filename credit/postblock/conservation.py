@@ -81,6 +81,64 @@ def _set_pred(batch_dict: dict, var_key: str, tensor: torch.Tensor) -> None:
     batch_dict["y_processed"][_src(var_key)][var_key] = tensor
 
 
+def _apply_energy_correction(
+    core,
+    *,
+    scale_by_mass: bool,
+    flag_sigma: bool,
+    net_forcing: torch.Tensor,
+    global_TE_t0: torch.Tensor,
+    global_TE_t1: torch.Tensor,
+    T_pred: torch.Tensor,
+    CP_t1: torch.Tensor,
+    E_level_t1: torch.Tensor,
+    E_qgk_t1: torch.Tensor,
+    sp_pred: torch.Tensor = None,
+) -> torch.Tensor:
+    """Turn a global energy imbalance into a corrected temperature field.
+
+    Shared by :class:`GlobalNetEnergyFixer` and :class:`GlobalEnergyFixerUpDown`,
+    which differ only in how they assemble ``net_forcing`` from their flux
+    variables; everything from here on is the same calculation.  Both branches
+    inject exactly the same total energy -- they differ only in *where* they put
+    it, which is what ``scale_by_mass`` selects.
+
+    Args:
+        core: the physics core used for the vertical / area integrals.
+        scale_by_mass: ``True`` = one uniform mass-weighted ``dT``; ``False`` = rescale column energy (gen1).
+        flag_sigma: ``True`` for a hybrid-sigma grid (``sp_pred`` required).
+        net_forcing: ``N_seconds * (R_T_sum - F_S_sum)``, the energy the fluxes say the atmosphere gained [J].
+        global_TE_t0, global_TE_t1: global total energy before / after the step [J].
+        T_pred: predicted temperature, ``(B, L, H, W)``.
+        CP_t1: heat capacity of the predicted state.
+        E_level_t1: per-level total energy of the predicted state.
+        E_qgk_t1: the non-thermal part of ``E_level_t1`` (latent + potential + kinetic).
+        sp_pred: predicted surface pressure; required when ``flag_sigma``.
+
+    Returns:
+        The corrected temperature field, same shape as ``T_pred``.
+    """
+    if scale_by_mass:
+        # Spread the deficit by cp-weighted air mass: a single uniform dT.  Both
+        # integrals use the *predicted* state, so the energy actually added is
+        # dT * sum(cp * dm) == dE exactly.
+        if flag_sigma:
+            C_column = core.integral(CP_t1, sp_pred) / GRAVITY  # J K-1 m-2
+        else:
+            C_column = core.integral(CP_t1) / GRAVITY
+        C_global = core.weighted_sum(C_column, axis=(-2, -1))  # J K-1
+        dE = net_forcing + global_TE_t0 - global_TE_t1
+        return T_pred + (dE / C_global).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+    # total energy correction ratio; broadcast to (B, 1, 1, 1)
+    E_correct_ratio = (net_forcing + global_TE_t0) / global_TE_t1
+    E_correct_ratio = E_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+
+    # let thermal energy carry the corrected total energy amount
+    E_t1_correct = E_level_t1 * E_correct_ratio
+    return (E_t1_correct - E_qgk_t1) / CP_t1
+
+
 class TracerFixer(nn.Module):
     """Clamp tracer fields to a lower (and optional upper) threshold by name.
 
@@ -264,6 +322,35 @@ class GlobalNetEnergyFixer(nn.Module):
     ``N_seconds`` internally; with ``flux_units="W m-2"`` every flux is the
     mean rate over the step and is used as-is.
 
+    How the correction is spread (``scale_by_mass``): the global energy deficit
+    is a single scalar, and the block must decide where in the 3d temperature
+    field to put it.  The two choices differ substantially in the spurious
+    spatial pattern they leave behind.
+
+    * ``scale_by_mass=False`` (default, gen1 behavior) rescales the column total
+      energy, ``E_level * ratio``, and back-solves temperature.  That makes the
+      increment ``dT = (ratio - 1) * (T + PHIS/cp + L*q/cp + ke/cp)``, i.e.
+      proportional to *local total energy* rather than to local heat capacity.
+      Two consequences: the surface-geopotential term is constant through the
+      column and reaches ~49000 J/kg (~+49 K after dividing by ``cp``) over 5 km
+      terrain but is 0 over ocean, so high-elevation columns are corrected
+      harder than sea-level ones; and ``PHIS * ps / g`` is *potential* energy,
+      which heating cannot change, yet it enters the multiplier and is charged
+      to temperature anyway.  On an idealized but realistic atmosphere the
+      resulting per-column ``dT`` spans 0.89--1.11 times the mass-weighted
+      value (warm/moist and high-terrain columns high, cold dry columns low).
+      Because the pattern is fixed in space it accumulates coherently over a
+      long rollout instead of averaging out, and the block cannot detect it:
+      only the global integral is constrained, never the distribution.
+    * ``scale_by_mass=True`` applies a single uniform increment
+      ``dT = dE / sum(cp * dm)``, spreading the deficit in proportion to local
+      heat capacity times air mass -- how heating actually distributes.  This
+      adds no horizontal or vertical structure, conserves exactly the same
+      total energy, and matches what CAM/CESM's own energy fixer does.
+
+    The default is ``False`` for backwards compatibility with existing
+    configs and checkpoints; ``True`` is the physically preferable choice.
+
     Args:
         T_var, q_var, U_var, V_var: 3d atmosphere state keys.
         surface_geopotential_name: variable name of surface geopotential in the
@@ -276,6 +363,7 @@ class GlobalNetEnergyFixer(nn.Module):
             ignored for ``grid_type="pressure"``.
         flux_units: ``"J m-2"`` or ``"W m-2"`` (see above).
         input_source_key: batch-dict key holding the t0 physical input state.
+        scale_by_mass: spread the correction by air mass as a uniform ``dT``; default ``False`` (gen1).
         **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
@@ -298,6 +386,7 @@ class GlobalNetEnergyFixer(nn.Module):
         sp_var=None,
         flux_units="J m-2",
         input_source_key="x_physical",
+        scale_by_mass=False,
         **physics,
     ):
         super().__init__()
@@ -320,6 +409,7 @@ class GlobalNetEnergyFixer(nn.Module):
         self.flux_units = flux_units
         # factor that turns the configured flux units into W m-2 (a rate)
         self.flux_scale = 1.0 / self.N_seconds if flux_units == "J m-2" else 1.0
+        self.scale_by_mass = bool(scale_by_mass)
 
         self.core, self.flag_sigma, self.midpoint, self.N_levels, self.coef_a, self.coef_b = _setup_physics_core(
             physics
@@ -397,13 +487,19 @@ class GlobalNetEnergyFixer(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        # total energy correction ratio; broadcast to (B, 1, 1, 1)
-        E_correct_ratio = (self.N_seconds * (R_T_sum - F_S_sum) + global_TE_t0) / global_TE_t1
-        E_correct_ratio = E_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-
-        # let thermal energy carry the corrected total energy amount
-        E_t1_correct = E_level_t1 * E_correct_ratio
-        T_pred = (E_t1_correct - E_qgk_t1) / CP_t1
+        T_pred = _apply_energy_correction(
+            self.core,
+            scale_by_mass=self.scale_by_mass,
+            flag_sigma=self.flag_sigma,
+            net_forcing=self.N_seconds * (R_T_sum - F_S_sum),
+            global_TE_t0=global_TE_t0,
+            global_TE_t1=global_TE_t1,
+            T_pred=T_pred,
+            CP_t1=CP_t1,
+            E_level_t1=E_level_t1,
+            E_qgk_t1=E_qgk_t1,
+            sp_pred=sp_pred if self.flag_sigma else None,
+        )
 
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
@@ -421,6 +517,14 @@ class GlobalEnergyFixerUpDown(nn.Module):
     the prediction, so it is read from the input dict by name
     (``toa_down_solar_input_var``).
 
+    ``scale_by_mass`` selects how the correction is spread over the temperature
+    field, exactly as in :class:`GlobalNetEnergyFixer` -- see that class for the
+    full discussion. In short: ``False`` (default, gen1 behavior) rescales the
+    column total energy, which makes the increment proportional to local *total*
+    energy and so over-corrects high-elevation and warm, moist columns; ``True``
+    applies one uniform ``dT`` proportional to local heat capacity times air
+    mass, adding no spurious spatial structure. Both inject the same total energy.
+
     Args:
         T_var, q_var, U_var, V_var, sp_var: atmosphere state keys.
         surface_geopotential_name: variable name of PHIS in the statics file.
@@ -429,6 +533,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surf_down_solar_var, surf_up_solar_var, surf_down_lw_var, surf_up_lw_var, surf_sh_var, surf_lh_var:
             surface flux keys.
         lead_time_periods: forecast step length in hours.
+        scale_by_mass: spread the correction by air mass as a uniform ``dT``; default ``False`` (gen1).
         **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
@@ -451,6 +556,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surf_lh_var,
         lead_time_periods,
         input_source_key="x_physical",
+        scale_by_mass=False,
         **physics,
     ):
         super().__init__()
@@ -470,6 +576,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         self.surf_lh_var = surf_lh_var
         self.N_seconds = int(lead_time_periods) * 3600
         self.input_source_key = input_source_key
+        self.scale_by_mass = bool(scale_by_mass)
         self.core, self.flag_sigma, self.midpoint, self.N_levels, self.coef_a, self.coef_b = _setup_physics_core(
             physics
         )
@@ -513,6 +620,38 @@ class GlobalEnergyFixerUpDown(nn.Module):
         E_qgk_t0 = LH_WATER * q_input + GPH_surf + ken_t0
         E_qgk_t1 = LH_WATER * q_pred + GPH_surf + ken_t1
 
+        # TODO(investigate): flux-unit asymmetry between the TOA and surface branches.
+        #
+        # The ``* self.N_seconds`` on all three TOA terms cancels exactly against the
+        # ``/ self.N_seconds`` below, so ``R_T`` keeps whatever units the inputs are in,
+        # while ``F_S`` (see below) *is* divided by ``N_seconds``. Since the
+        # ``net_forcing=self.N_seconds * (R_T_sum - F_S_sum)`` argument to
+        # ``_apply_energy_correction`` consumes both as rates, the block is
+        # only self-consistent if TOA fluxes arrive as W m-2 and surface fluxes as J m-2
+        # accumulated over the step -- a mixed convention no dataset provides.
+        #
+        # Measured dT injected per 6 h step, realistic global atmosphere, TOA net +1 W m-2:
+        #     all fluxes W m-2 (CAM native)      0.0021 K  (surface term silently dropped)
+        #     only FSDS_J/FLDS_J accumulated     1.1109 K
+        #     all surface accumulated, TOA W     0.4368 K
+        #     all fluxes J m-2                  44.9218 K  (blows up in 1-2 steps)
+        #
+        # The fix is to drop the three multiplies, making both branches uniformly J m-2
+        # (matching GlobalNetEnergyFixer's default ``flux_units="J m-2"``):
+        #
+        #     TOA_down_solar = self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device)
+        #     TOA_up_solar = _pred(batch_dict, self.toa_up_solar_var)[:, 0, 0, ...]
+        #     TOA_up_OLR = _pred(batch_dict, self.toa_up_olr_var)[:, 0, 0, ...]
+        #
+        # Left inactive deliberately: it changes the injected correction, so any checkpoint
+        # trained against the current behavior would shift. Before enabling, confirm the
+        # actual units in the forcing files that config/gen_2/camulator/*.yml read -- those
+        # configs name FSDS_J/FLDS_J with a ``_J`` suffix but FSUS/FLUS/SHFLX/LHFLX without,
+        # so the F_S sum below may itself mix accumulated and rate terms. Adding a
+        # ``flux_units`` argument here, as GlobalNetEnergyFixer has, is the tidier endpoint.
+        #
+        # Separately unresolved: the ``+ surf_SH + surf_LH`` signs in the ``F_S`` sum below (see
+        # ENERGY_FIXER_REVIEW.md) -- worth at least as much drift as the units question.
         TOA_down_solar = (
             self._input(batch_dict, self.toa_down_solar_input_var)[:, 0, -1, ...].to(device) * self.N_seconds
         )
@@ -539,11 +678,19 @@ class GlobalEnergyFixerUpDown(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        E_correct_ratio = (self.N_seconds * (R_T_sum - F_S_sum) + global_TE_t0) / global_TE_t1
-        E_correct_ratio = E_correct_ratio.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
-
-        E_t1_correct = E_level_t1 * E_correct_ratio
-        T_pred = (E_t1_correct - E_qgk_t1) / CP_t1
+        T_pred = _apply_energy_correction(
+            self.core,
+            scale_by_mass=self.scale_by_mass,
+            flag_sigma=self.flag_sigma,
+            net_forcing=self.N_seconds * (R_T_sum - F_S_sum),
+            global_TE_t0=global_TE_t0,
+            global_TE_t1=global_TE_t1,
+            T_pred=T_pred,
+            CP_t1=CP_t1,
+            E_level_t1=E_level_t1,
+            E_qgk_t1=E_qgk_t1,
+            sp_pred=sp_pred,
+        )
 
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))

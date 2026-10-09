@@ -17,6 +17,7 @@ import torch
 import xarray as xr
 import pytest
 
+from credit.physics_constants import GRAVITY, LH_WATER, CP_DRY, CP_VAPOR
 from credit.postblock.reconstruct import Reconstruct, FlattenToTensor
 from credit.postblock.conservation import (
     TracerFixer,
@@ -474,3 +475,263 @@ def test_full_chain_flatten_preserves_physical(statics_file):
     assert batch["y_pred"].shape == (B, n_ch, H, W)
     # y_processed untouched by a no-scaler flatten
     assert torch.allclose(batch["y_processed"][SRC][key("prognostic", "3d", "T")], phys_snapshot)
+
+
+# --------------------------------------------------------------------------- #
+# scale_by_mass: how GlobalNetEnergyFixer spreads the global energy correction
+# --------------------------------------------------------------------------- #
+@pytest.fixture
+def statics_file_terrain(tmp_path):
+    """Same grid as ``statics_file`` but with real topography in PHIS.
+
+    The flat ``PHIS=1000`` of the default fixture makes the two ``scale_by_mass``
+    paths nearly indistinguishable; the elevation contrast is what exposes the
+    difference, so these tests need their own statics file.
+    """
+    lat = np.linspace(-80.0, 80.0, H)
+    lon = np.linspace(0.0, 315.0, W)
+    lon2d, lat2d = np.meshgrid(lon, lat)
+    hyai = np.linspace(1000.0, 0.0, L + 1)
+    hybi = np.linspace(0.0, 1.0, L + 1)
+    zs = np.zeros((H, W))
+    zs[H // 2, W // 2] = 5000.0  # an isolated 5 km peak
+    zs[0, :] = 2800.0  # and a zonal ice-sheet band
+    ds = xr.Dataset(
+        {
+            "lon2d": (("y", "x"), lon2d),
+            "lat2d": (("y", "x"), lat2d),
+            "hyai": (("ilev",), hyai),
+            "hybi": (("ilev",), hybi),
+            "PHIS": (("y", "x"), zs * GRAVITY),
+        }
+    )
+    path = tmp_path / "statics_terrain.nc"
+    ds.to_netcdf(path)
+    return str(path), zs
+
+
+def _run_with_open_budget(statics, **overrides):
+    """Perturb T so the budget is open, run the fixer, return (fixer, dT, batch)."""
+    batch, _, _ = build_super_dict(requires_grad=False)
+    tk = key("prognostic", "3d", "T")
+    batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+    t_perturbed = batch["y_processed"][SRC][tk].detach().clone()
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics, **overrides))
+    batch = fixer(batch)
+    dT = batch["y_processed"][SRC][tk].detach() - t_perturbed
+    return fixer, dT, batch
+
+
+def test_energy_fixer_net_scale_by_mass_defaults_to_false(statics_file):
+    """Default must stay on the gen1 multiplicative path for backwards compat."""
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file))
+    assert fixer.scale_by_mass is False
+
+    explicit = _run_with_open_budget(statics_file, scale_by_mass=False)[1]
+    default = _run_with_open_budget(statics_file)[1]
+    assert torch.allclose(default, explicit)
+
+
+def test_energy_fixer_net_scale_by_mass_is_spatially_uniform(statics_file_terrain):
+    """scale_by_mass=True must apply one uniform dT; the default must not."""
+    statics, zs = statics_file_terrain
+    peak = (H // 2, W // 2)  # 5000 m
+    flat = (H // 2, 0)  # 0 m, same latitude row
+
+    _, dT_mass, _ = _run_with_open_budget(statics, scale_by_mass=True)
+    spread = dT_mass.max() - dT_mass.min()
+    assert spread.abs() < 1e-4 * dT_mass.abs().mean(), "scale_by_mass=True left spatial structure"
+    assert torch.allclose(
+        dT_mass[0, :, 0, peak[0], peak[1]],
+        dT_mass[0, :, 0, flat[0], flat[1]],
+        rtol=1e-6,
+    )
+
+    # the default path must be elevation-dependent: PHIS/cp adds ~+49 K over the
+    # 5 km peak, so its correction there is measurably larger than at sea level
+    _, dT_default, _ = _run_with_open_budget(statics, scale_by_mass=False)
+    peak_dT = dT_default[0, :, 0, peak[0], peak[1]].mean()
+    flat_dT = dT_default[0, :, 0, flat[0], flat[1]].mean()
+    assert (peak_dT / flat_dT) > 1.10, "expected the multiplicative path to over-correct high terrain"
+
+
+def test_energy_fixer_net_scale_by_mass_closes_budget(statics_file_terrain):
+    """Uniform-dT path must close the global budget as exactly as the default."""
+    statics, _ = statics_file_terrain
+    for scale_by_mass in (False, True):
+        batch, _, _ = build_super_dict(requires_grad=False)
+        tk = key("prognostic", "3d", "T")
+        batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+        fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics, scale_by_mass=scale_by_mass))
+
+        TE0, TE1_before, forcing = _global_energy_budget(fixer, batch)
+        resid_before = (TE1_before - TE0 - forcing).abs()
+
+        batch = fixer(batch)
+        TE0, TE1_after, forcing = _global_energy_budget(fixer, batch)
+        resid_after = (TE1_after - TE0 - forcing).abs()
+
+        assert (resid_after < resid_before).all(), f"scale_by_mass={scale_by_mass} did not improve closure"
+        assert torch.allclose(TE1_after, TE0 + forcing, rtol=1e-4), f"scale_by_mass={scale_by_mass} budget open"
+
+
+def test_energy_fixer_net_scale_by_mass_grad(statics_file_terrain):
+    """The uniform-dT path must stay differentiable end to end."""
+    statics, _ = statics_file_terrain
+    batch, _, _ = build_super_dict(requires_grad=True)
+    tk = key("prognostic", "3d", "T")
+    t_in = batch["y_processed"][SRC][tk]
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics, scale_by_mass=True))
+    out = fixer(batch)["y_processed"][SRC][tk]
+    assert out.shape == (B, L, 1, H, W)
+    assert torch.isfinite(out).all()
+    out.sum().backward()
+    assert t_in.grad is not None
+    assert torch.isfinite(t_in.grad).all()
+
+
+# --------------------------------------------------------------------------- #
+# scale_by_mass on GlobalEnergyFixerUpDown (same knob, same shared helper)
+# --------------------------------------------------------------------------- #
+def _updown_energy_kwargs(statics_file, **overrides):
+    kw = dict(
+        T_var=key("prognostic", "3d", "T"),
+        q_var=key("prognostic", "3d", "Qtot"),
+        U_var=key("prognostic", "3d", "U"),
+        V_var=key("prognostic", "3d", "V"),
+        sp_var=key("prognostic", "2d", "PS"),
+        surface_geopotential_name="PHIS",
+        toa_down_solar_input_var=key("dynamic_forcing", "2d", "SOLIN"),
+        toa_up_solar_var=key("diagnostic", "2d", "FSUTOA"),
+        toa_up_olr_var=key("diagnostic", "2d", "FLUT"),
+        surf_down_solar_var=key("diagnostic", "2d", "FSDS_J"),
+        surf_up_solar_var=key("diagnostic", "2d", "FSUS"),
+        surf_down_lw_var=key("diagnostic", "2d", "FLDS_J"),
+        surf_up_lw_var=key("diagnostic", "2d", "FLUS"),
+        surf_sh_var=key("diagnostic", "2d", "SHFLX"),
+        surf_lh_var=key("diagnostic", "2d", "LHFLX"),
+        lead_time_periods=6,
+        **_physics_args(statics_file),
+    )
+    kw.update(overrides)
+    return kw
+
+
+def _updown_global_energy_budget(fixer, batch):
+    """(global_TE_t0, global_TE_t1, N_seconds * (R_T_sum - F_S_sum)) for the up/down fixer.
+
+    Mirrors ``_global_energy_budget`` but rebuilds the two flux sums from the
+    up/down components, following the block's own sign convention.
+    """
+    core = fixer.core
+    src = batch["y_processed"][SRC]
+    inp = batch["x_physical"][SRC]
+
+    def lvl(d, k, t):
+        return d[k][:, :, t, ...].detach()
+
+    def sfc(d, k, t):
+        return d[k][:, 0, t, ...].detach()
+
+    T0, q0, U0, V0 = (lvl(inp, key("prognostic", "3d", n), -1) for n in ("T", "Qtot", "U", "V"))
+    T1, q1, U1, V1 = (lvl(src, key("prognostic", "3d", n), 0) for n in ("T", "Qtot", "U", "V"))
+    sp0 = sfc(inp, key("prognostic", "2d", "PS"), -1)
+    sp1 = sfc(src, key("prognostic", "2d", "PS"), 0)
+
+    E0 = ((1 - q0) * CP_DRY + q0 * CP_VAPOR) * T0 + LH_WATER * q0 + fixer.GPH_surf + 0.5 * (U0**2 + V0**2)
+    E1 = ((1 - q1) * CP_DRY + q1 * CP_VAPOR) * T1 + LH_WATER * q1 + fixer.GPH_surf + 0.5 * (U1**2 + V1**2)
+    TE0 = core.weighted_sum(core.integral(E0, sp0) / GRAVITY, axis=(-2, -1))
+    TE1 = core.weighted_sum(core.integral(E1, sp1) / GRAVITY, axis=(-2, -1))
+
+    n = fixer.N_seconds
+    R_T = (
+        sfc(inp, fixer.toa_down_solar_input_var, -1) * n
+        - sfc(src, fixer.toa_up_solar_var, 0) * n
+        - sfc(src, fixer.toa_up_olr_var, 0) * n
+    ) / n
+    F_S = (
+        sfc(src, fixer.surf_down_solar_var, 0)
+        - sfc(src, fixer.surf_up_solar_var, 0)
+        + sfc(src, fixer.surf_down_lw_var, 0)
+        - sfc(src, fixer.surf_up_lw_var, 0)
+        + sfc(src, fixer.surf_sh_var, 0)
+        + sfc(src, fixer.surf_lh_var, 0)
+    ) / n
+    forcing = n * (core.weighted_sum(R_T, axis=(-2, -1)) - core.weighted_sum(F_S, axis=(-2, -1)))
+    return TE0, TE1, forcing
+
+
+def _run_updown_with_open_budget(statics, **overrides):
+    batch, _, _ = build_super_dict(requires_grad=False)
+    tk = key("prognostic", "3d", "T")
+    batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+    t_perturbed = batch["y_processed"][SRC][tk].detach().clone()
+    fixer = GlobalEnergyFixerUpDown(**_updown_energy_kwargs(statics, **overrides))
+    batch = fixer(batch)
+    dT = batch["y_processed"][SRC][tk].detach() - t_perturbed
+    return fixer, dT, batch
+
+
+def test_energy_fixer_updown_scale_by_mass_defaults_to_false(statics_file):
+    """Default must stay on the gen1 multiplicative path for backwards compat."""
+    fixer = GlobalEnergyFixerUpDown(**_updown_energy_kwargs(statics_file))
+    assert fixer.scale_by_mass is False
+
+    explicit = _run_updown_with_open_budget(statics_file, scale_by_mass=False)[1]
+    default = _run_updown_with_open_budget(statics_file)[1]
+    assert torch.allclose(default, explicit)
+
+
+def test_energy_fixer_updown_scale_by_mass_is_spatially_uniform(statics_file_terrain):
+    """scale_by_mass=True must apply one uniform dT; the default must not."""
+    statics, _ = statics_file_terrain
+    peak = (H // 2, W // 2)  # 5000 m
+    flat = (H // 2, 0)  # 0 m, same latitude row
+
+    _, dT_mass, _ = _run_updown_with_open_budget(statics, scale_by_mass=True)
+    spread = dT_mass.max() - dT_mass.min()
+    assert spread.abs() < 1e-4 * dT_mass.abs().mean(), "scale_by_mass=True left spatial structure"
+
+    _, dT_default, _ = _run_updown_with_open_budget(statics, scale_by_mass=False)
+    peak_dT = dT_default[0, :, 0, peak[0], peak[1]].mean()
+    flat_dT = dT_default[0, :, 0, flat[0], flat[1]].mean()
+    assert (peak_dT / flat_dT) > 1.10, "expected the multiplicative path to over-correct high terrain"
+
+
+def test_energy_fixer_updown_closes_budget(statics_file_terrain):
+    """Both paths must close the global energy budget.
+
+    The review noted there was no closure test for the up/down fixer at all;
+    this covers the default path as well as the new mass-weighted one.
+    """
+    statics, _ = statics_file_terrain
+    for scale_by_mass in (False, True):
+        batch, _, _ = build_super_dict(requires_grad=False)
+        tk = key("prognostic", "3d", "T")
+        batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+        fixer = GlobalEnergyFixerUpDown(**_updown_energy_kwargs(statics, scale_by_mass=scale_by_mass))
+
+        TE0, TE1_before, forcing = _updown_global_energy_budget(fixer, batch)
+        resid_before = (TE1_before - TE0 - forcing).abs()
+
+        batch = fixer(batch)
+        TE0, TE1_after, forcing = _updown_global_energy_budget(fixer, batch)
+        resid_after = (TE1_after - TE0 - forcing).abs()
+
+        assert (resid_after < resid_before).all(), f"scale_by_mass={scale_by_mass} did not improve closure"
+        assert torch.allclose(TE1_after, TE0 + forcing, rtol=1e-4), f"scale_by_mass={scale_by_mass} budget open"
+
+
+def test_energy_fixer_updown_scale_by_mass_grad(statics_file_terrain):
+    """The uniform-dT path must stay differentiable end to end."""
+    statics, _ = statics_file_terrain
+    batch, _, _ = build_super_dict(requires_grad=True)
+    tk = key("prognostic", "3d", "T")
+    t_in = batch["y_processed"][SRC][tk]
+    fixer = GlobalEnergyFixerUpDown(**_updown_energy_kwargs(statics, scale_by_mass=True))
+    out = fixer(batch)["y_processed"][SRC][tk]
+    assert out.shape == (B, L, 1, H, W)
+    assert torch.isfinite(out).all()
+    out.sum().backward()
+    assert t_in.grad is not None
+    assert torch.isfinite(t_in.grad).all()
