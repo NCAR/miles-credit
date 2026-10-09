@@ -327,7 +327,8 @@ class ARCOERA5Dataset(_ObjectStoreZarrMixin, BaseDataset):
                 requests.append((self._get_field_name(field_type, "2d", vname), ds_t[vname]))
 
         for i, (key, arr) in enumerate(self._read_arrays(requests)):
-            tensor = torch.tensor(arr, dtype=torch.float32)
+            # from_numpy shares the buffer; asarray only copies if the store isn't float32.
+            tensor = torch.from_numpy(np.asarray(arr, dtype=np.float32))
             # 3D: (n_levels, lat, lon) -> (n_levels, 1, lat, lon); 2D: (lat, lon) -> (1, 1, lat, lon)
             sample[key] = tensor.unsqueeze(1) if i < n_3d else tensor.unsqueeze(0).unsqueeze(0)
 
@@ -556,6 +557,7 @@ class WeatherBench2ERA5Dataset(_ObjectStoreZarrMixin, BaseDataset):
         ]
 
         for i, (key, arr) in enumerate(self._read_arrays(requests)):
-            tensor = torch.tensor(arr, dtype=torch.float32)
+            # from_numpy shares the buffer; asarray only copies if the store isn't float32.
+            tensor = torch.from_numpy(np.asarray(arr, dtype=np.float32))
             # 3D: (n_levels, lat, lon) -> (n_levels, 1, lat, lon); 2D: (lat, lon) -> (1, 1, lat, lon)
             sample[key] = tensor.unsqueeze(1) if i < n_3d else tensor.unsqueeze(0).unsqueeze(0)

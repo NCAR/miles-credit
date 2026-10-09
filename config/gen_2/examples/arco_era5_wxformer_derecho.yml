@@ -116,15 +116,15 @@ trainer:
   weight_decay: 0
 
   train_batch_size: 1
-  valid_batch_size: 4
+  valid_batch_size: 1
 
   batches_per_epoch: 10
   valid_batches_per_epoch: 10
   stopping_patience: 999
 
   start_epoch: 0
-  num_epoch: 2
-  epochs: &epochs 2
+  num_epoch: 1
+  epochs: 50
 
   use_tensorboard: True
   use_ema: True
@@ -154,6 +154,14 @@ preblocks:
           - search: nan        # NaN       → 0.0
             fill: 0.0
         variables: ["ERA5/static/2d/sea_ice_cover"]
+    pos_vals:
+      type: "fill_values"
+      args:
+        rules: 
+          - search: 0.0
+            op: "<="  
+            fill: 1e-8
+        variables: ["ERA5/prognostic/3d/specific_humidity"]
     log_trans:
       type: "log_transform"
       args:
@@ -295,11 +303,19 @@ loss:
     use_latitude_weights: false
 
 pbs: #derecho
-  conda: "credit-derecho"
+  #conda: "credit-derecho"
+  #project: "NAML0001"
+  #job_name: "arco_wxformer_gen2"
+  #walltime: "03:00:00"
+  #nodes: 1
+  #ncpus: 64
+  #ngpus: 4
+  #queue: 'main'
+  conda: "credit_20260706"
   project: "NAML0001"
   job_name: "arco_wxformer_gen2"
-  walltime: "01:00:00"
+  walltime: "04:00:00"
   nodes: 1
-  ncpus: 64
+  ncpus: 24
   ngpus: 4
-  queue: 'main'        
+  queue: "casper"
