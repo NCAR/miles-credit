@@ -215,6 +215,61 @@ def test_flatten_to_tensor_scales_with_preprocess_scaler(tmp_path):
         assert torch.allclose(v, originals[k], atol=1e-4), k
 
 
+def test_flatten_to_tensor_spatial_scaler_round_trip(tmp_path):
+    """FlattenToTensor with `spatial_variables` applies a per-gridpoint scaler
+    (PS fit with one mean/variance per grid cell): the variable is flattened to
+    (B, H*W) for scaling, so the column-count check passes, and the result
+    round-trips through Reconstruct + the spatial inverse postblock scaler. The
+    physical y_processed stays untouched and keeps its shape."""
+    from bridgescaler import save_scaler_dict
+    from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
+    from credit.postblock.scaler import BridgeScalerTransform as PostScalerBlock
+
+    cmap, n_ch = build_channel_map()
+    ps = key("prognostic", "2d", "PS")
+
+    def rand_super():
+        return {SRC: {k: torch.randn(B, info["orig_shape"][0], 1, H, W) * 3.0 + 5.0 for k, info in cmap.items()}}
+
+    scaler_path = str(tmp_path / "scaler_spatial.json")
+    pre = PreScalerBlock(
+        scaler_path=scaler_path,
+        variables=[],
+        method="transform",
+        scaler_params={"channels_last": False},
+        spatial_variables=[ps],
+    )
+    for _ in range(3):  # several batches so per-gridpoint variances are well defined
+        pre.fit_scaler_batch({"target": rand_super()})
+    save_scaler_dict(pre.scaler, scaler_path)
+
+    y_processed = rand_super()
+    originals = {k: v.clone() for k, v in y_processed[SRC].items()}
+    batch = {"y_processed": y_processed, "metadata": {"target": {"_channel_map": cmap}}}
+
+    # without spatial_variables, PS has 1 column but the scaler was fit with H*W
+    with pytest.raises(AssertionError, match="does not match scaler"):
+        FlattenToTensor(scaler_path=scaler_path, variables=list(cmap))(
+            {"y_processed": rand_super(), "metadata": {"target": {"_channel_map": cmap}}}
+        )
+
+    # partial path exercises the same prefix expansion as the scaler blocks
+    flat = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap), spatial_variables=[f"{SRC}/prognostic/2d/PS"])
+    batch = flat(batch)
+    assert batch["y_pred"].shape == (B, n_ch, H, W)
+
+    for k, v in batch["y_processed"][SRC].items():
+        assert v.shape == originals[k].shape, k
+        assert torch.equal(v, originals[k]), k
+
+    batch = Reconstruct(detach=True)(batch)
+    inv = PostScalerBlock(scaler_path=scaler_path, variables=[], method="inverse_transform", spatial_variables=[ps])
+    batch = inv(batch)
+    for k, v in batch["y_processed"][SRC].items():
+        assert v.shape == originals[k].shape, k
+        assert torch.allclose(v, originals[k], atol=1e-4), k
+
+
 # --------------------------------------------------------------------------- #
 # TracerFixer
 # --------------------------------------------------------------------------- #

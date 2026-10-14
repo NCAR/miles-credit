@@ -298,6 +298,38 @@ def test_postblock_spatial_variables_mismatch_errors(conf):
     assert "spatial_variables" in _text(rep)
 
 
+def _spatial_preblock_and_flatten(conf, flatten_spatial):
+    """Spatial-SP preblock + matching scaler postblocks, plus a flatten_to_tensor
+    block on the same scaler_path with *flatten_spatial* as its spatial_variables."""
+    scaler_path = conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"]
+    spatial = ["ERA5/prognostic/2d/SP"]
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": scaler_path, "variables": [], "method": "transform", "spatial_variables": spatial},
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = spatial
+    conf["postblocks"]["per_step"]["scaler_target"]["args"]["spatial_variables"] = spatial
+    flatten_args = {"scaler_path": scaler_path, "variables": [], "method": "transform"}
+    if flatten_spatial is not None:
+        flatten_args["spatial_variables"] = flatten_spatial
+    conf["postblocks"]["per_step"]["flatten"] = {"type": "flatten_to_tensor", "args": flatten_args}
+
+
+def test_flatten_to_tensor_spatial_variables_matches_preblock_ok(conf):
+    """flatten_to_tensor naming the same spatial_variables as the fitting preblock: no error."""
+    _spatial_preblock_and_flatten(conf, ["ERA5/prognostic/2d/SP"])
+    assert "postblocks.per_step.flatten" not in _wheres(_run(conf))
+
+
+def test_flatten_to_tensor_missing_spatial_variables_errors(conf):
+    """flatten_to_tensor forward-scales with a grid-wise scaler but omits
+    spatial_variables — it would fail the column-count check on the first batch."""
+    _spatial_preblock_and_flatten(conf, None)
+    rep = _run(conf)
+    assert "postblocks.per_step.flatten" in _wheres(rep)
+    assert "spatial_variables" in _text(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
