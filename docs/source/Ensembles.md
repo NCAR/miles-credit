@@ -61,12 +61,33 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
 
 5. **Validate before submitting:**
 
-**Distributed Ensemble Approach (gen 1: `trainer.type: ensemble-gen1`, alias `era5-ensemble`):**
-- Ensemble members are distributed across available GPUs
-- Effective ensemble size becomes `ensemble_size × num_gpus`
-- KCRPS computation occurs across the entire distributed ensemble
-- Batch size remains constant per GPU regardless of ensemble scaling
-- Requires cross-GPU communication for loss computation
+   ```bash
+   credit check -c config/gen_2/examples/wxformer_sdl.yml
+   ```
+
+   This instantiates the model with your config, which is enough to catch an architecture mismatch against the checkpoint before you burn a GPU allocation finding out.
+
+6. **Train.** Only the noise-injection layers have `requires_grad=True`; everything else stays fixed at the base checkpoint's values. A smaller learning rate and far fewer epochs than base training are typically enough:
+
+   ```bash
+   credit submit --cluster derecho -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --nodes 1
+   ```
+
+### Generating an ensemble at inference time
+
+Once fine-tuned, an SDL checkpoint samples a new `z` on every forward pass, so re-running rollout against the same checkpoint gives a different member each time. There are two distinct ways to build an ensemble in CREDIT, and it's worth being clear about which one you're doing:
+
+- **Perturbed-IC ensemble from a deterministic model.** Run a plain (non-SDL) trained model N times, each from a slightly perturbed initial condition (random or bred-vector perturbations). The stochasticity comes entirely from the IC, not the model.
+- **Fixed-IC ensemble from an SDL model.** Run the SDL checkpoint N times from the *same* initial condition. The stochasticity comes from the noise sampled inside the model at each call.
+
+These aren't mutually exclusive — you can perturb the IC and use an SDL model in the same rollout — but each is sufficient on its own to produce an ensemble, and conflating them makes the ensemble's uncertainty harder to interpret.
+
+### Scaling across GPUs
+
+`ensemble_size` in the trainer config controls how many stochastic samples are drawn per input during training. Two placements of that ensemble matter for multi-GPU runs:
+
+- **Local**, one ensemble per GPU: each GPU independently draws `ensemble_size` samples and computes its own ensemble-aware loss; the loss is then averaged across GPUs the normal DDP way. Total compute scales linearly with GPU count, with no extra cross-GPU communication for the ensemble itself.
+- **Distributed**, one ensemble spread across GPUs: each data-parallel rank produces one member from the same batch, so `ensemble_size` equals the number of data-parallel GPUs, and the loss is computed jointly across ranks (`ring-crps` in `credit/losses/crps.py`; see below). Per-GPU batch size stays fixed regardless of ensemble size, at the cost of the extra communication.
 
 ### Gen 2: ring-CRPS ensemble training
 
@@ -115,34 +136,6 @@ deterministic `validation_loss` (it warns if one is missing). See
 Running several members on each GPU (a local `ensemble_size` per rank) is not
 supported with ring-CRPS. Use the local ensemble approach with an in-tensor CRPS
 loss instead.
-
-   ```bash
-   credit check -c config/gen_2/examples/wxformer_sdl.yml
-   ```
-
-   This instantiates the model with your config, which is enough to catch an architecture mismatch against the checkpoint before you burn a GPU allocation finding out.
-
-6. **Train.** Only the noise-injection layers have `requires_grad=True`; everything else stays fixed at the base checkpoint's values. A smaller learning rate and far fewer epochs than base training are typically enough:
-
-   ```bash
-   credit submit --cluster derecho -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --nodes 1
-   ```
-
-### Generating an ensemble at inference time
-
-Once fine-tuned, an SDL checkpoint samples a new `z` on every forward pass, so re-running rollout against the same checkpoint gives a different member each time. There are two distinct ways to build an ensemble in CREDIT, and it's worth being clear about which one you're doing:
-
-- **Perturbed-IC ensemble from a deterministic model.** Run a plain (non-SDL) trained model N times, each from a slightly perturbed initial condition (random or bred-vector perturbations). The stochasticity comes entirely from the IC, not the model.
-- **Fixed-IC ensemble from an SDL model.** Run the SDL checkpoint N times from the *same* initial condition. The stochasticity comes from the noise sampled inside the model at each call.
-
-These aren't mutually exclusive — you can perturb the IC and use an SDL model in the same rollout — but each is sufficient on its own to produce an ensemble, and conflating them makes the ensemble's uncertainty harder to interpret.
-
-### Scaling across GPUs
-
-`ensemble_size` in the trainer config controls how many stochastic samples are drawn per input during training. Two placements of that ensemble matter for multi-GPU runs:
-
-- **Local**, one ensemble per GPU: each GPU independently draws `ensemble_size` samples and computes its own ensemble-aware loss; the loss is then averaged across GPUs the normal DDP way. Total compute scales linearly with GPU count, with no extra cross-GPU communication for the ensemble itself.
-- **Distributed**, one ensemble spread across GPUs: `ensemble_size × num_gpus` becomes the effective ensemble seen by the loss, computed jointly across ranks (see `ring-crps` in `credit/losses/crps.py`, which shares batches across the data-parallel group specifically for this). Per-GPU batch size stays fixed regardless of ensemble size, at the cost of the extra communication.
 
 ## Diffusion-Based Ensembles
 
