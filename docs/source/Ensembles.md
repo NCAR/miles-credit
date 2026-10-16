@@ -7,9 +7,9 @@ The CREDIT framework implements two primary approaches for generating probabilis
 CREDIT supports two primary training approaches for ensemble generation:
 
 1. **Fine-tuning approach**: Pre-trained deterministic models fine-tuned with noise-injection layers using CRPS loss
-2. **Diffusion training**: Training from scratch with diffusion models using latitude-weighted MSE loss
+2. **Diffusion training** (gen 1 only): Training from scratch with diffusion models using latitude-weighted MSE loss
 
-The fine-tuning approach is currently preferred due to computational efficiency and resource requirements.
+The **fine-tuning approach** is currently preferred due to computational efficiency and resource requirements.
 
 The rest of this page walks through the noise-injection approach in detail, called **SDL** (Stochastic Decomposition Layer) elsewhere in the codebase and docs — `crossformer-ensemble`/`crossformer-style` in `model.type`, `StochasticDecompositionLayer` in the code.
 
@@ -31,7 +31,8 @@ Because the base model is frozen and only these small layers train, fine-tuning 
 ### Fine-tuning SDL on a trained wxformer checkpoint
 
 Starting point: you already have a trained `wxformer` checkpoint (`model_checkpoint.pt` or `checkpoint.pt` under some `save_loc`). A full worked example is at
-[`config/gen_2/examples/wxformer_sdl.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/wxformer_sdl.yml).
+[`config/gen_2/examples/wxformer_sdl.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/wxformer_sdl.yml),
+derived from the gen2 starter config `config/gen_2/examples/example-v2026.2.yml`.
 
 1. **Copy the base checkpoint into a new `save_loc`.** `load_weights: True` looks for a checkpoint inside the config's own `save_loc`, not somewhere else — it doesn't have a separate "warm start from" path. Use a directory different from the base run's so you don't overwrite it:
 
@@ -41,7 +42,7 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
       /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl/checkpoint.pt
    ```
 
-2. **Copy the base model's architecture into the SDL config exactly** (`image_height`/`image_width`, `levels`, `channels`, `surface_channels`, `dim`/`depth`, window sizes, `padding_conf`, everything under `model:` the base config had). SDL loads the checkpoint by matching parameter names and shapes; a mismatch either fails to load or loads weights into the wrong place.
+2. **Start from the config that trained the base model.** Copy it whole, then make the changes in steps 3–5. Leave the `model:` architecture keys untouched: SDL loads the checkpoint by matching parameter names and shapes, so any change there fails to load.
 
 3. **Set `model.type: "crossformer-ensemble"`** and add the SDL-specific keys on top of the base architecture:
 
@@ -59,7 +60,20 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
 
 4. **Set `trainer.load_weights: True`**, and `load_optimizer`/`load_scaler`/`load_scheduler: False` — the trainable parameter set is new and much smaller, so start its optimizer state fresh rather than resuming the base model's.
 
-5. **Validate before submitting:**
+5. **Switch the loss to ring-CRPS** and set `trainer.ensemble_size` to the number of data-parallel GPUs you will train on. A deterministic loss such as `mse` scores one noisy sample against the target and so trains the noise toward zero, collapsing the ensemble spread. CRPS rewards a spread that matches the error instead (details in [Gen 2: ring-CRPS ensemble training](#gen-2-ring-crps-ensemble-training) below):
+
+   ```yaml
+   trainer:
+     ensemble_size: 4              # = --gpus x --nodes
+   loss:
+     type: base
+     args:
+       training_loss: "ring-crps"
+       validation_loss: "mae"      # validation shards data across ranks, so keep it deterministic
+       # ... var_weighting, scaler_path, latitude weights as in the base config ...
+   ```
+
+6. **Validate before submitting:**
 
    ```bash
    credit check -c config/gen_2/examples/wxformer_sdl.yml
@@ -67,7 +81,7 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
 
    This instantiates the model with your config, which is enough to catch an architecture mismatch against the checkpoint before you burn a GPU allocation finding out.
 
-6. **Train.** Only the noise-injection layers have `requires_grad=True`; everything else stays fixed at the base checkpoint's values. A smaller learning rate and far fewer epochs than base training are typically enough:
+7. **Train** on exactly `ensemble_size` GPUs. Only the noise-injection layers have `requires_grad=True`; everything else stays fixed at the base checkpoint's values. A smaller learning rate and far fewer epochs than base training are typically enough:
 
    ```bash
    credit submit --cluster derecho -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --nodes 1
@@ -75,7 +89,31 @@ Starting point: you already have a trained `wxformer` checkpoint (`model_checkpo
 
 ### Generating an ensemble at inference time
 
-Once fine-tuned, an SDL checkpoint samples a new `z` on every forward pass, so re-running rollout against the same checkpoint gives a different member each time. There are two distinct ways to build an ensemble in CREDIT, and it's worth being clear about which one you're doing:
+An SDL checkpoint samples new noise on every forward pass, but `credit rollout` seeds every random number generator from the config's top-level `seed`. Re-running rollout with the same config therefore reproduces the **same** member. To build an N-member ensemble, run rollout once per member, giving each run its own `seed` and output directory:
+
+1. **Point the config at the fine-tuned run.** Rollout loads the checkpoint from `save_loc`, so keep the training config's `save_loc` and `model:` block.
+
+2. **Write one config per member** with a distinct `seed` and `inference.save_forecast`, then roll each one out:
+
+   ```bash
+   for m in 0 1 2 3 4; do
+     sed -e "s/^seed: .*/seed: $((1000 + m))/" \
+         -e "s|^\(\s*save_forecast:\).*|\1 '/glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl_forecast/member_$m'|" \
+         config/gen_2/examples/wxformer_sdl.yml > wxformer_sdl_member_$m.yml
+     credit rollout -c wxformer_sdl_member_$m.yml
+   done
+   ```
+
+3. **Optionally rescale the noise** with `inference.noise_scale` (or `--noise-scale` when calling `credit/applications/rollout_gen2.py` directly). It multiplies every SDL `noise_factor`: `1.0` (or unset) keeps the trained amplitude, `0.0` gives the deterministic mean member, and values in between shrink the spread.
+
+   ```yaml
+   inference:
+     noise_scale: 1.0
+   ```
+
+The init times, forecast length and output format come from the usual `inference:` block (see [Inference](Inference.md)); only `seed` and `save_forecast` need to differ between members.
+
+There are two distinct ways to build an ensemble in CREDIT, and it's worth being clear about which one you're doing:
 
 - **Perturbed-IC ensemble from a deterministic model.** Run a plain (non-SDL) trained model N times, each from a slightly perturbed initial condition (random or bred-vector perturbations). The stochasticity comes entirely from the IC, not the model.
 - **Fixed-IC ensemble from an SDL model.** Run the SDL checkpoint N times from the *same* initial condition. The stochasticity comes from the noise sampled inside the model at each call.
@@ -138,6 +176,12 @@ supported with ring-CRPS. Use the local ensemble approach with an in-tensor CRPS
 loss instead.
 
 ## Diffusion-Based Ensembles
+
+```{note}
+Diffusion training is gen 1 only: it uses the gen 1 `era5-diffusion` trainer and has no gen 2 config. Working configs are in
+[`config/gen_1/applications/diffusion/`](https://github.com/NCAR/miles-credit/tree/main/config/gen_1/applications/diffusion).
+For new gen 2 work, use SDL (above).
+```
 
 ### Configuration
 

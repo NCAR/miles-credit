@@ -4,19 +4,23 @@
 #
 # SDL (StochasticDecompositionLayer) does not train a model from scratch. It wraps a
 # trained wxformer's encoder/decoder with a handful of small noise-injection layers,
-# freezes every pretrained weight, and only trains the new layers. See
-# docs/source/SDL.md before running this — in particular, the checkpoint you fine-tune
+# freezes every pretrained weight, and only trains the new layers.
+#
+# Derived from config/gen_2/examples/example-v2026.2.yml: data, preblocks,
+# postblocks and the model architecture are unchanged; model.type, the SDL keys
+# under model:, trainer.load_weights/ensemble_size and the ring-crps loss are new.
+# See docs/source/Ensembles.md before running this — in particular, the checkpoint you fine-tune
 # from has to be copied into save_loc below first; load_weights alone will not find it.
 #
 # Quick-start, once the checkpoint is in place:
 #
 #   credit check -c config/gen_2/examples/wxformer_sdl.yml
-#   credit submit --cluster casper -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --chain 4
+#   credit submit --cluster derecho -c config/gen_2/examples/wxformer_sdl.yml --gpus 4 --nodes 1
 # --------------------------------------------------------------------------------------------------------------------- #
 
 # ---- USER SETTINGS: output directory ---- #
 # A NEW directory, not the base model's save_loc. Copy the base checkpoint here
-# before the first run (see docs/source/SDL.md):
+# before the first run (see docs/source/Ensembles.md):
 #   mkdir -p /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl
 #   cp /glade/derecho/scratch/$USER/CREDIT_runs/starter_gen2/checkpoint.pt \
 #      /glade/derecho/scratch/$USER/CREDIT_runs/wxformer_sdl/checkpoint.pt
@@ -115,6 +119,12 @@ trainer:
 
   activation_checkpoint: True
 
+  # ring-crps (loss below) trains one ensemble member per data-parallel GPU:
+  # every rank sees the same batch, and per-rank RNG seeds give each member
+  # different SDL noise. Must equal the number of data-parallel GPUs
+  # (--gpus x --nodes), so change both together.
+  ensemble_size: 4
+
   # Load the base checkpoint's weights (strict=False — the new noise layers
   # aren't in it and start from their default init). Everything else starts
   # fresh: a new optimizer/scheduler for the (much smaller) set of trainable
@@ -141,7 +151,7 @@ trainer:
   train_batch_size: 8
   valid_batch_size: 8
 
-  batches_per_epoch: 5
+  batches_per_epoch: 1000   # 0 = use full dataset each epoch
   valid_batches_per_epoch: 100
   stopping_patience: 999
 
@@ -226,7 +236,7 @@ postblocks:
 # wrong shapes. Copy these values from the base model's config, don't retype
 # them from memory.
 model:
-  type: "crossformer-ensemble"  # SDL model class (CrossFormerWithNoise); see docs/source/SDL.md
+  type: "crossformer-ensemble"  # SDL model class (CrossFormerWithNoise); see docs/source/Ensembles.md
   frames: 1
   image_height: 181
   image_width: 360
@@ -269,21 +279,23 @@ model:
   freeze: True                  # freeze every pretrained weight; train only the noise layers
   encoder_noise: True           # inject noise in the encoder as well as the decoder
   noise_latent_dim: 128         # dimensionality of the sampled noise vector z
-  encoder_noise_factor: 0.05    # initial (learnable) scale of encoder noise injection
-  decoder_noise_factor: 0.275   # initial (learnable) scale of decoder noise injection
+  encoder_noise_factor: 0.05    # fixed (not learned) scale of encoder noise injection
+  decoder_noise_factor: 0.275   # fixed (not learned) scale of decoder noise injection
   correlated: False             # True: one z per forward pass, shared across all injection points
 
 
 # ---- Loss ---- #
-# Same as the base model. A single stochastic sample per batch is scored
-# against the same deterministic target here (mse); see docs/source/SDL.md
-# for how to move to an ensemble-aware loss (e.g. ring-crps) once you're
-# generating multiple members per init at rollout/inference time.
+# ring-crps: the fair CRPS across the ensemble_size members, one per
+# data-parallel rank. A deterministic loss (e.g. mse) on a single stochastic
+# sample would instead train the noise toward zero and collapse the spread.
+# Validation keeps data-parallel sharding (ranks hold different samples), so
+# validate with a deterministic loss. See docs/source/Losses.md.
 loss:
   type: base
   args:
-    training_loss: "mse"
+    training_loss: "ring-crps"
     base_loss_parameters: {}
+    validation_loss: "mae"
 
     var_weighting: "inverse_variance"
     scaler_path: '/glade/campaign/cisl/aiml/credit/credit_scalers/ERA5_mlevel_1deg_6h_bridgescaler_pre.json'
@@ -297,9 +309,12 @@ loss:
 
 
 # ---- Inference (used by rollout_gen2.py, not training) ---- #
-# Each rollout call samples new noise, so re-running inference against the
-# same checkpoint gives a different ensemble member every time — that's the
-# point. See docs/source/SDL.md for generating a full ensemble from one config.
+# Each forward pass samples new SDL noise, but rollout seeds every RNG from the
+# top-level `seed`, so re-running with the same config reproduces the same
+# member. For an N-member ensemble, run rollout N times with a different `seed`
+# and --save-dir each time; noise_scale (or --noise-scale) rescales the trained
+# noise amplitude (0.0 = deterministic mean member). See docs/source/Ensembles.md.
+#   noise_scale: 1.0
 inference:
   run_mode: batch
   mode: ddp
@@ -330,7 +345,7 @@ pbs: # derecho
   project: "NAML0001"
   job_name: "wxformer_sdl"
   walltime: "04:00:00"   # fine-tuning is much shorter than base training
-  nodes: 8
+  nodes: 1               # 1 node x 4 GPUs = trainer.ensemble_size
   ncpus: 64
   ngpus: 4
   mem: '480GB'
