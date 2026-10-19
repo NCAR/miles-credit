@@ -272,6 +272,8 @@ class Trainer(BaseTrainer):
                         era5_static = batch_era5.get("static", None)
                         if era5_static is not None and era5_static.numel() > 0:
                             era5_static = era5_static.to(self.device)
+                            if ensemble_size > 1:
+                                era5_static = torch.repeat_interleave(era5_static, ensemble_size, 0)
                         else:
                             era5_static = None
 
@@ -304,6 +306,8 @@ class Trainer(BaseTrainer):
 
                     if "temporal_forcing_10m" in batch_era5:
                         tf = batch_era5["temporal_forcing_10m"].to(self.device)
+                        if ensemble_size > 1:
+                            tf = torch.repeat_interleave(tf, ensemble_size, 0)
                         concat_x_list.append(tf)  # already native GOES resolution, no crop needed
 
                     # x is now 35 channels at native GOES resolution (1003×923).
@@ -665,6 +669,8 @@ class Trainer(BaseTrainer):
                             era5_static = batch_era5.get("static", None)
                             if era5_static is not None and era5_static.numel() > 0:
                                 era5_static = era5_static.to(self.device)
+                                if ensemble_size > 1:
+                                    era5_static = torch.repeat_interleave(era5_static, ensemble_size, 0)
                             else:
                                 era5_static = None
 
@@ -694,6 +700,8 @@ class Trainer(BaseTrainer):
 
                         if "temporal_forcing_10m" in batch_era5:
                             tf = batch_era5["temporal_forcing_10m"].to(self.device)
+                            if ensemble_size > 1:
+                                tf = torch.repeat_interleave(tf, ensemble_size, 0)
                             concat_x_list.append(tf)  # already native GOES resolution, no crop needed
 
                         # x is now 35 channels at native GOES resolution (1003×923).

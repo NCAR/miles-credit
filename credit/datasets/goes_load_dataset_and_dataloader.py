@@ -268,10 +268,17 @@ def generate_rollout_sampling_modes(dataset, compute_metrics=False):
     return ["init"] + ["forcing"] * (num_forecast_steps - 1) + ["stop"]
 
 
-def load_verification_dataset(conf):
+def load_verification_dataset(conf, verif_conf):
     logger.info("loading a GOES 10km dataset for evaluation")
-
+    
     data_config = conf["data"]
+    if "goes_zarr_file" in verif_conf.keys():
+        data_config["save_loc"] = verif_conf["goes_zarr_file"]
+
+    time_config = {
+        "time_tol": pd.Timedelta(verif_conf["time_tol"])
+    }
+
     padding_conf = conf["model"].get("padding_conf", {})
     if padding_conf:
         padding = not padding_conf["activate"] # opposite of what the model does

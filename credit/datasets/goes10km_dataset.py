@@ -129,7 +129,9 @@ class GOES10kmDataset(Dataset):
         _t = time.time()
         _diag(f"opening metadata-only dataset (chunks=None) from {ds_path}")
         _meta_ds = xr.open_zarr(ds_path, chunks=None)
-        _meta_ds = _meta_ds.drop_duplicates(dim="t").sortby("t")
+        _mt = _meta_ds.t.values
+        if not np.all(_mt[:-1] < _mt[1:]):
+            _meta_ds = _meta_ds.drop_duplicates(dim="t").sortby("t")
         _diag(f"metadata dataset opened and sorted in {time.time()-_t:.2f}s")
 
         self.era5dataset = era5dataset
@@ -379,7 +381,67 @@ class GOES10kmDataset(Dataset):
         self.init_times = self.init_times.sel(t=rollout_init_times, method="nearest",
                                               tolerance=pd.Timedelta(*time_tol))
 
+
     def _generate_valid_init_times(self, valid_init_filepath, ds: xr.Dataset):
+        # due to missing data, need to have a different list of valid init times
+        # ds is passed explicitly (from _meta_ds in __init__) so this method
+        # never reads from self.ds, which is None until worker-side lazy open.
+
+        # Known-bad times (impossible IR domain means, excessive NaN). Loaded here,
+        # ahead of the closure, so a bad time disqualifies a window wherever it
+        # appears — the post-loop isin() filter only ever caught the init time
+        # itself, leaving bad fields usable as forecast targets.
+        nan_file = join(self.valid_init_dir, "nan_times.nc")
+        if os.path.exists(nan_file):
+            bad_times = np.asarray(xr.open_dataarray(nan_file).t.values,
+                                dtype="datetime64[ns]")
+            logger.info(f"excluding {len(bad_times)} known-bad times from {nan_file}")
+        else:
+            bad_times = np.array([], dtype="datetime64[ns]")
+            logger.info(f"no {nan_file} — no times excluded")
+
+        def check_valid_forecast_times(t_init, timestep, num_forecast_steps):
+            time_tolerance = pd.Timedelta(3, "m")
+            target_times = [t_init.values + timestep * step
+                            for step in range(1, num_forecast_steps + 1)]
+            zarr_times = ds.t.sel(t=target_times, method="nearest")
+            within_tol = np.abs(zarr_times.values
+                                - np.array(target_times).astype(zarr_times.dtype)) < time_tolerance
+            if not all(within_tol):
+                return False
+
+            if len(bad_times):
+                # test the times that will actually be read (the nearest matches),
+                # plus the init time itself
+                window = np.concatenate([
+                    np.asarray([t_init.values], dtype="datetime64[ns]"),
+                    zarr_times.values.astype("datetime64[ns]")])
+                if np.abs(window[:, None] - bad_times[None, :]).min() < np.timedelta64(3, "m"):
+                    return False
+            return True
+
+        logger.info(f"generating valid init times and saving to {valid_init_filepath}. will take around 5 min")
+        _t_gen = time.time()
+        _diag("_generate_valid_init_times loop START")
+
+        valid_times = []
+        for i, t in enumerate(ds.t):
+            if i % 10000 == 0 and i > 0:
+                _diag(f"_generate_valid_init_times progress: {i} timestamps checked, {len(valid_times)} valid so far, elapsed {time.time()-_t_gen:.0f}s")
+            if check_valid_forecast_times(t, self.timestep, self.num_forecast_steps):
+                valid_times.append(t.values)
+
+        _diag(f"_generate_valid_init_times loop done in {time.time()-_t_gen:.2f}s  n_valid={len(valid_times)}")
+
+        valid_times_da = xr.DataArray(valid_times, coords={"t": valid_times})
+
+        os.makedirs(self.valid_init_dir, exist_ok=True)
+        valid_times_da.to_netcdf(valid_init_filepath)
+        logger.info(f"wrote valid init times to {valid_init_filepath}")
+
+        return valid_times_da
+
+    '''def _generate_valid_init_times(self, valid_init_filepath, ds: xr.Dataset):
         # due to missing data, need to have a different list of valid init times
         # ds is passed explicitly (from _meta_ds in __init__) so this method
         # never reads from self.ds, which is None until worker-side lazy open.
@@ -416,7 +478,7 @@ class GOES10kmDataset(Dataset):
         valid_times_da.to_netcdf(valid_init_filepath)
         logger.info(f"wrote valid init times to {valid_init_filepath}")
 
-        return valid_times_da
+        return valid_times_da'''
 
     def _timestamps(self, ds: xr.Dataset):
         # grab or compute valid init times across whole dataset, due to missing data
@@ -503,6 +565,30 @@ class GOES10kmDataset(Dataset):
         # 3. Normalize
         return (da - mean_vals) / std_vals
 
+    # Planck floor values measured from frames 144521 and 139327. np.clip(Rad, 1e-8,
+    # None) in the download script pushes non-positive radiances through the Planck
+    # conversion; each IR channel emerges pinned at its own constant rather than NaN.
+    # A partially floored scan has a plausible mean and zero NaN, so nothing else sees it.
+    ABI_FLOOR = {7: 120.35, 8: 138.05, 9: 137.70, 10: 126.91, 11: 60.02,
+                 12: 53.55, 13: 89.62, 14: 96.19, 15: 42.96, 16: 92.70}
+
+    def _mask_abi_floor(self, da, time_str, tol=0.01, warn_frac=0.02):
+        """Turn floor-pinned pixels into NaN so _nanfill_ABI repairs them."""
+        vals = da.values
+        for i, ch in enumerate(np.atleast_1d(da.channel.values)):
+            f = self.ABI_FLOOR.get(int(ch))
+            if f is None:
+                continue
+            m = np.abs(vals[i] - f) < tol
+            frac = float(m.mean())
+            if frac > 0:
+                vals[i][m] = np.nan
+                if frac > warn_frac:
+                    logger.warning(
+                        f"{time_str} C{int(ch):02d}: {frac:.2%} of pixels at the Planck "
+                        f"floor ({f} K) — masked to NaN for nanfill")
+        return da
+
     def _nanfill_ABI(self, da):
         if self.evaluate:
             nan_fraction = da.isnull().mean()
@@ -532,7 +618,9 @@ class GOES10kmDataset(Dataset):
             _diag(f"lazy open: opening {self.ds_path} with chunks=None in this worker")
             _t = time.time()
             self.ds = xr.open_zarr(self.ds_path, chunks=None)
-            self.ds = self.ds.drop_duplicates(dim="t").sortby("t")
+            _t_vals = self.ds.t.values
+            if not np.all(_t_vals[:-1] < _t_vals[1:]):
+                self.ds = self.ds.drop_duplicates(dim="t").sortby("t")
             _diag(f"lazy open: done in {time.time()-_t:.2f}s")
 
         ts, mode = args
@@ -552,6 +640,9 @@ class GOES10kmDataset(Dataset):
         if mode != "forcing":  # draw goes if mode is not forcing
             # DYNAMIC FIX: Slice ONLY the channels requested in config
             da = ds["BT_or_R"].sel(channel=self.active_channels).copy()
+
+            # must precede log scaling and normalisation — floor values are in K
+            da = self._mask_abi_floor(da, time_str)
 
             # FIX: Apply log norm to the visible reflective channels present
             if self.log_normal_scaling:  # channels is the first axis
