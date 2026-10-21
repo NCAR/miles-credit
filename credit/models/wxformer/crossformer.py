@@ -3,6 +3,7 @@ import logging
 import re
 import torch.nn.functional as F
 
+from typing import Optional
 from torch import nn, einsum
 from einops import rearrange
 from einops.layers.torch import Rearrange
@@ -439,7 +440,17 @@ class Attention(nn.Module):
                 f"Choose a TP degree that divides {instance.heads}, or increase dim_head."
             )
 
-    def __init__(self, dim, attn_type, window_size, dim_head=32, dropout=0.0, tp_col="to_qkv", tp_row="to_out"):
+    def __init__(
+        self,
+        dim,
+        attn_type,
+        window_size,
+        dim_head=32,
+        dropout=0.0,
+        tp_col="to_qkv",
+        tp_row="to_out",
+        rope: Optional[nn.Module] = None,
+    ):
         super().__init__()
         # Tensor-parallel opt-in: to_qkv is column-parallel (output channels
         # sharded), to_out is row-parallel (input sharded + all_reduce).
@@ -461,6 +472,9 @@ class Attention(nn.Module):
 
         self.attn_type = attn_type
         self.window_size = window_size
+        # Optional rotary position embedding (e.g. GnomonicRoPE), applied to q/k
+        # before windowing. None (default) leaves attention exactly as before.
+        self.rope = rope
 
         self.norm = LayerNorm(dim)
 
@@ -484,6 +498,18 @@ class Attention(nn.Module):
 
         self.register_buffer("rel_pos_indices", rel_pos_indices, persistent=False)
 
+    def _apply_rope(self, q, k, heads):
+        """Rotate q, k (each (b, inner_dim, h, w), full un-windowed grid) via self.rope."""
+
+        def to_rope_shape(t):
+            return rearrange(t, "b (h d) x y -> b h x y d", h=heads)
+
+        def from_rope_shape(t):
+            return rearrange(t, "b h x y d -> b (h d) x y")
+
+        q_r, k_r = self.rope(to_rope_shape(q), to_rope_shape(k))
+        return from_rope_shape(q_r), from_rope_shape(k_r)
+
     def forward(self, x):
         """
         Forward pass of the Attention module.
@@ -505,16 +531,27 @@ class Attention(nn.Module):
 
         x = self.norm(x)
 
+        # queries / keys / values, computed on the FULL (un-windowed) grid.
+        # to_qkv is a pointwise (1x1) conv, so computing it here vs. after the
+        # windowing rearrange below is exactly equivalent -- this ordering only
+        # matters so rope (if enabled) can see each token's absolute position
+        # on the face before windowing splits it into (batch*windows) groups.
+
+        q, k, v = self.to_qkv(x).chunk(3, dim=1)
+
+        if self.rope is not None:
+            q, k = self._apply_rope(q, k, heads)
+
         # rearrange for short or long distance attention
 
         if self.attn_type == "short":
-            x = rearrange(x, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            q = rearrange(q, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            k = rearrange(k, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
+            v = rearrange(v, "b d (h s1) (w s2) -> (b h w) d s1 s2", s1=wsz, s2=wsz)
         elif self.attn_type == "long":
-            x = rearrange(x, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
-
-        # queries / keys / values
-
-        q, k, v = self.to_qkv(x).chunk(3, dim=1)
+            q = rearrange(q, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
+            k = rearrange(k, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
+            v = rearrange(v, "b d (l1 h) (l2 w) -> (b h w) d l1 l2", l1=wsz, l2=wsz)
 
         # split heads
 
@@ -576,12 +613,22 @@ class Transformer(nn.Module):
         dim_head=32,
         attn_dropout=0.0,
         ff_dropout=0.0,
+        use_rope: bool = False,
         fsdp2_shard=True,
     ):
         super().__init__()
         # FSDP2 per-block sharding / activation-checkpointing opt-in
         self._fsdp2_shard = fsdp2_shard
         self.layers = nn.ModuleList([])
+
+        # One shared GnomonicRoPE per Transformer (dim_head is constant across
+        # its layers); off by default so existing configs/checkpoints are
+        # unaffected. See credit.models.wxformer.cube_rope.
+        rope = None
+        if use_rope:
+            from credit.models.wxformer.cube_rope import GnomonicRoPE
+
+            rope = GnomonicRoPE(dim_head=dim_head)
 
         for _ in range(depth):
             self.layers.append(
@@ -593,6 +640,7 @@ class Transformer(nn.Module):
                             window_size=local_window_size,
                             dim_head=dim_head,
                             dropout=attn_dropout,
+                            rope=rope,
                         ),
                         FeedForward(dim, dropout=ff_dropout),
                         Attention(
@@ -601,6 +649,7 @@ class Transformer(nn.Module):
                             window_size=global_window_size,
                             dim_head=dim_head,
                             dropout=attn_dropout,
+                            rope=rope,
                         ),
                         FeedForward(dim, dropout=ff_dropout),
                     ]

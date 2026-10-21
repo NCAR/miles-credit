@@ -459,6 +459,26 @@ def _fit_and_save_preblock_scaler(path, batch, spatial_variables):
     return block
 
 
+def test_preblock_scaler_defaults_channels_last_false(tmp_path):
+    """A fresh scaler fit without an explicit scaler_params must not fall back to
+    bridgescaler's own channels_last=True default — CREDIT tensors are channels-first,
+    so that default silently fits statistics over the spatial axis instead of levels."""
+    path = str(tmp_path / "scaler.json")
+    block = BridgeScalerTransform(scaler_path=path, variables=[], method="transform")
+    assert block.scaler_params["channels_last"] is False
+    assert block.scaler_template.channels_last is False
+
+
+def test_preblock_scaler_respects_explicit_channels_last(tmp_path):
+    """An explicit scaler_params override is still honored."""
+    path = str(tmp_path / "scaler.json")
+    block = BridgeScalerTransform(
+        scaler_path=path, variables=[], method="transform", scaler_params={"channels_last": True}
+    )
+    assert block.scaler_params["channels_last"] is True
+    assert block.scaler_template.channels_last is True
+
+
 def test_preblock_scaler_spatial_round_trip(tmp_path):
     """A spatial variable transforms and inverse-transforms back to its original
     values and shape, alongside an ordinary per-level variable."""
@@ -820,6 +840,15 @@ class TestBuildPostblocks:
         from credit.postblock import _POSTBLOCK_REGISTRY
 
         assert _POSTBLOCK_REGISTRY["global_energy_fixer_updown"] is _POSTBLOCK_REGISTRY["global_energy_fixer"]
+
+    def test_global_energy_fixer_net_registered(self):
+        """global_energy_fixer_net resolves to the net-flux class, distinct from the up/down one."""
+        from credit.postblock import _load_postblock_entry
+        from credit.postblock.conservation import GlobalNetEnergyFixer, GlobalEnergyFixerUpDown
+
+        assert _load_postblock_entry("global_energy_fixer_net") is GlobalNetEnergyFixer
+        assert _load_postblock_entry("global_energy_fixer_updown") is GlobalEnergyFixerUpDown
+        assert GlobalNetEnergyFixer is not GlobalEnergyFixerUpDown
 
 
 # ---------------------------------------------------------------------------

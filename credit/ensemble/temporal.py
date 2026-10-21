@@ -43,8 +43,8 @@ class TemporalNoise:
         self.temporal_correlation = temporal_correlation
         self.perturbation_std = perturbation_std
         self.hemispheric_rescale = hemi_rescale if hemispheric_rescale else False
-        if self.hemispheric_rescale is not None:
-            if not os.path.exists(terrain_file) or terrain_file is None:
+        if hemispheric_rescale:
+            if terrain_file is None or not os.path.exists(terrain_file):
                 raise FileNotFoundError(f"Terrain file {terrain_file} not found")
             latlons = xr.open_dataset(terrain_file).load()
             self.latitudes = torch.tensor(latlons.latitude.values)
@@ -102,7 +102,7 @@ class TemporalNoise:
             # AR(1) process: δ_t = ρ * δ_{t-1} + ε_t
             current_perturbation = self.temporal_correlation * previous_perturbation + white_noise
 
-        if self.hemispheric_rescale is not None:
+        if self.hemispheric_rescale:
             current_perturbation = self.hemispheric_rescale(
                 current_perturbation, self.latitudes.to(current_perturbation.device)
             )

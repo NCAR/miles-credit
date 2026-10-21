@@ -33,6 +33,7 @@ from credit.metrics import LatWeightedMetrics, LatWeightedMetricsClimatology
 
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
+from credit.models.wxformer.stochastic_decomposition_layer import scale_sdl_noise
 from credit.parser import credit_main_parser, predict_data_check
 from credit.pbs import launch_script, launch_script_mpi
 from credit.pol_lapdiff_filt import Diffusion_and_Pole_Filter
@@ -198,6 +199,9 @@ def predict(rank, world_size, conf, backend=None, p=None):
         model = load_model_state(conf, model, device)
 
     model.eval()
+
+    # Apply noise_scale override for SDL ensemble models.
+    scale_sdl_noise(model, conf["predict"].get("noise_scale"))
 
     # Set up metrics and containers
     if "climatology" in conf["predict"]:

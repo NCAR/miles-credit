@@ -192,6 +192,33 @@ class TestLoadCustomObjects:
         load_custom_objects(conf)
         assert "RegTestMetric" in _METRIC_REGISTRY
 
+    def test_registers_trainer(self, tmp_path, monkeypatch):
+        """A trainer entry is imported, registered, and resolved by load_trainer."""
+        _make_installable_module(
+            tmp_path,
+            "reg_test_trainer_pkg",
+            "from credit.trainers.trainer_gen2 import TrainerERA5Gen2\n"
+            "class RegTestTrainer(TrainerERA5Gen2):\n"
+            "    pass\n",
+        )
+
+        import credit.trainers as trainers
+        from credit.registry import load_custom_objects
+
+        monkeypatch.setattr(trainers, "_TRAINER_REGISTRY", dict(trainers._TRAINER_REGISTRY))
+        conf = {
+            "trainer": {"type": "RegTestTrainer"},
+            "custom_objects": {
+                "RegTestTrainer": {
+                    "object_type": "trainer",
+                    "module_path": "reg_test_trainer_pkg",
+                }
+            },
+        }
+        load_custom_objects(conf)
+        assert "RegTestTrainer" in trainers._TRAINER_REGISTRY
+        assert trainers.load_trainer(conf).__name__ == "RegTestTrainer"
+
     def test_yaml_key_is_registry_key(self, tmp_path):
         """The YAML key, not the class name, is used as the registry key.
 
@@ -631,6 +658,77 @@ class TestRegisterMetric:
         metric = load_metric(conf)
         assert isinstance(metric, BaseCombinedMetric)
         assert "unit_test_metric_load" in metric.metric_modules
+
+
+# ---------------------------------------------------------------------------
+# register_trainer
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterTrainer:
+    @pytest.fixture(autouse=True)
+    def _isolated_registry(self, monkeypatch):
+        """Give each test a copy of the trainer registry so registrations don't leak."""
+        import credit.trainers as trainers
+
+        monkeypatch.setattr(trainers, "_TRAINER_REGISTRY", dict(trainers._TRAINER_REGISTRY))
+
+    def test_decorator_registers_and_loads(self):
+        import credit.trainers as trainers
+        from credit.trainers import load_trainer, register_trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2
+
+        @register_trainer("unit_test_trainer")
+        class UnitTestTrainer(TrainerERA5Gen2):
+            pass
+
+        assert trainers._TRAINER_REGISTRY["unit_test_trainer"][0] is UnitTestTrainer
+        assert load_trainer({"trainer": {"type": "unit_test_trainer"}}) is UnitTestTrainer
+
+    def test_custom_message_logged(self, caplog):
+        from credit.trainers import load_trainer, register_trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2
+
+        @register_trainer("unit_test_trainer_msg", "Loading the unit test trainer")
+        class MsgTrainer(TrainerERA5Gen2):
+            pass
+
+        with caplog.at_level(logging.INFO, logger="credit.trainers"):
+            load_trainer({"trainer": {"type": "unit_test_trainer_msg"}})
+
+        assert "Loading the unit test trainer" in caplog.messages
+
+    def test_overwrite_warns(self, caplog):
+        from credit.trainers import register_trainer
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2
+
+        @register_trainer("unit_test_trainer_overwrite")
+        class V1(TrainerERA5Gen2):
+            pass
+
+        with caplog.at_level(logging.WARNING, logger="credit.trainers"):
+
+            @register_trainer("unit_test_trainer_overwrite")
+            class V2(TrainerERA5Gen2):
+                pass
+
+        assert any("unit_test_trainer_overwrite" in m for m in caplog.messages)
+
+    def test_wrong_base_raises(self):
+        """register_trainer raises TypeError when class does not inherit BaseTrainer."""
+        from credit.trainers import register_trainer
+
+        with pytest.raises(TypeError, match="BaseTrainer"):
+
+            @register_trainer("bad_trainer_direct")
+            class BadTrainer:
+                pass
+
+    def test_unknown_type_error_lists_available(self):
+        from credit.trainers import load_trainer
+
+        with pytest.raises(ValueError, match="era5-gen2"):
+            load_trainer({"trainer": {"type": "nonexistent-trainer-xyz"}})
 
 
 # ---------------------------------------------------------------------------
