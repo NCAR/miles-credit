@@ -1170,6 +1170,20 @@ class TestSubmitDryRun:
         out = capsys.readouterr().out
         assert "#PBS" in out
 
+    def test_relative_save_loc_gives_absolute_pbs_output(self, tmp_path, capsys, monkeypatch):
+        # PBS resolves a relative `-o` path against $HOME, not the submit dir
+        config_path = _make_minimal_conf(tmp_path, extra={"save_loc": "rel_save"})
+        monkeypatch.chdir(tmp_path)
+        args = _casper_args(config=config_path, dry_run=True, chain=1, torchrun="/usr/bin/torchrun")
+
+        with _inject_preflight(0.0):
+            cli._submit(args)
+
+        out_lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("#PBS -o ")]
+        assert out_lines
+        for ln in out_lines:
+            assert ln == f"#PBS -o {tmp_path / 'rel_save' / 'logs'}"
+
     def test_dry_run_derecho_prints_script(self, tmp_path, capsys):
         config_path = _make_minimal_conf(tmp_path)
         args = _derecho_args(config=config_path, dry_run=True, chain=1, nodes=1)
