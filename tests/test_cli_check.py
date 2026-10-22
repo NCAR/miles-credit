@@ -847,6 +847,48 @@ def test_scaler_stats_without_data_type_level(conf, tmp_path):
     assert len(msgs) == 1 and "channel/level: 1" in msgs[0], _text(rep)
 
 
+def _exp_transform_q(conf):
+    for name, key in (("exp", "y_processed"), ("exp_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "exp_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def _log_variance_warnings(rep):
+    return [f for f in rep.findings if f.severity == "warning" and f.where.endswith("var_weighting")]
+
+
+def test_log_variance_weight_small_spread_is_silent(conf, tmp_path):
+    """Surface-pressure-like log variances: first-order and lognormal agree."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [5.0, 6.0], [0.01, 0.02])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_log_variance_weight_large_spread_warns(conf, tmp_path):
+    """Humidity-like log variances (> 2 near the surface) make the weight unreliable."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "differ by" in found[0].message
+    assert "variable_weights" in found[0].fix
+
+
+def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    conf["loss"]["args"]["var_weighting"] = "none"
+    assert not _log_variance_warnings(_run(conf))
+
+
+def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
+    """A log-space loss scores in log units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    assert not _log_variance_warnings(_run(conf))
+
+
 # ===========================================================================
 # Gradient clipping
 # ===========================================================================
