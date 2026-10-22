@@ -434,7 +434,8 @@ update_learning_rate: False
 - **`True`** → Makes `learning_rate` the new base learning rate, e.g. to change it
   when resuming. With a scheduler, its base LR is rescaled and its position kept, so
   a warmup still starts from 0 on a fresh run; without one (or with `plateau`), the
-  optimizer LR is set directly.  
+  optimizer LR is set directly. With `cosine-annealing-restarts`, `learning_rate`
+  replaces the scheduler's `max_lr` (peak) and `min_lr` is kept.  
 
 ---
 
@@ -607,7 +608,9 @@ grad_max_norm: 'dynamic'
     gradient norm is clipped to `factor ×` an EMA of recent norms, so normal steps pass
     untouched and spikes (e.g. an outlier sample) are scaled back. Tune it with the
     optional `dynamic_grad_clip` block; its state is saved next to the checkpoint
-    (`grad_clip_state.json`) and resumed with `load_weights`.  
+    (`grad_clip_state.json`) and resumed with `load_weights`. The norm does not depend on
+    the GPU count, so the state carries over when a job resumes on more or fewer GPUs
+    (with tensor parallelism, a changed GPU count restarts the warmup instead).  
   - a number `> 0` → Fixed clipping to that global norm (e.g. `1.0`).  
   - `0` → No clipping.  
 

@@ -203,6 +203,15 @@ the surface, where it overestimates by an order of magnitude.) The conversion is
 logged at startup, and the same applies to metrics. Remove any `variable_weights`
 you added to hand-correct these variables' units, or they apply twice.
 
+The first-order estimate is reliable only while the log-space spread is small.
+`credit check` warns for each such variable where it and the lognormal moment
+differ by more than 3× (a log variance of about 0.9 or more); the variable's real
+physical variance, and so its weight, is then uncertain by at least that factor.
+It is worst for zero-inflated fields (precipitation, cloud water), where the
+first-order value can be orders of magnitude too small and the variable dominates
+the loss. The warning's fix gives the `variable_weights` multiplier that corrects
+the weight from a measured physical variance.
+
 ```yaml
 loss:
   type: base

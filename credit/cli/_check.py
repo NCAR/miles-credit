@@ -40,6 +40,9 @@ _DIAGNOSTIC_POSTBLOCKS = frozenset({"geopotential_diagnostic", "mslp_diagnostic"
 # Postblocks that change a variable's units.  Whatever runs on the prediction
 # must also run on the target twin or the loss compares mismatched units.
 _UNIT_POSTBLOCKS = frozenset({"bridgescaler_transform", "exp_transform", "square_transform"})
+# Lognormal / first-order physical-variance ratio above which an exp_transformed
+# variable's inverse-variance weight is flagged (3x ~ a log variance of 0.9).
+_LOG_VARIANCE_SPREAD_WARN = 3.0
 
 _GEN1_TRAINERS = frozenset({"era5", "era5-gen1", "era5-ensemble", "ensemble-gen1"})
 
@@ -1137,6 +1140,95 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
                 )
 
 
+def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
+    """Warn where an ``exp_transform``ed variable's inverse-variance weight is unreliable.
+
+    The scaler of a log-transformed variable holds its log-space mean ``m`` and
+    variance ``s2``; BaseLoss and the gen2 metrics turn them into a physical
+    variance with the first-order estimate ``exp(2m) * s2``
+    (``credit.losses.base._physical_variance_from_log``). With a small ``s2`` any
+    reasonable estimate agrees, but the lognormal moment exceeds the first-order
+    one by ``(exp(s2) - 1) * exp(s2) / s2`` (4.7x at ``s2 = 1``, 24x at 2). A
+    spread that wide means the variable's real physical variance, and so its
+    weight, is not pinned down by the scaler. Zero-inflated fields (precipitation,
+    cloud water) are the worst case: there the first-order estimate can be orders
+    of magnitude too small, so the variable dominates the loss.
+    """
+    import math
+
+    import torch
+
+    from credit.losses.base import (
+        _matching_exp_spec,
+        _physical_variance_from_log,
+        _scaler_channel_variance,
+        exp_transform_specs,
+    )
+
+    specs = exp_transform_specs(conf)
+    if not specs:
+        return
+    sections = {}  # scaler path -> sections that weight by it
+    for top in ("loss", "metrics"):
+        if top == "loss" and _get(conf, "loss", "type") != "base":
+            continue
+        if _get(conf, top, "args", "var_weighting", default="inverse_variance") not in (
+            "inverse_variance",
+            "learnable",
+        ):
+            continue
+        path = _get(conf, top, "args", "scaler_path")
+        if isinstance(path, str) and os.path.isfile(os.path.expandvars(path)):
+            sections.setdefault(os.path.expandvars(path), []).append(top)
+
+    for path, tops in sections.items():
+        try:
+            from bridgescaler import load_scaler_dict
+
+            target = load_scaler_dict(path)["target"]
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(f"{tops[0]}.args.scaler_path", f"Could not read scaler {path}: {type(exc).__name__}: {exc}")
+            continue
+        where = f"{tops[0]}.args.var_weighting"
+        users = " and ".join(tops)
+        for source_scalers in target.values():
+            for var_key, scaler in source_scalers.items():
+                spec = _matching_exp_spec(var_key, specs)
+                var = _scaler_channel_variance(scaler)
+                if spec is None or var is None or not torch.isfinite(var).all():
+                    continue
+                mean = getattr(scaler, "mean_x_", None)
+                if mean is None:
+                    rep.warn(
+                        where,
+                        f"'{var_key}' is exp_transformed back to physical units, but its scaler has no mean "
+                        f"to convert the log-space variance, so the {users} weight it with the log-space "
+                        "variance (orders of magnitude off).",
+                        fix=f"variable_weights:\n  {var_key}: <1 / physical variance>   # or var_weighting: manual",
+                    )
+                    continue
+                mean = torch.as_tensor(mean, dtype=torch.float64).flatten()
+                s2 = var.double() * {"e": 1.0, "2": math.log(2.0), "10": math.log(10.0)}[spec["base"]] ** 2
+                first_order = _physical_variance_from_log(mean, var, spec["base"], spec["eps"])
+                lognormal = torch.expm1(s2) * torch.exp(s2) * first_order / s2.clamp_min(1e-300)
+                # The weight uses the level mean, so compare the estimators where it counts.
+                spread = float(lognormal.mean() / first_order.mean())
+                if math.isnan(spread) or spread < _LOG_VARIANCE_SPREAD_WARN:  # nan: all-zero variance
+                    continue
+                rep.warn(
+                    where,
+                    f"'{var_key}' is weighted in physical units from log-space scaler statistics with a "
+                    f"large spread (log variance up to {float(s2.max()):.2g}). The first-order variance "
+                    f"used for its {users} weight ({float(first_order.mean()):.3g}) and the lognormal "
+                    f"moment differ by {spread:.3g}x, so the weight is uncertain by at least that much; "
+                    "for zero-inflated fields the first-order estimate can be far too small.",
+                    fix=(
+                        "Measure the variable's physical-unit variance V (level mean) and set\n"
+                        f"variable_weights:\n  {var_key}: {float(first_order.mean()):.3g} / V"
+                    ),
+                )
+
+
 def _iter_scalers(tree, keys=()):
     """Yield ``(key_path, scaler)`` for every fitted scaler in a ``load_scaler_dict`` tree.
 
@@ -1288,6 +1380,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,
             _check_pbs,

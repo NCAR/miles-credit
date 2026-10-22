@@ -88,3 +88,59 @@ def test_from_config_and_validation():
         AdaptiveGradClipper(factor=1.0)
     with pytest.raises(ValueError):
         AdaptiveGradClipper(ema_decay=1.0)
+
+
+def _fake_world(monkeypatch, world_size):
+    """Pretend world_size ranks each hold these same grads: all_reduce SUM multiplies by world_size."""
+    import credit.trainers.grad_clip as grad_clip
+
+    monkeypatch.setattr(grad_clip.dist, "all_reduce", lambda t, op=None: t.mul_(world_size))
+    monkeypatch.setattr(grad_clip.dist, "get_world_size", lambda: world_size)
+
+
+def test_replicated_norm_independent_of_world_size(monkeypatch):
+    """DDP copies are counted once, so the EMA is valid on any GPU count."""
+    for world_size in (1, 4, 64):
+        _fake_world(monkeypatch, world_size)
+        params = _params_with_grad(5.0)
+        assert float(global_grad_norm(params, distributed=True, replicated=True)) == pytest.approx(5.0)
+    # Sharded (FSDP1) grads: the cross-rank sum is the true norm and is not divided.
+    assert float(global_grad_norm(params, distributed=True, replicated=False)) == pytest.approx(5.0 * 8)
+
+
+def _saved_state(tmp_path, world_size):
+    clipper = AdaptiveGradClipper(warmup_steps=2)
+    for norm in (1.0, 2.0, 3.0):
+        clipper.clip_(_params_with_grad(norm), distributed=False)
+    clipper.world_size = world_size
+    clipper.save(str(tmp_path))
+    return clipper
+
+
+def test_resume_on_other_world_size_keeps_state(tmp_path):
+    saved = _saved_state(tmp_path, world_size=4)
+    resumed = AdaptiveGradClipper.from_config({}, replicated_grads=True, world_invariant=True)
+    resumed.world_size = 16
+    assert resumed.load(str(tmp_path))
+    assert resumed.ema == saved.ema and resumed.steps == saved.steps
+
+
+def test_tensor_parallel_world_size_change_restarts_warmup(tmp_path):
+    _saved_state(tmp_path, world_size=4)
+    resumed = AdaptiveGradClipper.from_config({}, world_invariant=False)
+    resumed.world_size = 8
+    assert not resumed.load(str(tmp_path))
+    assert resumed.steps == 0 and resumed.threshold() == math.inf
+    resumed.world_size = 4
+    assert resumed.load(str(tmp_path))
+
+
+def test_pre_normalization_state_restarts_warmup_for_replicated(tmp_path):
+    """A state file without world_size holds a sqrt(world size)-inflated EMA under DDP."""
+    (tmp_path / "grad_clip_state.json").write_text('{"ema": 2.0, "steps": 100}')
+    ddp = AdaptiveGradClipper.from_config({}, replicated_grads=True)
+    ddp.world_size = 4
+    assert not ddp.load(str(tmp_path)) and ddp.steps == 0
+    fsdp = AdaptiveGradClipper.from_config({})  # sharded grads were never inflated
+    fsdp.world_size = 4
+    assert fsdp.load(str(tmp_path)) and fsdp.steps == 100
