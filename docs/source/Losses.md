@@ -187,7 +187,30 @@ Variances are read from `DStandardScalerTensor.var_x_` directly, estimated from
 t-digest centroid moments for `DQuantileScalerTensor`, or taken from `sd_²` for the
 numpy `DeepStandardScaler`. A variable with no entry in the scaler falls back to
 weight 1.0 with a logged warning — worth watching for, since a silent 1.0 among
-1/σ² weights effectively drops that variable from the objective.
+1/σ² weights effectively drops that variable from the objective. Postblock-computed
+diagnostics (e.g. `geopotential_diagnostic`) are never in the scaler, so give them
+a `variable_weights` entry of about `1 / σ²` in their physical units.
+
+Log-transformed variables are handled automatically. When a `log_transform`
+preblock feeds the scaler and an `exp_transform` postblock converts the variable
+back to physical units in `y_processed`, the scaler's variance is in log space
+while the loss is scored in physical units. `load_loss` reads the `exp_transform`
+postblocks from the config and converts each level's natural-log mean `m` and
+variance `s²` to a physical variance with the first-order estimate
+`Var(x) ≈ exp(2m) · s²` before weighting. (The exact lognormal moment is avoided on
+purpose: skewed fields such as specific humidity have log variances above 2 near
+the surface, where it overestimates by an order of magnitude.) The conversion is
+logged at startup, and the same applies to metrics. Remove any `variable_weights`
+you added to hand-correct these variables' units, or they apply twice.
+
+The first-order estimate is reliable only while the log-space spread is small.
+`credit check` warns for each such variable where it and the lognormal moment
+differ by more than 3× (a log variance of about 0.9 or more); the variable's real
+physical variance, and so its weight, is then uncertain by at least that factor.
+It is worst for zero-inflated fields (precipitation, cloud water), where the
+first-order value can be orders of magnitude too small and the variable dominates
+the loss. The warning's fix gives the `variable_weights` multiplier that corrects
+the weight from a measured physical variance.
 
 ```yaml
 loss:
