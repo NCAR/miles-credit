@@ -259,7 +259,7 @@ preblocks:
             - 'E3SM_LND/diagnostic/2d/QRUNOFF'
             - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
             - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'   # signed delta: log/exp is invalid (exp overflows the mse)
+            - 'E3SM_OCN/diagnostic/2d/dMLD'   
             - 'E3SM_ICE/prognostic/2d/sithick'
             - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
@@ -270,10 +270,17 @@ preblocks:
             rules:
                 - search: nan        # NaN       → 0
                   fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
             variables:               # optional — defaults to all variables
                 - 'E3SM_LND/diagnostic/2d/QRUNOFF'
                 - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
                 - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
                 - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
 
     scaler:
@@ -479,27 +486,74 @@ postblocks:
            - 'E3SM_OCN/diagnostic/2d/dMLD'
            - 'E3SM_ICE/prognostic/2d/sithick'
            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-           - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-           - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         method: inverse_transform
+    
+    fillnan_prepred:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_ATM/static/2d/landfrac'   # ocean cells are NaN; 0 = no land, the physically correct fill
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    
+    
     log_trans:
       type: "exp_transform"
       args:
         max_output: 1.0e+6   # overflow guard; ~55x QRUNOFF's measured max of 1.83e4
-                            # (scripts/check_exp_ranges.py). Must stay above every real
-                            # value: this block also runs on the target twin, so a low
-                            # cap would silently clip the ground truth.
+                             # (scripts/check_exp_ranges.py). Must stay above every real
+                             # value: this block also runs on the target twin, so a low
+                             # cap would silently clip the ground truth.
         variables:
             - 'E3SM_ATM/diagnostic/2d/PRECT'
             - 'E3SM_LND/diagnostic/2d/QRUNOFF'
             - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
             - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'   # signed delta: log/exp is invalid (exp overflows the mse)
+            - 'E3SM_OCN/diagnostic/2d/dMLD' 
             - 'E3SM_ICE/prognostic/2d/sithick'
             - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
 
+    fillnan_postpred:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_OCN/diagnostic/2d/dMLD' 
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
 # ----------------------------------------------------------------------- #
 # Target twin.
 #
@@ -579,6 +633,31 @@ postblocks:
            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
         method: inverse_transform
 
+    fillnan_pretarget:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_ATM/static/2d/landfrac'   # ocean cells are NaN; 0 = no land, the physically correct fill
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+                
     log_trans_target:
       type: "exp_transform"
       args:
@@ -592,27 +671,49 @@ postblocks:
             - 'E3SM_LND/diagnostic/2d/QRUNOFF'
             - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
             - 'E3SM_LND/prognostic/2d/SNOWDP'
-#            - 'E3SM_OCN/diagnostic/2d/dMLD'   #
+            - 'E3SM_OCN/diagnostic/2d/dMLD'   #
             - 'E3SM_ICE/prognostic/2d/sithick'
             - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
             - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
             - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
 
-    tracer_fixer:
-      type: tracer_fixer
-      args:
-        tracer_thres: 0.0
-        tracer_vars:
-          - E3SM_ATM/prognostic/3d/Q
-          - E3SM_OCN/prognostic/2d/SSS
-          - E3SM_LND/prognostic/2d/SOILWAT_2m
-          - E3SM_LND/prognostic/2d/SNOWDP
-          - E3SM_ICE/prognostic/2d/sithick
-          - E3SM_ATM/diagnostic/2d/PRECT
-          - E3SM_ATM/diagnostic/2d/CLDTOT
-          - E3SM_ATM/diagnostic/2d/FLUT
-          - E3SM_LND/diagnostic/2d/QRUNOFF
-          - E3SM_OCN/diagnostic/2d/dMLD
+    fillnan_posttarget:
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan        # NaN       → 0
+                  fill: 0
+                - search: 1.0e+30 #inf
+                  op: ">"
+                  fill: 0
+                - search: -1.0e+30 #-inf
+                  op: "<"
+                  fill: 0
+            variables:               # optional — defaults to all variables
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_OCN/diagnostic/2d/dMLD' 
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    # tracer_fixer:
+    #   type: tracer_fixer
+    #   args:
+    #     tracer_thres: 0.0
+    #     tracer_vars:
+    #       - E3SM_ATM/prognostic/3d/Q
+    #       - E3SM_OCN/prognostic/2d/SSS
+    #       - E3SM_LND/prognostic/2d/SOILWAT_2m
+    #       - E3SM_LND/prognostic/2d/SNOWDP
+    #       - E3SM_ICE/prognostic/2d/sithick
+    #       - E3SM_ATM/diagnostic/2d/PRECT
+    #       - E3SM_ATM/diagnostic/2d/CLDTOT
+    #       - E3SM_ATM/diagnostic/2d/FLUT
+    #       - E3SM_LND/diagnostic/2d/QRUNOFF
+    #       - E3SM_OCN/diagnostic/2d/dMLD
 
 #    mass_fixer:
 #      type: global_mass_fixer
