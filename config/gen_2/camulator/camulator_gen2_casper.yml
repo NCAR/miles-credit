@@ -163,7 +163,8 @@ trainer:
 # "Mixed_Modal" mean/std the checkpoint was trained with. A single global PS
 # mean/std puts normalized PS far outside the training range over the ice sheets
 # and Tibet, and the rollout drifts and blows up within a year. Use the same
-# scaler_path and spatial_variables in preblocks.scaler and postblocks.inverse_scale.
+# scaler_path and spatial_variables in preblocks.scaler, postblocks.inverse_scale
+# and (when training) postblocks.flatten.
 preblocks:
   per_step:
     scaler:
@@ -361,15 +362,54 @@ postblocks:
         surf_lh_var: CESM/diagnostic/2d/LHFLX
 
 # ONLY NEEDED FOR TRAINING #
-# NOTE: flatten_to_tensor has no spatial_variables option yet, so it cannot apply
-# the per-grid-point PS scaler above; it needs that support before training with it.
 #    flatten:
 #      type: flatten_to_tensor
 #      args:
 #        method: transform
 #        key: y_processed
 #        out_key: y_pred
-#        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
+#        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+#        spatial_variables:
+#          - CESM/prognostic/2d/PS
+#        variables:
+#          - CESM/prognostic/3d/U
+#          - CESM/prognostic/3d/V
+#          - CESM/prognostic/3d/T
+#          - CESM/prognostic/3d/Qtot
+#          - CESM/prognostic/2d/PS
+#          - CESM/prognostic/2d/TREFHT
+#          - CESM/diagnostic/2d/PRECT
+#          - CESM/diagnostic/2d/TS
+#          - CESM/diagnostic/2d/CLDHGH
+#          - CESM/diagnostic/2d/CLDLOW
+#          - CESM/diagnostic/2d/CLDMED
+#          - CESM/diagnostic/2d/TAUX
+#          - CESM/diagnostic/2d/TAUY
+#          - CESM/diagnostic/2d/U10
+#          - CESM/diagnostic/2d/QFLX
+#          - CESM/diagnostic/2d/FSDS_J
+#          - CESM/diagnostic/2d/FLDS_J
+#          - CESM/diagnostic/2d/FSUS
+#          - CESM/diagnostic/2d/FLUS
+#          - CESM/diagnostic/2d/SHFLX
+#          - CESM/diagnostic/2d/LHFLX
+#          - CESM/diagnostic/2d/FSUTOA
+#          - CESM/diagnostic/2d/FLUT
+#    # target twin: every gen2 metric compares y_processed with y_target_processed,
+#    # and the trainer runs the default metrics even with the mse loss above
+#    reconstruct_target:
+#      type: reconstruct
+#      args:
+#        in_key: y
+#        out_key: y_target_processed
+#    scaler_target:
+#      type: bridgescaler_transform
+#      args:
+#        method: inverse_transform
+#        key: y_target_processed
+#        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+#        spatial_variables:
+#          - CESM/prognostic/2d/PS
 #        variables:
 #          - CESM/prognostic/3d/U
 #          - CESM/prognostic/3d/V

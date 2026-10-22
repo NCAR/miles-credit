@@ -102,12 +102,22 @@ flattening, yielding a normalized `y_pred` for the loss while leaving the
 physical `y_processed` untouched for autoregressive rollout assembly. Omit
 `scaler_path` to flatten as-is with no scaling.
 
+If the scaler stores some variables per grid point (fit with `spatial_variables`
+in the `bridgescaler_transform` preblock), list the same variables under
+`spatial_variables` here. They are flattened to `(B, H*W)` before scaling and
+restored afterward, as in the scaler pre/postblocks. Without it, bridgescaler's
+column-count check fails on the first training batch. `credit check` reports a
+`flatten_to_tensor` block whose `spatial_variables` differ from those of the
+preblock that fits the same `scaler_path`.
+
 ```yaml
 type: "flatten_to_tensor"
 args:
   scaler_path: "/path/to/scaler.json"
   variables: []          # variables the scaler should transform
   method: "transform"    # physical -> normalized
+  spatial_variables:     # optional: grid-wise variables, must match the preblock
+    - "cesm/prognostic/2d/PS"
 ```
 
 ## Inverse Transforms
