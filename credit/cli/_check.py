@@ -1221,6 +1221,9 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
 
 
 def _check(args: argparse.Namespace) -> None:
+    # --json output must stay parseable, so the progress line goes to stderr there.
+    stream = sys.stderr if getattr(args, "json", False) else sys.stdout
+    print(f"Checking config: {args.config} ...", file=stream, flush=True)
     rep = _Report(args.config)
     conf = _load_config(args.config, rep)
     if conf is not None:

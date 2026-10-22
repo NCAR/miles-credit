@@ -197,7 +197,7 @@ _SLURM_CLUSTER_DEFAULTS = {
 
 def _prompt(prompt: str, default=None) -> str:
     """Print a prompt and return stripped input, or *default* if empty."""
-    hint = f" [{default}]" if default is not None else ""
+    hint = f" [{default}]" if default not in (None, "") else ""
     val = input(f"  {prompt}{hint}: ").strip()
     return val if val else (str(default) if default is not None else "")
 
