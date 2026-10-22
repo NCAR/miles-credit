@@ -395,6 +395,45 @@ postblocks:
 #          - CESM/diagnostic/2d/LHFLX
 #          - CESM/diagnostic/2d/FSUTOA
 #          - CESM/diagnostic/2d/FLUT
+#    # target twin: every gen2 metric compares y_processed with y_target_processed,
+#    # and the trainer runs the default metrics even with the mse loss above
+#    reconstruct_target:
+#      type: reconstruct
+#      args:
+#        in_key: y
+#        out_key: y_target_processed
+#    scaler_target:
+#      type: bridgescaler_transform
+#      args:
+#        method: inverse_transform
+#        key: y_target_processed
+#        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+#        spatial_variables:
+#          - CESM/prognostic/2d/PS
+#        variables:
+#          - CESM/prognostic/3d/U
+#          - CESM/prognostic/3d/V
+#          - CESM/prognostic/3d/T
+#          - CESM/prognostic/3d/Qtot
+#          - CESM/prognostic/2d/PS
+#          - CESM/prognostic/2d/TREFHT
+#          - CESM/diagnostic/2d/PRECT
+#          - CESM/diagnostic/2d/TS
+#          - CESM/diagnostic/2d/CLDHGH
+#          - CESM/diagnostic/2d/CLDLOW
+#          - CESM/diagnostic/2d/CLDMED
+#          - CESM/diagnostic/2d/TAUX
+#          - CESM/diagnostic/2d/TAUY
+#          - CESM/diagnostic/2d/U10
+#          - CESM/diagnostic/2d/QFLX
+#          - CESM/diagnostic/2d/FSDS_J
+#          - CESM/diagnostic/2d/FLDS_J
+#          - CESM/diagnostic/2d/FSUS
+#          - CESM/diagnostic/2d/FLUS
+#          - CESM/diagnostic/2d/SHFLX
+#          - CESM/diagnostic/2d/LHFLX
+#          - CESM/diagnostic/2d/FSUTOA
+#          - CESM/diagnostic/2d/FLUT
 
 
 # ---- Model architecture ---- #
