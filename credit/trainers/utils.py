@@ -7,7 +7,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 
-from credit.scheduler import load_scheduler
+from credit.scheduler import CosineAnnealingWarmupRestarts, load_scheduler
 from credit.samplers import DistributedMultiStepBatchSampler
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.models.checkpoint import (
@@ -730,10 +730,23 @@ def apply_learning_rate_override(optimizer, scheduler, learning_rate):
     to ``learning_rate``. On a fresh run the factor is 1 and nothing changes.
     Without a scheduler, or for one with no base LRs (``ReduceLROnPlateau``), the
     LR is set directly.
+
+    ``CosineAnnealingWarmupRestarts`` keeps its floor (``min_lr``) in ``base_lrs``
+    and its peak in ``max_lr``, so there ``learning_rate`` replaces the peak,
+    ``min_lr`` is left as configured, and the current LR is recomputed at the
+    scheduler's position. Rescaling ``base_lrs`` would multiply the LR by
+    ``learning_rate / min_lr`` and flatten the schedule.
     """
-    base_lrs = getattr(scheduler, "base_lrs", None)
     # The scheduler may hold the unwrapped optimizer (FSDPOptimizerWrapper.optim).
     param_groups = getattr(scheduler, "optimizer", optimizer).param_groups
+    if isinstance(scheduler, CosineAnnealingWarmupRestarts):
+        factor = learning_rate / scheduler.base_max_lr
+        scheduler.base_max_lr = learning_rate
+        scheduler.max_lr *= factor  # keeps the gamma decay of the current cycle
+        for param_group, lr in zip(param_groups, scheduler.get_lr()):
+            param_group["lr"] = lr
+        return
+    base_lrs = getattr(scheduler, "base_lrs", None)
     if not base_lrs:
         for param_group in param_groups:
             param_group["lr"] = learning_rate
