@@ -319,7 +319,15 @@ class BaseTrainer(ABC):
         # credit.trainers.grad_clip); its EMA is resumed with the weights.
         self.grad_clipper = None
         if self.grad_max_norm == "dynamic":
-            self.grad_clipper = AdaptiveGradClipper.from_config(trainer_conf)
+            # Plain grads are one identical copy per rank under DDP / domain
+            # parallelism; FSDP shards them. Tensor parallelism mixes the two.
+            no_tp = int(_p.get("tensor", 1)) == 1
+            replicated = self.mode in ("ddp", "none") and no_tp
+            self.grad_clipper = AdaptiveGradClipper.from_config(
+                trainer_conf,
+                replicated_grads=replicated,
+                world_invariant=replicated or (self.mode in ("fsdp", "fsdp2") and no_tp),
+            )
             if self.load_weights and self.grad_clipper.load(self.save_loc):
                 logger.info(f"Resumed dynamic grad clipping state (step {self.grad_clipper.steps})")
 
