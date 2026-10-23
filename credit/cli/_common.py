@@ -72,6 +72,60 @@ def casper_mem(gpus: int, gpu_type: str = None) -> str:
     return f"{min(full, int(-(-mem // 16) * 16))}GB"
 
 
+# ``pbs.mem: auto`` (train / preprocess jobs): size the request from the config.
+# Per process (one per GPU) the job holds the DataLoader's buffered batches plus
+# the PyTorch/CUDA runtime and model copies; the overhead and safety factor are
+# rough, uncalibrated allowances.  PBS reads "GB" as 1024-based, matching GiB.
+_AUTO_MEM_OVERHEAD_GIB = 4
+_AUTO_MEM_SAFETY = 1.3
+_AUTO_MEM_STEP_GB = 32  # also the smallest request: any positive estimate rounds up to >= 32
+
+
+def node_mem_cap_gb(cluster: str, gpu_type: str = None) -> int:
+    """Largest memory request (GB, a multiple of 32) that fits one *cluster* GPU node."""
+    if cluster == "casper":
+        node_mem = _CASPER_GPU_NODES.get((gpu_type or "").lower() or None, _CASPER_GPU_NODES[None])[1]
+        return int(node_mem * _CASPER_MEM_NODE_FRACTION) // _AUTO_MEM_STEP_GB * _AUTO_MEM_STEP_GB
+    return int(_PBS_DEFAULTS["derecho"]["mem"].rstrip("GB"))
+
+
+def auto_mem(
+    conf: dict, cluster: str, gpus: int, gpu_type: str = None, include_validation: bool = True
+) -> tuple[str, str, bool] | None:
+    """Config-derived per-node memory request for ``pbs.mem: auto``.
+
+    Returns ``(mem, explanation, exceeds_node)``, or None when the config gives
+    nothing to estimate from. The training DataLoader is always counted; the
+    validation DataLoader is added when *include_validation* is set (train jobs)
+    and the config does not set ``trainer.skip_validation`` — its workers persist
+    alongside the training ones. The request is rounded up to a multiple of
+    32 GB and capped at what one node offers; ``exceeds_node`` flags a capped request.
+    """
+    from credit.trainers.preflight import estimate_dataloader_memory_gib
+
+    train_gib = estimate_dataloader_memory_gib(conf)
+    if train_gib <= 0:
+        return None
+    loaders = f"{train_gib:.1f} GiB training DataLoader"
+    loader_gib = train_gib
+    if include_validation and not (conf.get("trainer") or {}).get("skip_validation", False):
+        valid_gib = estimate_dataloader_memory_gib(conf, validation=True)
+        loader_gib += valid_gib
+        loaders += f" + {valid_gib:.1f} GiB validation DataLoader = {loader_gib:.1f} GiB"
+    gpus = max(1, int(gpus))
+    need = (loader_gib + _AUTO_MEM_OVERHEAD_GIB) * gpus * _AUTO_MEM_SAFETY
+    mem = -(-need // _AUTO_MEM_STEP_GB) * _AUTO_MEM_STEP_GB
+    cap = node_mem_cap_gb(cluster, gpu_type)
+    explanation = (
+        f"{loaders} per process; {gpus} process(es) x ({loader_gib:.1f} + {_AUTO_MEM_OVERHEAD_GIB} GiB overhead) "
+        f"x {_AUTO_MEM_SAFETY} safety = {need:.0f} GB, assuming float32 (4-byte) data values, "
+        f"rounded up to a multiple of {_AUTO_MEM_STEP_GB} GB"
+    )
+    if mem > cap:
+        return f"{cap}GB", explanation + f"; capped at the ~{cap} GB a {cluster} node offers", True
+    return f"{int(mem)}GB", explanation, False
+
+
 # PBS queues by cluster.  A ``pbs:`` block written for one NCAR machine is often
 # reused against the other (``credit submit --cluster casper`` with a Derecho
 # config, say), and the only symptom is a qsub rejection *after* the script has

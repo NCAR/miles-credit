@@ -16,6 +16,7 @@ from ._common import (
     _SLURM_DEFAULTS,
     _repo_root,
     _resolve_torchrun,
+    auto_mem,
     casper_mem,
     queue_cluster_error,
 )
@@ -131,12 +132,43 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
     # On Casper the memory ask scales with the fraction of the node's GPUs in use
     # (64GB for one GPU up to the whole node's memory for all of them); an explicit
-    # --mem / pbs.mem always wins.
+    # --mem / pbs.mem always wins.  pbs.mem: auto sizes it from the config instead.
     fallback_mem = casper_mem(r.gpus, r.gpu_type) if is_casper else d["mem"]
-    r.mem = _first(args.mem, pbs_cfg.get("mem"), fallback_mem)
+    pbs_mem = pbs_cfg.get("mem")
+    if str(pbs_mem).lower() == "auto":
+        pbs_mem = _auto_mem_request(args, r) if args.mem is None else None
+    r.mem = _first(args.mem, pbs_mem, fallback_mem)
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
     return r
+
+
+def _auto_mem_request(args: argparse.Namespace, r: argparse.Namespace) -> str | None:
+    """Resolve ``pbs.mem: auto`` from the config (train / preprocess); None means use the default."""
+    mode = getattr(args, "submit_mode", "train")
+    if mode not in ("train", "preprocess"):
+        return None
+    try:
+        with open(args.config) as f:
+            conf = yaml.safe_load(f) or {}
+    except Exception:  # noqa: BLE001 — an unreadable config is reported elsewhere
+        return None
+    # Preprocess only fits scalers on the training data, so it has no validation loader.
+    estimate = auto_mem(conf, args.cluster, r.gpus, r.gpu_type, include_validation=mode == "train")
+    if estimate is None:
+        logger.warning("pbs.mem: auto — nothing to estimate memory from in the config; using the default request.")
+        return None
+    mem, explanation, exceeds_node = estimate
+    if exceeds_node:
+        logger.warning(
+            "Memory (pbs.mem: auto): %s = %s. The job likely needs more than one node offers; "
+            "reduce trainer.train_batch_size, thread_workers or prefetch_factor, or use fewer levels.",
+            mem,
+            explanation,
+        )
+    else:
+        logger.info("Memory (pbs.mem: auto): %s = %s.", mem, explanation)
+    return mem
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +234,8 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     r.gpus = int(_first(args.gpus, slurm_cfg.get("ngpus") or slurm_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, slurm_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, slurm_cfg.get("ncpus") or slurm_cfg.get("cpus"), d["cpus"]))
-    r.mem = _first(args.mem, slurm_cfg.get("mem"), d["mem"])
+    slurm_mem = slurm_cfg.get("mem")
+    r.mem = _first(args.mem, None if str(slurm_mem).lower() == "auto" else slurm_mem, d["mem"])
     # --queue doubles as the SLURM partition selector.
     r.partition = _first(args.queue, slurm_cfg.get("partition") or slurm_cfg.get("queue"), d["partition"])
     r.queue = r.partition
@@ -804,6 +837,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         "  Account  : %s\n"
         "  Config   : %s\n"
         "  GPUs     : %s\n"
+        "  Memory   : %s per node\n"
         "  Walltime : %s per job\n"
         "  Chain    : %s\n"
         "  DataLoader memory est. : %s%s\n"
@@ -814,6 +848,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         getattr(args, "account", "unset"),
         getattr(args, "config", "unset"),
         gpu_str,
+        getattr(args, "mem", None) or "site default",
         args.walltime,
         chain_desc,
         mem_str,
@@ -1013,6 +1048,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         "  Config    : %s\n"
         "  Nodes     : %s\n"
         "  GPUs      : %s per node  (%s total)\n"
+        "  Memory    : %s per node\n"
         "  Walltime  : %s\n"
         "%s",
         sep,
@@ -1024,6 +1060,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         args.nodes,
         args.gpus,
         args.nodes * args.gpus,
+        getattr(args, "mem", None) or "site default",
         args.walltime,
         sep,
     )
@@ -1310,7 +1347,8 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         "mem": "128GB",
         "walltime": "06:00:00",
     }
-    merged_cfg = {**_rollout_defaults, **{k: v for k, v in sched_cfg.items() if v is not None}}
+    # pbs.mem: auto is sized for training; a rollout keeps its own default.
+    merged_cfg = {**_rollout_defaults, **{k: v for k, v in sched_cfg.items() if v is not None and v != "auto"}}
 
     if not hasattr(args, "nodes"):
         args.nodes = None
