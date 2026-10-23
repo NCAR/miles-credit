@@ -251,11 +251,73 @@ tensorboard --logdir <save_loc>/tensorboard
 Then open `http://localhost:6006` in your browser.
 On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](tensorboard.md).
 
+## 6. Run a rollout
 
-## 6. Visualize a prediction
+Once training has produced a checkpoint, `credit rollout` steps the model forward
+autoregressively from a schedule of initial conditions and writes the forecasts
+to disk. The same config used for training drives inference. The `inference:`
+block controls which init times are run, how long each forecast is, and where
+output goes:
 
-Once at least one checkpoint exists, run a forward pass and produce a
-3-panel global map (truth | prediction | difference) for any field:
+```yaml
+inference:
+  run_mode: batch                   # batch (many init times) | single (one init time)
+  mode: none                        # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_experiment/rollout'
+
+  batch_forecast:                   # used when run_mode: batch
+    forecast_length: "10d"          # total forecast duration per init time
+    first_init_date: "2020-01-01"   # must be within the data date range
+    last_init_date: "2020-01-10"
+    init_interval: "12h"
+
+  single_forecast:                  # used when run_mode: single
+    forecast_length: "10d"
+    start_datetime: "2020-06-01T00:00Z"
+```
+
+Rollout has no truth data, so if your training `postblocks:` include the
+`y_target_processed` target twin used by the `base` loss, give inference its own
+`inference.postblocks` chain without it (see
+[`example-end-to-end.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-end-to-end.yml)
+for a complete example).
+
+### Run locally
+
+```bash
+credit rollout -c my_experiment.yml
+```
+
+Set `run_mode: single` to run just the one forecast in `single_forecast`, which
+is a fast way to confirm the rollout works before launching a full batch.
+
+### Submit on NCAR HPC
+
+```bash
+# Preview the PBS script first
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode rollout --gpus 1 --dry-run
+
+# Then submit
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode rollout --gpus 1
+```
+
+Rollout jobs are independent, so there is no `afterok` chain like training.
+
+Output lands in `save_forecast/<YYYYMMDD_HHMMZ>/`, one subdirectory per init time,
+as NetCDF (or Zarr) files in physical units. `inference.output.group_by` sets the file
+granularity (one file per step, day, month, or whole run). These forecasts are the
+input for evaluation with `credit metrics` (see [Evaluation](Evaluation.md)) and
+for any downstream analysis.
+
+> **More detail**: [Inference guide](Inference.md) | `credit rollout --help`
+
+## 7. Visualize a prediction
+
+For a quick look at what the model has learned, `credit plot` loads the latest
+checkpoint, runs a single forward step on the first validation sample, and
+draws a 3-panel global map (truth | prediction | difference) for any field.
+It does not read rollout output, so you can use it during training as soon as
+one checkpoint exists:
 
 ```bash
 # Denormalised to physical units (K for temperature, Pa for pressure)
@@ -281,7 +343,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 > **More detail**: `credit plot --help`
 
-## 7. Get help from the AI assistant
+## 8. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat
