@@ -35,18 +35,27 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def estimate_dataloader_memory_gib(conf: dict) -> float:
-    """Estimate peak CPU RAM used by the DataLoader (GiB).
+def estimate_dataloader_memory_gib(conf: dict, validation: bool = False) -> float:
+    """Estimate peak CPU RAM used by one process's DataLoader (GiB).
 
     Formula::
 
-        workers × prefetch_factor × batch_size × sample_bytes
+        buffered_batches × batch_size × sample_bytes
 
-    where sample_bytes = H × W × total_channels × 4 (float32).
-    Input and target tensors are counted separately (×2).
+    where buffered_batches = workers × prefetch_factor (1 with no workers) and
+    sample_bytes = H × W × total_channels × 4, i.e. **every value is assumed to
+    be float32** (4 bytes). Channels are summed over every data source and
+    variable group (prognostic, diagnostic, dynamic_forcing, static), and
+    input and target are counted separately (×2). The workers / prefetch
+    defaults match ``credit.trainers.utils.load_dataloader``.
+
+    This is per process: a multi-GPU job runs one DataLoader per GPU.
 
     Args:
         conf: Full training config dict.
+        validation: estimate the validation DataLoader instead: ``valid_thread_workers``
+            / ``valid_batch_size``, with data from ``validation_data`` (whose
+            ``source`` falls back to ``data``'s, as in ``load_dataset``).
 
     Returns:
         Estimated peak DataLoader RAM in GiB. Returns 0.0 if config is
@@ -56,16 +65,16 @@ def estimate_dataloader_memory_gib(conf: dict) -> float:
         trainer_conf = conf.get("trainer", {})
         data_conf = conf.get("data", {})
         model_conf = conf.get("model", {})
-        src = next(iter(data_conf.get("source", {}).values()), {})
-        v = src.get("variables", {})
-        prog = v.get("prognostic") or {}
-        diag = v.get("diagnostic") or {}
+        sources = data_conf.get("source", {})
+        if validation:
+            sources = (conf.get("validation_data") or {}).get("source") or sources
 
-        n_levels = resolve_num_levels(src, conf)
-        n_vars_3d = len(prog.get("vars_3D", []))
-        n_vars_2d = len(prog.get("vars_2D", []))
-        n_diag_2d = len(diag.get("vars_2D", []))
-        total_ch = n_vars_3d * n_levels + n_vars_2d + n_diag_2d
+        total_ch = 0
+        for src in sources.values():
+            n_levels = resolve_num_levels(src, conf)
+            for group in (src.get("variables") or {}).values():
+                group = group or {}
+                total_ch += len(group.get("vars_3D") or []) * n_levels + len(group.get("vars_2D") or [])
 
         if total_ch == 0:
             return 0.0
@@ -76,11 +85,12 @@ def estimate_dataloader_memory_gib(conf: dict) -> float:
         bytes_per_sample = H * W * total_ch * 4  # float32 4 bytes
         bytes_per_sample *= 2  # input + target
 
-        workers = trainer_conf.get("thread_workers", 4)
-        prefetch = trainer_conf.get("prefetch_factor", 4)
-        batch_size = trainer_conf.get("train_batch_size", 1)
+        workers = trainer_conf.get("valid_thread_workers" if validation else "thread_workers", 4)
+        prefetch = trainer_conf.get("prefetch_factor", 2)
+        batch_size = trainer_conf.get("valid_batch_size" if validation else "train_batch_size", 1)
+        buffered = workers * prefetch if workers > 0 else 1
 
-        total_bytes = workers * prefetch * batch_size * bytes_per_sample
+        total_bytes = buffered * batch_size * bytes_per_sample
         return total_bytes / 2**30
 
     except Exception:
@@ -131,7 +141,7 @@ def check_dataloader_startup(
 
     trainer_conf = conf.get("trainer", {})
     workers = trainer_conf.get("thread_workers", 4)
-    prefetch = trainer_conf.get("prefetch_factor", 4)
+    prefetch = trainer_conf.get("prefetch_factor", 2)
     batch = trainer_conf.get("train_batch_size", 1)
 
     # ---- Memory estimate ----

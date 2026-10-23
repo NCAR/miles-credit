@@ -122,6 +122,9 @@ def _yaml_dump(conf, f):
 
 _SPATIAL_TIME_DIMS = frozenset(("time", "lat", "lon", "latitude", "longitude", "x", "y"))
 
+# ERA5 model levels (1 = top, 137 = lowest) of the 16-level WXFormer v1 / arXiv 2024 data.
+_DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
+
 
 def _zarr_dims(glob_path: str) -> list[str] | None:
     """Return all dimension names from the first matching file, or None on failure."""
@@ -282,7 +285,6 @@ def _convert(args: argparse.Namespace) -> None:
         train_years = data.get("train_years") or [1979, 2018]
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
-        _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
         levels = list(data["level_ids"]) if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {
