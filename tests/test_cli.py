@@ -150,6 +150,12 @@ class TestPrompt:
         _prompt("My question", default="42")
         assert "[42]" in calls[0]
 
+    def test_prompt_empty_default_shows_no_brackets(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("builtins.input", lambda s: calls.append(s) or "")
+        assert _prompt("My question", default="") == ""
+        assert "[]" not in calls[0]
+
     def test_prompt_bool_yes(self, monkeypatch):
         for val in ("y", "yes", "Y", "YES"):
             monkeypatch.setattr("builtins.input", lambda _, v=val: v)
@@ -1503,6 +1509,9 @@ class TestSubmitReload:
             cli._submit(args)
 
         assert len(qsub_calls) == 1
+        out = capsys.readouterr().out
+        assert "[SUCCESS] Job 99999 submitted to Casper (PBS).\n" in out
+        assert f"  Logs:   {tmp_path / 'save' / 'logs'}\n" in out
 
     def test_submit_chain_calls_qsub_multiple(self, tmp_path, capsys, monkeypatch):
         """Chain=3 should call _qsub 3 times."""
@@ -1530,6 +1539,7 @@ class TestSubmitReload:
             cli._submit(args)
 
         assert len(qsub_calls) == 3
+        assert "[SUCCESS] Jobs 1000, 2000, 3000 submitted to Casper (PBS).\n" in capsys.readouterr().out
 
 
 # ===========================================================================
