@@ -113,7 +113,7 @@ Per-variable scores are always reported in the variable's own physical units. Th
 
 | Mode | Behavior |
 |---|---|
-| `inverse_variance` *(default)* | Weight by `1 / σ^scale_power`, with σ from the fitted bridgescaler |
+| `inverse_variance` *(default)* | Weight by `1 / σ^scale_power`, with σ from the fitted bridgescaler (converted to physical units for `exp_transform`ed variables, as in [`BaseLoss`](Losses.md)) |
 | `manual` | Weights come from `variable_weights` alone |
 | `none` | Uniform combination |
 

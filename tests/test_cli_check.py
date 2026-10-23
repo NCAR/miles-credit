@@ -833,3 +833,119 @@ def test_checks_do_not_mutate_the_config(conf):
     before = copy.deepcopy(conf)
     _run(conf)
     assert conf == before
+
+
+# ===========================================================================
+# Fitted scaler statistics
+# ===========================================================================
+
+
+def _write_standard_scaler(path, mean, var, data_type="target"):
+    import torch
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = torch.tensor(mean, dtype=torch.float64)
+    s.var_x_ = torch.tensor(var, dtype=torch.float64)
+    s.x_columns_ = list(range(len(mean)))
+    s.n_ = 10
+    s._fit = True
+    tree = {"ERA5": {"ERA5/prognostic/3d/Q": s}}
+    save_scaler_dict({data_type: tree} if data_type else tree, str(path))
+
+
+def test_scaler_with_healthy_stats_is_silent(conf, tmp_path):
+    _write_standard_scaler(tmp_path / "scaler.json", [1.0, 2.0], [0.5, 0.1])
+    rep = _run(conf)
+    assert not any("NaN/inf statistic" in f.message for f in rep.findings), _text(rep)
+
+
+def test_scaler_nan_or_zero_variance_levels_error(conf, tmp_path):
+    """All-NaN levels at fit time (e.g. ARCO cloud cover aloft) leave mean 0/NaN, var 0."""
+    _write_standard_scaler(tmp_path / "scaler.json", [0.0, float("nan"), 3.0], [0.0, float("nan"), 1.0])
+    rep = _run(conf)
+    msgs = [f.message for f in rep.findings if f.severity == "error" and "NaN/inf statistic" in f.message]
+    assert len(msgs) == 1, _text(rep)
+    assert "ERA5/prognostic/3d/Q" in msgs[0] and "channel/level: 1, 2" in msgs[0]
+
+
+def test_scaler_stats_without_data_type_level(conf, tmp_path):
+    """Post-only scaler files nest {source: {var: scaler}} with no input/target level."""
+    _write_standard_scaler(tmp_path / "scaler.json", [0.0, 3.0], [0.0, 1.0], data_type=None)
+    rep = _run(conf)
+    assert not any("Check itself failed" in f.message for f in rep.findings), _text(rep, "warning")
+    msgs = [f.message for f in rep.findings if f.severity == "error" and "NaN/inf statistic" in f.message]
+    assert len(msgs) == 1 and "channel/level: 1" in msgs[0], _text(rep)
+
+
+def _exp_transform_q(conf):
+    for name, key in (("exp", "y_processed"), ("exp_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "exp_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def _log_variance_warnings(rep):
+    return [f for f in rep.findings if f.severity == "warning" and f.where.endswith("var_weighting")]
+
+
+def test_log_variance_weight_small_spread_is_silent(conf, tmp_path):
+    """Surface-pressure-like log variances: first-order and lognormal agree."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [5.0, 6.0], [0.01, 0.02])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_log_variance_weight_large_spread_warns(conf, tmp_path):
+    """Humidity-like log variances (> 2 near the surface) make the weight unreliable."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "differ by" in found[0].message
+    assert "variable_weights" in found[0].fix
+
+
+def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    conf["loss"]["args"]["var_weighting"] = "none"
+    assert not _log_variance_warnings(_run(conf))
+
+
+def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
+    """A log-space loss scores in log units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    assert not _log_variance_warnings(_run(conf))
+
+
+# ===========================================================================
+# Gradient clipping
+# ===========================================================================
+
+
+def test_dynamic_grad_clip_valid(conf):
+    conf["trainer"]["grad_max_norm"] = "dynamic"
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0, "warmup_steps": 10}
+    assert not {w for w in _wheres(_run(conf)) if "grad" in w}
+
+
+def test_dynamic_grad_clip_bad_values(conf):
+    conf["trainer"]["grad_max_norm"] = "dynamic"
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 0.5}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf))
+    conf["trainer"]["dynamic_grad_clip"] = {"facter": 3.0}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf))
+
+
+def test_grad_max_norm_rejects_unknown_string(conf):
+    conf["trainer"]["grad_max_norm"] = "adaptive"
+    assert "trainer.grad_max_norm" in _wheres(_run(conf))
+
+
+def test_dynamic_grad_clip_ignored_without_dynamic_warns(conf):
+    conf["trainer"]["grad_max_norm"] = 1.0
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf), "warning")
