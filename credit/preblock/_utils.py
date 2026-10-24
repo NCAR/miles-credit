@@ -1,3 +1,6 @@
+import torch
+
+
 def _parse_variable_selection(variable_list: list, state_dict: dict, data_types: list = None) -> list:
     """
     The goal of this function is to expand partial variables in `variable_list` based on the keys in `state_dict`.
@@ -95,6 +98,73 @@ def _flatten_spatial_tensors(state_dict: dict, spatial_variables: list) -> tuple
         return new_d
 
     return _walk(state_dict), original_shapes
+
+
+def _spatial_scaler_template(ndim: int):
+    """Unfitted per-location standard scaler for an ``ndim``-D CREDIT tensor.
+
+    CREDIT tensors are ``(batch, level, time, *grid)``: the levels are the channel
+    axis, batch and time are reduced, and every grid axis (``lat, lon`` or ``ncol``)
+    gets its own statistics, so 3D variables are scaled per level and per gridpoint.
+    """
+    try:
+        from bridgescaler.distributed_tensor import DSpatialStandardScalerTensor
+    except ImportError as exc:
+        raise ImportError(
+            "Fitting spatial_variables needs a bridgescaler with DSpatialStandardScalerTensor (newer than 0.8.6)."
+        ) from exc
+
+    return DSpatialStandardScalerTensor(channels_last=False, spatial_dims=tuple(range(3 - ndim, 0)))
+
+
+def _leaf_ndims(state_dict: dict, keys: list) -> dict:
+    """``{key: ndim}`` for the tensors named in *keys* (first occurrence wins)."""
+    wanted, ndims = set(keys), {}
+
+    def _walk(d):
+        for key, value in d.items():
+            if isinstance(value, dict):
+                _walk(value)
+            elif key in wanted and key not in ndims and torch.is_tensor(value):
+                ndims[key] = value.ndim
+
+    _walk(state_dict)
+    return ndims
+
+
+def _merge_nested(a: dict, b: dict) -> dict:
+    """Recursively merge nested dict *b* into a copy of *a* (``b`` wins on leaf clashes)."""
+    merged = dict(a)
+    for key, value in b.items():
+        both_dicts = isinstance(value, dict) and isinstance(merged.get(key), dict)
+        merged[key] = _merge_nested(merged[key], value) if both_dicts else value
+    return merged
+
+
+def _legacy_spatial_variables(scaler_dict: dict | None, spatial_variables: list) -> list:
+    """The *spatial_variables* whose fitted scaler still needs `_flatten_spatial_tensors`.
+
+    Scaler files fit before per-location scaling store a spatial variable as a plain
+    ``DStandardScalerTensor`` with one column per gridpoint, which only lines up with
+    the tensor once it is flattened to ``(batch, H*W)``. A ``DSpatialStandardScalerTensor``
+    takes the tensor as it is, so those variables are left out of the flatten.
+    """
+    try:
+        from bridgescaler.distributed_tensor import DSpatialStandardScalerTensor
+    except ImportError:  # a bridgescaler without it can only have written legacy scalers
+        return list(spatial_variables)
+
+    spatial_set, legacy = set(spatial_variables), set()
+
+    def _walk(d):
+        for key, value in d.items():
+            if isinstance(value, dict):
+                _walk(value)
+            elif key in spatial_set and not isinstance(value, DSpatialStandardScalerTensor):
+                legacy.add(key)
+
+    _walk(scaler_dict or {})
+    return [v for v in spatial_variables if v in legacy]
 
 
 def _unflatten_spatial_tensors(state_dict: dict, original_shapes: dict) -> dict:

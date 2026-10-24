@@ -3,8 +3,9 @@ from os.path import expandvars
 from bridgescaler import load_scaler_dict, scale_var_dict
 from credit.postblock.base import BasePostblock
 from credit.preblock._utils import (
-    _parse_variable_selection,
     _flatten_spatial_tensors,
+    _legacy_spatial_variables,
+    _parse_variable_selection,
     _unflatten_spatial_tensors,
 )  # shared utilities — live in preblock but used by both pre and postblocks
 
@@ -36,10 +37,10 @@ class BridgeScalerTransform(BasePostblock):
     all variables under that hierarchy. Expansion happens lazily on the first
     forward call.
 
-    ``spatial_variables`` scales the listed variables per gridpoint (one
-    mean/variance per lat/lon cell) instead of per level — see the preblock's
-    docstring for the full explanation. Entries must also be covered by
-    ``variables``.
+    ``spatial_variables`` scales the listed variables per level and gridpoint
+    with the per-location scaler the preblock fit — see the preblock's
+    docstring for the full explanation. It must match the preblock's list, and
+    entries must also be covered by ``variables``.
 
     Example config::
 
@@ -85,6 +86,7 @@ class BridgeScalerTransform(BasePostblock):
         self.spatial_variables = spatial_variables or []
         full_scaler = load_scaler_dict(self.scaler_path)
         self.scaler = full_scaler["target"]
+        self._flat_spatial = []  # legacy (flattened-grid) spatial scalers, resolved on first forward
 
     def forward(self, batch_dict: dict) -> dict:
         if not self.variables_expanded:
@@ -99,8 +101,9 @@ class BridgeScalerTransform(BasePostblock):
                 missing = set(self.spatial_variables) - set(self.variables)
                 if missing:
                     raise ValueError(f"spatial_variables must also be selected by `variables` (missing: {missing}).")
+                self._flat_spatial = _legacy_spatial_variables(self.scaler, self.spatial_variables)
             self.variables_expanded = True
-        flattened, spatial_shapes = _flatten_spatial_tensors(batch_dict[self.key], self.spatial_variables)
+        flattened, spatial_shapes = _flatten_spatial_tensors(batch_dict[self.key], self._flat_spatial)
         scaled = scale_var_dict(flattened, self.scaler, self.method, self.variables)
         batch_dict[self.key] = _unflatten_spatial_tensors(
             scaled, spatial_shapes

@@ -534,12 +534,15 @@ def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None
     """A scaler's `spatial_variables` must match between its preblock (fit) and
     postblock (apply) blocks.
 
-    `credit preprocess` fits grid-wise (per-gridpoint) statistics only for the
-    variables named in the preblock's `spatial_variables` — anything else is fit
-    per-level. If the postblock applying that same scaler names a variable under
-    `spatial_variables` that the preblock didn't, the postblock flattens it to
-    `n_lat * n_lon` columns before calling the scaler, which no longer matches
-    the fitted column count and raises at runtime on the very first batch.
+    `credit preprocess` fits grid-wise (per-gridpoint) statistics, with a
+    `DSpatialStandardScalerTensor`, only for the variables named in the
+    preblock's `spatial_variables` — anything else is fit per-level. If the
+    postblock applying that same scaler names a variable under
+    `spatial_variables` that the preblock fit per-level, it treats that scaler as
+    a legacy flattened-grid one and flattens the tensor to `n_lat * n_lon`
+    columns, which no longer matches the fitted column count and raises at
+    runtime on the very first batch (as does the reverse with scaler files fit
+    before per-location scaling).
     `flatten_to_tensor` forward-scales with its `scaler_path` too, so it is held
     to the same rule.
     """

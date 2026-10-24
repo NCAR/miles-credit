@@ -164,6 +164,18 @@ you don't need to set it yourself unless you have a reason to override it.
 of an existing scaler is unaffected.)
 ```
 
+Variables listed under `spatial_variables` are scaled **grid-wise**: one mean and
+variance per level *and* grid point, fit with bridgescaler's
+`DSpatialStandardScalerTensor` whatever `scaler_type` the block uses. It works on
+lat/lon and unstructured (`ncol`) grids and on 3D variables (per level). The
+statistics are NaN-aware per grid point, so a fixed mask (SST over land, say)
+only drops those cells, and a constant grid point is scaled with a standard
+deviation of 1 instead of dividing by zero. A cell that is NaN in every sample
+has NaN statistics and stays NaN, so fill masked cells before the scaler (a
+`fill_values` preblock) when the model must see finite values there. Fitting
+needs a bridgescaler newer than 0.8.6; scaler files fit before this (one
+column per grid point, over the flattened grid) still load and work unchanged.
+
 ```{warning}
 If a variable is scaled grid-wise via `spatial_variables`, that same list must
 be set identically on both the preblock that fits the scaler and the

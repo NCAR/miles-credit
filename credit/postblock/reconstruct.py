@@ -33,6 +33,7 @@ from credit.postblock.base import BasePostblock
 from credit.preblock._utils import (
     _parse_variable_selection,
     _flatten_spatial_tensors,
+    _legacy_spatial_variables,
     _unflatten_spatial_tensors,
 )
 
@@ -124,9 +125,9 @@ class FlattenToTensor(BasePostblock):
         key: source nested dict (default ``"y_processed"``).
         out_key: flat tensor destination (default ``"y_pred"``).
         spatial_variables: full keys or partial paths of variables the scaler
-            stores per gridpoint rather than per level. They are flattened to
-            ``(B, H*W)`` before scaling and restored afterward, as in the
-            ``bridgescaler_transform`` pre/postblocks. Must match the
+            stores per level and gridpoint, as in the ``bridgescaler_transform``
+            pre/postblocks (scalers fit before per-location scaling are flattened
+            to ``(B, H*W)`` around the transform). Must match the
             ``spatial_variables`` of the preblock that fit ``scaler_path``.
     """
 
@@ -142,6 +143,7 @@ class FlattenToTensor(BasePostblock):
         super().__init__()
         self.spatial_variables = spatial_variables or []
         self.spatial_expanded = False
+        self._flat_spatial = []  # legacy (flattened-grid) spatial scalers, resolved on first forward
         self.scaler_path = os.path.expandvars(scaler_path) if scaler_path is not None else None
         self.variables = variables
         self.method = method
@@ -169,8 +171,9 @@ class FlattenToTensor(BasePostblock):
                 self.spatial_variables = _parse_variable_selection(
                     self.spatial_variables, {"_": nested}, data_types=["_"]
                 )
+                self._flat_spatial = _legacy_spatial_variables(self.scaler, self.spatial_variables)
                 self.spatial_expanded = True
-            work, spatial_shapes = _flatten_spatial_tensors(work, self.spatial_variables)
+            work, spatial_shapes = _flatten_spatial_tensors(work, self._flat_spatial)
             work = scale_var_dict(work, self.scaler, self.method, self.variables)
             work = _unflatten_spatial_tensors(work, spatial_shapes)
         else:

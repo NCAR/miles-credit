@@ -104,9 +104,10 @@ physical `y_processed` untouched for autoregressive rollout assembly. Omit
 
 If the scaler stores some variables per grid point (fit with `spatial_variables`
 in the `bridgescaler_transform` preblock), list the same variables under
-`spatial_variables` here. They are flattened to `(B, H*W)` before scaling and
-restored afterward, as in the scaler pre/postblocks. Without it, bridgescaler's
-column-count check fails on the first training batch. `credit check` reports a
+`spatial_variables` here. The per-location scaler is applied to the tensor as it
+is; a scaler file fit before per-location scaling has one column per grid point
+instead, so those variables are flattened to `(B, H*W)` around the transform,
+and without the list its column-count check fails on the first training batch. `credit check` reports a
 `flatten_to_tensor` block whose `spatial_variables` differ from those of the
 preblock that fits the same `scaler_path`.
 

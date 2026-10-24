@@ -224,10 +224,9 @@ def test_flatten_to_tensor_scales_with_preprocess_scaler(tmp_path):
 
 def test_flatten_to_tensor_spatial_scaler_round_trip(tmp_path):
     """FlattenToTensor with `spatial_variables` applies a per-gridpoint scaler
-    (PS fit with one mean/variance per grid cell): the variable is flattened to
-    (B, H*W) for scaling, so the column-count check passes, and the result
-    round-trips through Reconstruct + the spatial inverse postblock scaler. The
-    physical y_processed stays untouched and keeps its shape."""
+    (PS fit with one mean/variance per grid cell by DSpatialStandardScalerTensor),
+    and the result round-trips through Reconstruct + the spatial inverse postblock
+    scaler. The physical y_processed stays untouched and keeps its shape."""
     from bridgescaler import save_scaler_dict
     from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
     from credit.postblock.scaler import BridgeScalerTransform as PostScalerBlock
@@ -254,11 +253,17 @@ def test_flatten_to_tensor_spatial_scaler_round_trip(tmp_path):
     originals = {k: v.clone() for k, v in y_processed[SRC].items()}
     batch = {"y_processed": y_processed, "metadata": {"target": {"_channel_map": cmap}}}
 
-    # without spatial_variables, PS has 1 column but the scaler was fit with H*W
-    with pytest.raises(AssertionError, match="does not match scaler"):
-        FlattenToTensor(scaler_path=scaler_path, variables=list(cmap))(
-            {"y_processed": rand_super(), "metadata": {"target": {"_channel_map": cmap}}}
-        )
+    # A per-location scaler takes the unflattened tensor, so the result does not
+    # depend on the block repeating spatial_variables (only legacy flattened-grid
+    # scaler files need the list to line up their columns).
+    probe = rand_super()
+    listed = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap), spatial_variables=[ps])(
+        {"y_processed": probe, "metadata": {"target": {"_channel_map": cmap}}}
+    )["y_pred"]
+    unlisted = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap))(
+        {"y_processed": probe, "metadata": {"target": {"_channel_map": cmap}}}
+    )["y_pred"]
+    assert torch.allclose(listed, unlisted)
 
     # partial path exercises the same prefix expansion as the scaler blocks
     flat = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap), spatial_variables=[f"{SRC}/prognostic/2d/PS"])
