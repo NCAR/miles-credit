@@ -426,13 +426,6 @@ postblocks:
         spatial_variables: *spatial_vars
         method: inverse_transform
     
-    fillnan_prepred: #fill all variables with land/ocean mask
-        type: "fill_values"
-        args:
-            rules: *fill_rules
-            variables: *fill_vars  
-    
-    
     log_trans:
       type: "exp_transform"
       args:
@@ -442,20 +435,6 @@ postblocks:
                              # cap would silently clip the ground truth.
         variables: *log_vars
 
-    fillnan_postpred: #fill any variables that went through log transform
-        type: "fill_values"
-        args:
-            rules: *fill_rules
-            variables: &fill_post_vars  
-                - 'E3SM_ATM/diagnostic/2d/PRECT'
-                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
-                - 'E3SM_LND/prognostic/2d/SNOWDP'
-                - 'E3SM_OCN/diagnostic/2d/dMLD' 
-                - 'E3SM_ICE/prognostic/2d/sithick'
-                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
 # ----------------------------------------------------------------------- #
 # Target twin.
 #
@@ -488,12 +467,6 @@ postblocks:
         spatial_variables: *spatial_vars
         method: inverse_transform
 
-    fillnan_pretarget:
-        type: "fill_values"
-        args:
-            rules: *fill_rules
-            variables: *fill_vars  
-                
     log_trans_target:
       type: "exp_transform"
       args:
@@ -501,13 +474,6 @@ postblocks:
         key: 'y_target_processed'
         variables: *log_vars
 
-    fillnan_posttarget:
-        type: "fill_values"
-        args:
-            rules: *fill_rules
-            variables: *fill_post_vars
-
-            
     # tracer_fixer:
     #   type: tracer_fixer
     #   args:

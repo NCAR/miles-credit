@@ -28,7 +28,6 @@ _POSTBLOCK_REGISTRY = {
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
-    "fill_values": ("credit.preblock.fill_values", "FillValues"),
     "se_to_latlon": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
 }
 
