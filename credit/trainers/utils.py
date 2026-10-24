@@ -8,7 +8,7 @@ from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.utils.data import DataLoader
 import torch.distributed as dist
 
-from credit.scheduler import load_scheduler
+from credit.scheduler import CosineAnnealingWarmupRestarts, load_scheduler
 from credit.samplers import DistributedMultiStepBatchSampler
 from credit.datasets.gen_2.multi_source import MultiSourceDataset
 from credit.models.checkpoint import (
@@ -717,8 +717,7 @@ def load_model_states_and_optimizer(conf, model, device):
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     if conf["trainer"].get("update_learning_rate", False):
-        for param_group in optimizer.param_groups:
-            param_group["lr"] = learning_rate
+        apply_learning_rate_override(optimizer, scheduler, learning_rate)
 
     return conf, model, optimizer, scheduler, scaler
 
@@ -836,3 +835,43 @@ def report_nonfinite_loss(full_data_dict: dict, criterion, logger) -> None:
         logger.error(
             "  all %d per-variable loss terms finite — the combination weights are the problem", len(var_losses)
         )
+
+
+def apply_learning_rate_override(optimizer, scheduler, learning_rate):
+    """Make ``learning_rate`` the new base LR (``trainer.update_learning_rate``).
+
+    With a scheduler that owns ``base_lrs``, the base is rescaled and each group's
+    current LR is scaled by the same ``new / old`` factor, so the scheduler's
+    position is kept: a warmup at step 0 stays at 0 rather than jumping straight
+    to ``learning_rate``. On a fresh run the factor is 1 and nothing changes.
+    Without a scheduler, or for one with no base LRs (``ReduceLROnPlateau``), the
+    LR is set directly.
+
+    ``CosineAnnealingWarmupRestarts`` keeps its floor (``min_lr``) in ``base_lrs``
+    and its peak in ``max_lr``, so there ``learning_rate`` replaces the peak,
+    ``min_lr`` is left as configured, and the current LR is recomputed at the
+    scheduler's position. Rescaling ``base_lrs`` would multiply the LR by
+    ``learning_rate / min_lr`` and flatten the schedule.
+    """
+    # The scheduler may hold the unwrapped optimizer (FSDPOptimizerWrapper.optim).
+    param_groups = getattr(scheduler, "optimizer", optimizer).param_groups
+    if isinstance(scheduler, CosineAnnealingWarmupRestarts):
+        factor = learning_rate / scheduler.base_max_lr
+        scheduler.base_max_lr = learning_rate
+        scheduler.max_lr *= factor  # keeps the gamma decay of the current cycle
+        for param_group, lr in zip(param_groups, scheduler.get_lr()):
+            param_group["lr"] = lr
+        return
+    base_lrs = getattr(scheduler, "base_lrs", None)
+    if not base_lrs:
+        for param_group in param_groups:
+            param_group["lr"] = learning_rate
+        return
+    for i, param_group in enumerate(param_groups):
+        old_base = base_lrs[i]
+        if old_base > 0:
+            param_group["lr"] *= learning_rate / old_base
+        else:
+            param_group["lr"] = learning_rate
+        param_group["initial_lr"] = learning_rate
+    scheduler.base_lrs = [learning_rate] * len(param_groups)
