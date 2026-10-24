@@ -92,6 +92,30 @@ logger = logging.getLogger(__name__)
 VAR_WEIGHTING_MODES = ("inverse_variance", "manual", "learnable", "none")
 
 
+def _observed(scaler, values: torch.Tensor) -> torch.Tensor:
+    """Drop the entries of a flattened statistic that the scaler never observed.
+
+    Fitted bridgescaler standard scalers record a count ``n_`` per channel (per
+    channel and grid point for ``DSpatialStandardScalerTensor``). Entries with
+    ``n_ == 0`` were NaN in every fitted sample, so their statistics are NaN and
+    say nothing about the variable; they are skipped when it lines up with
+    *values*, and *values* is returned unchanged otherwise.
+    """
+    n = getattr(scaler, "n_", None)
+    if n is None or isinstance(n, (int, float)):
+        return values
+    n = torch.as_tensor(n).flatten()
+    return values[n > 0] if n.numel() == values.numel() else values
+
+
+def _scaler_channel_mean(scaler) -> "torch.Tensor | None":
+    """Per-channel mean (``mean_x_``) over the observed entries, matching ``_scaler_channel_variance``."""
+    mean = getattr(scaler, "mean_x_", None)
+    if mean is None:
+        return None
+    return _observed(scaler, torch.as_tensor(mean, dtype=torch.float32).flatten())
+
+
 def _scaler_channel_variance(scaler) -> "torch.Tensor | None":
     """Per-channel variance from a fitted bridgescaler object, or None.
 
@@ -102,7 +126,8 @@ def _scaler_channel_variance(scaler) -> "torch.Tensor | None":
     """
     var = getattr(scaler, "var_x_", None)
     if var is not None:
-        return torch.as_tensor(var, dtype=torch.float32).flatten()
+        # Never-observed entries (n_ == 0, e.g. land cells of an ocean field) are skipped.
+        return _observed(scaler, torch.as_tensor(var, dtype=torch.float32).flatten())
 
     means_list = getattr(scaler, "centroids_mean_tensor", None)
     weights_list = getattr(scaler, "centroids_weight_tensor", None)
@@ -198,7 +223,7 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
                 continue
             spec = _matching_exp_spec(var_key, exp_transforms)
             if spec is not None:
-                mean = getattr(scaler, "mean_x_", None)
+                mean = _scaler_channel_mean(scaler)
                 if mean is None:
                     logger.warning(
                         "'%s' is exp-transformed back to physical units, but its scaler has no "
@@ -207,7 +232,6 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
                         var_key,
                     )
                 else:
-                    mean = torch.as_tensor(mean, dtype=torch.float32).flatten()
                     phys = _physical_variance_from_log(mean, channel_var, spec["base"], spec["eps"])
                     if not torch.isfinite(phys).all():
                         logger.warning(

@@ -34,6 +34,7 @@ from credit.preblock._utils import (
     _parse_variable_selection,
     _flatten_spatial_tensors,
     _legacy_spatial_variables,
+    _pass_through_empty_cells,
     _unflatten_spatial_tensors,
 )
 
@@ -152,7 +153,7 @@ class FlattenToTensor(BasePostblock):
         if self.scaler_path is not None:
             from bridgescaler import load_scaler_dict
 
-            self.scaler = load_scaler_dict(self.scaler_path)["target"]
+            self.scaler = _pass_through_empty_cells(load_scaler_dict(self.scaler_path)["target"])
         else:
             self.scaler = None
 

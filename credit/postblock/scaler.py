@@ -6,6 +6,7 @@ from credit.preblock._utils import (
     _flatten_spatial_tensors,
     _legacy_spatial_variables,
     _parse_variable_selection,
+    _pass_through_empty_cells,
     _unflatten_spatial_tensors,
 )  # shared utilities — live in preblock but used by both pre and postblocks
 
@@ -85,7 +86,7 @@ class BridgeScalerTransform(BasePostblock):
         # scaling instead of per-level scaling. Must also be selected by `variables`.
         self.spatial_variables = spatial_variables or []
         full_scaler = load_scaler_dict(self.scaler_path)
-        self.scaler = full_scaler["target"]
+        self.scaler = _pass_through_empty_cells(full_scaler["target"])
         self._flat_spatial = []  # legacy (flattened-grid) spatial scalers, resolved on first forward
 
     def forward(self, batch_dict: dict) -> dict:

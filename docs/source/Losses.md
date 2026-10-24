@@ -190,6 +190,9 @@ weight 1.0 with a logged warning — worth watching for, since a silent 1.0 amon
 1/σ² weights effectively drops that variable from the objective. Postblock-computed
 diagnostics (e.g. `geopotential_diagnostic`) are never in the scaler, so give them
 a `variable_weights` entry of about `1 / σ²` in their physical units.
+For a grid-wise (`spatial_variables`) scaler the variance is the mean of the
+per-grid-point variances over the cells it observed (cells that were NaN in
+every sample are skipped), i.e. the variable's typical *local* variability.
 
 Log-transformed variables are handled automatically. When a `log_transform`
 preblock feeds the scaler and an `exp_transform` postblock converts the variable

@@ -167,6 +167,37 @@ def _legacy_spatial_variables(scaler_dict: dict | None, spatial_variables: list)
     return [v for v in spatial_variables if v in legacy]
 
 
+def _pass_through_empty_cells(scaler_dict: dict) -> dict:
+    """Make spatial scalers the identity at cells that never had data; returns *scaler_dict*.
+
+    A ``DSpatialStandardScalerTensor`` cell that was NaN in every fitted sample (land
+    in an ocean field, say) has ``n_ == 0`` and a NaN mean and variance, so both
+    ``transform`` and ``inverse_transform`` return NaN there and the loss turns NaN.
+    Setting those cells to mean 0 and variance 0 (which the scaler applies with
+    std 1) makes both directions the identity; observed cells keep their statistics.
+    Only the loaded scalers change, in place; the file on disk keeps NaN as
+    "never observed".
+    """
+    try:
+        from bridgescaler.distributed_tensor import DSpatialStandardScalerTensor
+    except ImportError:  # no per-location scalers to patch
+        return scaler_dict
+
+    def _walk(d):
+        for value in d.values():
+            if isinstance(value, dict):
+                _walk(value)
+            elif isinstance(value, DSpatialStandardScalerTensor) and value.n_ is not None:
+                empty = torch.as_tensor(value.n_) == 0
+                if empty.any():
+                    zero = torch.zeros((), dtype=value.mean_x_.dtype, device=value.mean_x_.device)
+                    value.mean_x_ = torch.where(empty, zero, value.mean_x_)
+                    value.var_x_ = torch.where(empty, zero, value.var_x_)
+
+    _walk(scaler_dict or {})
+    return scaler_dict
+
+
 def _unflatten_spatial_tensors(state_dict: dict, original_shapes: dict) -> dict:
     """Return a copy of `state_dict` with tensors restored to the shapes recorded by `_flatten_spatial_tensors`."""
     if not original_shapes:

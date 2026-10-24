@@ -171,8 +171,10 @@ lat/lon and unstructured (`ncol`) grids and on 3D variables (per level). The
 statistics are NaN-aware per grid point, so a fixed mask (SST over land, say)
 only drops those cells, and a constant grid point is scaled with a standard
 deviation of 1 instead of dividing by zero. A cell that is NaN in every sample
-has NaN statistics and stays NaN, so fill masked cells before the scaler (a
-`fill_values` preblock) when the model must see finite values there. Fitting
+(never observed) has NaN statistics; the scaler pre/postblocks pass it through
+unchanged (mean 0, std 1) so nothing downstream turns NaN. Raw NaNs stay NaN
+through the scaler, so fill them *after* it (a `fill_values` preblock) before
+`concat` so the model sees finite values. Fitting
 needs a bridgescaler newer than 0.8.6; scaler files fit before this (one
 column per grid point, over the flattened grid) still load and work unchanged.
 

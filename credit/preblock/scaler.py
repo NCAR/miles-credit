@@ -10,6 +10,7 @@ from ._utils import (
     _legacy_spatial_variables,
     _merge_nested,
     _parse_variable_selection,
+    _pass_through_empty_cells,
     _spatial_scaler_template,
     _unflatten_spatial_tensors,
 )
@@ -180,7 +181,7 @@ class BridgeScalerTransform(BasePreblock):
         # inverse_transform (loaded from disk, or accumulated by fit_scaler_batch).
         # ``scaler_template`` is the single unfitted prototype used to fit new data.
         if exists(self.scaler_path):
-            self.scaler = load_scaler_dict(self.scaler_path)
+            self.scaler = _pass_through_empty_cells(load_scaler_dict(self.scaler_path))
             self.scaler_template = None
         else:
             full_scaler_path = self.scaler_path

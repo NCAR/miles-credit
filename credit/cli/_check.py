@@ -1266,6 +1266,11 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
     (e.g. ARCO ERA5 cloud cover on the top hybrid levels) stores a NaN mean or a
     zero variance/range. Scaling divides by it, so every sample comes out
     NaN/inf and the first loss is NaN. Only files that already exist are read.
+
+    Per-location (``DSpatialStandardScalerTensor``) scalers are exempt where that is
+    by design: a constant cell is scaled with std 1, and a never-observed cell
+    (``n_ == 0``, e.g. land in an ocean field) is passed through unchanged by the
+    scaler blocks (``_pass_through_empty_cells``).
     """
     import torch
 
@@ -1291,8 +1296,11 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
             bad = torch.zeros_like(next(iter(stats.values())), dtype=torch.bool)
             for value in stats.values():
                 bad |= ~torch.isfinite(value)
-            if "var_x_" in stats:
+            spatial = type(scaler).__name__ == "DSpatialStandardScalerTensor"
+            if "var_x_" in stats and not spatial:
                 bad |= stats["var_x_"] <= 0
+            if spatial and getattr(scaler, "n_", None) is not None:
+                bad &= torch.as_tensor(scaler.n_).flatten() > 0
             if "min_x_" in stats and "max_x_" in stats:
                 bad |= stats["max_x_"] <= stats["min_x_"]
             if bad.any():
@@ -1330,6 +1338,7 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
     from credit.losses.base import (
         _matching_exp_spec,
         _physical_variance_from_log,
+        _scaler_channel_mean,
         _scaler_channel_variance,
         exp_transform_specs,
     )
@@ -1366,7 +1375,7 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
                 var = _scaler_channel_variance(scaler)
                 if spec is None or var is None or not torch.isfinite(var).all():
                     continue
-                mean = getattr(scaler, "mean_x_", None)
+                mean = _scaler_channel_mean(scaler)
                 if mean is None:
                     rep.warn(
                         where,
