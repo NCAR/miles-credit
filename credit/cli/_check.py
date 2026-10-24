@@ -1408,7 +1408,7 @@ def _walk_scalars(node, path=""):
 def _check_numeric_strings(conf: dict, rep: _Report) -> None:
     """Flag values written in exponent notation that YAML parsed as strings.
 
-    ``max_output: 1.0e6`` looks numeric but reaches the code as ``"1.0e6"``,
+    ``max_value: 1.0e6`` looks numeric but reaches the code as ``"1.0e6"``,
     because YAML 1.1 requires a signed exponent to resolve a float. The result
     is a ``TypeError`` on the first comparison, or worse, a silent string
     where a number was meant.

@@ -1038,10 +1038,10 @@ def test_unsigned_exponent_is_an_error(conf):
     """`1.0e6` is a str in YAML 1.1 — it reaches the code and raises on first use."""
     conf["postblocks"]["per_step"]["log_trans"] = {
         "type": "exp_transform",
-        "args": {"variables": [], "max_output": yaml.safe_load("x: 1.0e6")["x"]},
+        "args": {"variables": [], "max_value": yaml.safe_load("x: 1.0e6")["x"]},
     }
     rep = _run(conf)
-    where = "postblocks.per_step.log_trans.args.max_output"
+    where = "postblocks.per_step.log_trans.args.max_value"
     assert where in _wheres(rep), _text(rep)
     assert "1.0e+6" in _text(rep)
 
@@ -1050,10 +1050,10 @@ def test_signed_exponent_is_accepted(conf):
     """The correct spelling parses as a float and must stay silent."""
     conf["postblocks"]["per_step"]["log_trans"] = {
         "type": "exp_transform",
-        "args": {"variables": [], "max_output": yaml.safe_load("x: 1.0e+6")["x"]},
+        "args": {"variables": [], "max_value": yaml.safe_load("x: 1.0e+6")["x"]},
     }
     rep = _run(conf)
-    assert not any(f.where.endswith("max_output") for f in rep.findings), _text(rep)
+    assert not any(f.where.endswith("max_value") for f in rep.findings), _text(rep)
 
 
 def test_numeric_string_found_in_a_list(conf):

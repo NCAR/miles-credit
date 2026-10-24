@@ -429,7 +429,7 @@ postblocks:
     log_trans:
       type: "exp_transform"
       args:
-        max_output: &max_exp 1.0e+6  # overflow guard; ~55x QRUNOFF's measured max of 1.83e4
+        max_value: &max_exp 1.0e+6  # overflow guard; ~55x QRUNOFF's measured max of 1.83e4
                              # (scripts/check_exp_ranges.py). Must stay above every real
                              # value: this block also runs on the target twin, so a low
                              # cap would silently clip the ground truth.
@@ -470,7 +470,7 @@ postblocks:
     log_trans_target:
       type: "exp_transform"
       args:
-        max_output: *max_exp  
+        max_value: *max_exp  
         key: 'y_target_processed'
         variables: *log_vars
 
