@@ -250,39 +250,41 @@ preblocks:
                 - 'E3SM_OCN/diagnostic/2d/dMLD'
                 - 'E3SM_ICE/prognostic/2d/sithick'
   per_step:
-    log_trans:
-      type: "log_transform"
-      args:
-        variables: &log_vars
-            - 'E3SM_ATM/diagnostic/2d/PRECT'
-            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
-            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
-            - 'E3SM_LND/prognostic/2d/SNOWDP'
-            - 'E3SM_OCN/diagnostic/2d/dMLD'   
-            - 'E3SM_ICE/prognostic/2d/sithick'
-            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
-            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
-            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
-    fillnan_pre: # CREDIT calculates the loss in physical space (not the normalized space), so need to fill nans with 0s before scaling if the variable is a spatial scaling
+    missing_to_nan: # raw fill values -> NaN, which the scaler skips per grid point. |x| >= 1e15 also catches
+                    # fill values the ic_only regrid blended with real data; no field here comes near it.
         type: "fill_values"
         args:
-            rules: &fill_rules
-                - search: nan #NaN
-                  fill: 0
-                - search: 1.0e+30 #inf
-                  op: ">"
-                  fill: 0
-                - search: -1.0e+30 #-inf
+            rules:
+                - search: 1.0e+15
+                  op: ">="
+                  fill: .nan
+                - search: -1.0e+15
+                  op: "<="
+                  fill: .nan
+            variables: []
+
+    clamp_negative: # the log-transformed fields are non-negative; clamp small negative noise (QRUNOFF, PRECT)
+                    # to 0 so log_trans does not turn it into NaN
+        type: "fill_values"
+        args:
+            rules:
+                - search: 0
                   op: "<"
                   fill: 0
-            variables: # no ocean included because land are finite-filled     
+            variables: &log_vars # dMLD is signed (a mixed-layer depth change), so it is not log-transformed
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
                 - 'E3SM_LND/diagnostic/2d/QRUNOFF'
                 - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
                 - 'E3SM_LND/prognostic/2d/SNOWDP'
-                - 'E3SM_ICE/prognostic/2d/sithick' #remove nan after log
-                - 'E3SM_OCN/diagnostic/2d/dMLD' #remove nan after log
+                - 'E3SM_ICE/prognostic/2d/sithick'
                 - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
 
+    log_trans:
+      type: "log_transform"
+      args:
+        variables: *log_vars
     scaler:
       type: bridgescaler_transform
       args:
@@ -340,10 +342,13 @@ preblocks:
           channels_last: False
         method: transform
 
-    fillnan_post:
+    fillnan_post: # NaN (missing data; cells the scaler never observed pass through as NaN) -> 0 after
+                  # scaling, so the model only sees finite values
         type: "fill_values"
         args:
-            rules: *fill_rules
+            rules:
+                - search: nan
+                  fill: 0
             variables: &fill_vars  
                 - 'E3SM_ATM/static/2d/landfrac'
                 - 'E3SM_OCN/prognostic/2d/SSS'
