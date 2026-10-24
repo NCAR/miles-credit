@@ -94,6 +94,7 @@ def _detect_system() -> dict:
     gpu_count = 0
     gpu_names = []
     mps_available = False
+    print("  Checking GPU availability (loading PyTorch) ...", flush=True)
     try:
         import torch
 
@@ -358,6 +359,7 @@ def _local_details(preset: dict) -> dict:
         if glob.glob(top):
             break
         print("  That path does not exist or cannot be globbed.")
+    print(f"  Scanning {top} for data files ...", flush=True)
     prog_path, diag_path, static_path = _glob_suggestions(top)
     print("  Suggested file paths were inferred from the directory contents.")
     prog_path = _prompt("Prognostic path", prog_path)
@@ -382,6 +384,8 @@ def _local_details(preset: dict) -> dict:
     preset["level_coord"] = _prompt("Vertical coordinate name", preset["level_coord"])
     preset["height"] = _prompt_int("Grid height", preset["height"])
     preset["width"] = _prompt_int("Grid width", preset["width"])
+    if preset["level_coord"]:
+        print(f"  Reading '{preset['level_coord']}' values from {prog_path} ...", flush=True)
     level_values = _read_level_values(prog_path, preset["level_coord"])
     if level_values is not None:
         # LocalDataset selects levels with nearest-neighbor matching, so the
@@ -400,6 +404,7 @@ def _local_details(preset: dict) -> dict:
         preset["levels"] = list(range(1, n_levels + 1))
     preset["local_paths"] = {"prognostic": prog_path, "diagnostic": diag_path, "static": static_path}
     preset["local_top"] = top
+    print(f"  Scanning {top} for years in file names ...", flush=True)
     years = [
         int(year)
         for year in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", " ".join(glob.glob(top + "/**", recursive=True)))
@@ -827,6 +832,7 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
         print("  Accelerator: Apple MPS")
     else:
         print("  GPUs: none detected (CPU configuration is still possible)")
+    print("\n  Press Enter to accept the value shown in [brackets], or type your own.")
 
     default_path = os.path.join(os.getcwd(), f"credit_config_{dt.date.today().isoformat()}.yml")
     config_path = os.path.abspath(
@@ -906,6 +912,7 @@ def _repair_state(state: dict) -> None:
 def _begin(args) -> None:
     system_info = _detect_system()
     config_path, state = _collect_state(args, system_info)
+    passed = False
     for attempt in range(3):
         config = _build_config(state)
         _quote_data_variable_names(config)
@@ -917,13 +924,19 @@ def _begin(args) -> None:
         with open(config_path, "w") as output:
             output.write(text)
         print(f"\n  Saved config: {config_path}")
-        print("  Running credit check ...")
+        print("  Running credit check (loading models may take a minute) ...", flush=True)
         if _run_check(config_path) == 0:
+            passed = True
             break
         if attempt == 2:
-            print("  The config still needs corrections; inspect the checker report above.")
             break
         _repair_state(state)
+
+    # Restate the outcome below the checker report, which can be long.
+    if passed:
+        print(f"\n[SUCCESS] Config file created at: {config_path}")
+    else:
+        print(f"\n[ERROR] Config file created at: {config_path}, but credit check still reports errors (see above).")
 
     print("\nNext steps:")
     if state["system"] != "local":

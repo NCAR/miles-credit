@@ -156,14 +156,14 @@ of this step covers batch submission on NCAR HPC (Casper/Derecho) with
 calculate it yourself.
 
 ```bash
-# Casper — chain computed automatically from config
-credit submit --cluster casper  -c my_run.yml --gpus 4
+# Casper — chain computed automatically from config.  Override gpu count to 4.  Be sure to use your authorized account key.
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --gpus 4
 
 # Derecho — 1 node × 4 GPUs
-credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 1
+credit submit --cluster derecho -c my_experiment.yml --account <ACCOUNT_KEY> --gpus 4 --nodes 1
 
 # Derecho — multi-node (e.g. 4 nodes × 4 GPUs = 16 GPUs total)
-credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 4
+credit submit --cluster derecho -c my_experiment.yml --account <ACCOUNT_KEY> --gpus 4 --nodes 4
 ```
 
 Before submitting, `credit submit` always prints a job plan:
@@ -173,7 +173,7 @@ Before submitting, `credit submit` always prints a job plan:
   Job plan
 ====================================================
   Cluster  : casper
-  Config   : my_run.yml
+  Config   : my_experiment.yml
   GPUs     : 4 GPU(s)
   Walltime : 12:00:00 per job
   Chain    : 14 jobs  (70 epochs ÷ 5 per job)
@@ -187,13 +187,13 @@ If the memory estimate is high (> 24 GB) it will warn you to reduce
 Override the chain length manually if needed:
 
 ```bash
-credit submit --cluster casper -c my_run.yml --gpus 4 --chain 5
+credit submit --cluster casper -c my_experiment.yml --gpus 4 --chain 5
 ```
 
 Preview the full PBS script without submitting:
 
 ```bash
-credit submit --cluster casper -c my_run.yml --gpus 4 --dry-run
+credit submit --cluster casper -c my_experiment.yml --gpus 4 --dry-run
 ```
 
 Job 1 starts immediately; jobs 2–N are queued with PBS `afterok` and start
@@ -205,7 +205,7 @@ If a job fails mid-run (preemption, node fault), the remaining `afterok` jobs
 are cancelled by PBS. Restart from the last good checkpoint:
 
 ```bash
-credit submit --cluster derecho -c my_run.yml --gpus 4 --nodes 1 --reload --chain 5
+credit submit --cluster derecho -c my_experiment.yml --gpus 4 --nodes 1 --reload --chain 5
 ```
 
 `--reload` patches the config to set `load_weights: True` and all related
@@ -218,7 +218,7 @@ reload flags automatically — no manual YAML editing required.
 ### Training log
 
 The trainer writes a CSV after every epoch to your config's `save_loc`
-directory (e.g. `/glade/derecho/scratch/$USER/CREDIT_runs/my_run` on NCAR HPC):
+directory (e.g. `/glade/derecho/scratch/$USER/CREDIT_runs/my_experiment` on NCAR HPC):
 
 ```bash
 # Quick check: last 5 epochs
@@ -251,21 +251,83 @@ tensorboard --logdir <save_loc>/tensorboard
 Then open `http://localhost:6006` in your browser.
 On HPC you will need SSH port-forwarding — see [Monitoring with TensorBoard](tensorboard.md).
 
+## 6. Run a rollout
 
-## 6. Visualize a prediction
+Once training has produced a checkpoint, `credit rollout` steps the model forward
+autoregressively from a schedule of initial conditions and writes the forecasts
+to disk. The same config used for training drives inference. The `inference:`
+block controls which init times are run, how long each forecast is, and where
+output goes:
 
-Once at least one checkpoint exists, run a forward pass and produce a
-3-panel global map (truth | prediction | difference) for any field:
+```yaml
+inference:
+  run_mode: batch                   # batch (many init times) | single (one init time)
+  mode: none                        # none | ddp | fsdp
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/my_experiment/rollout'
+
+  batch_forecast:                   # used when run_mode: batch
+    forecast_length: "10d"          # total forecast duration per init time
+    first_init_date: "2020-01-01"   # must be within the data date range
+    last_init_date: "2020-01-10"
+    init_interval: "12h"
+
+  single_forecast:                  # used when run_mode: single
+    forecast_length: "10d"
+    start_datetime: "2020-06-01T00:00Z"
+```
+
+Rollout has no truth data, so if your training `postblocks:` include the
+`y_target_processed` target twin used by the `base` loss, give inference its own
+`inference.postblocks` chain without it (see
+[`example-end-to-end.yml`](https://github.com/NCAR/miles-credit/blob/main/config/gen_2/examples/example-end-to-end.yml)
+for a complete example).
+
+### Run locally
+
+```bash
+credit rollout -c my_experiment.yml
+```
+
+Set `run_mode: single` to run just the one forecast in `single_forecast`, which
+is a fast way to confirm the rollout works before launching a full batch.
+
+### Submit on NCAR HPC
+
+```bash
+# Preview the PBS script first
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode rollout --gpus 1 --dry-run
+
+# Then submit
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode rollout --gpus 1
+```
+
+Rollout jobs are independent, so there is no `afterok` chain like training.
+
+Output lands in `save_forecast/<YYYYMMDD_HHMMZ>/`, one subdirectory per init time,
+as NetCDF (or Zarr) files in physical units. `inference.output.group_by` sets the file
+granularity (one file per step, day, month, or whole run). These forecasts are the
+input for evaluation with `credit metrics` (see [Evaluation](Evaluation.md)) and
+for any downstream analysis.
+
+> **More detail**: [Inference guide](Inference.md) | `credit rollout --help`
+
+## 7. Visualize a prediction
+
+For a quick look at what the model has learned, `credit plot` loads the latest
+checkpoint, runs a single forward step on the first validation sample, and
+draws a 3-panel global map (truth | prediction | difference) for any field.
+It does not read rollout output, so you can use it during training as soon as
+one checkpoint exists:
 
 ```bash
 # Denormalised to physical units (K for temperature, Pa for pressure)
-credit plot -c my_run.yml --field VAR_2T --denorm
+credit plot -c my_experiment.yml --field VAR_2T --denorm
 
 # Multiple fields at once
-credit plot -c my_run.yml --field VAR_2T SP VAR_10U --denorm
+credit plot -c my_experiment.yml --field VAR_2T SP VAR_10U --denorm
 
 # Specific pressure level (index into your levels list)
-credit plot -c my_run.yml --field U --level 5 --denorm
+credit plot -c my_experiment.yml --field U --level 5 --denorm
 ```
 
 Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
@@ -281,7 +343,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 > **More detail**: `credit plot --help`
 
-## 7. Get help from the AI assistant
+## 8. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat
@@ -297,7 +359,7 @@ export OPENAI_API_KEY=sk-...          # https://platform.openai.com
 export ANTHROPIC_API_KEY=sk-ant-...   # https://console.anthropic.com  (enables agent mode)
 
 credit ask "how do I resume a failed Derecho job?"
-credit ask -c my_run.yml "my loss stopped decreasing at epoch 12, what should I check?"
+credit ask -c my_experiment.yml "my loss stopped decreasing at epoch 12, what should I check?"
 ```
 
 | Provider | Env var | Mode | Cost |
@@ -311,8 +373,8 @@ Priority when multiple keys are set: Anthropic agent → OpenAI → Google → G
 
 ```bash
 # Agent mode: reads your PBS log, config, and source to give a specific answer
-credit ask -c my_run.yml "why did my training run crash?"
-credit ask -c my_run.yml "review this config before I start a 200-epoch run on 8 H100s"
+credit ask -c my_experiment.yml "why did my training run crash?"
+credit ask -c my_experiment.yml "review this config before I start a 200-epoch run on 8 H100s"
 credit ask "what PBS jobs are running and how much walltime do they have left?"
 ```
 

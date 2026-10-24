@@ -30,6 +30,11 @@ The same ``batch_dict`` with ``"y_processed"`` added as a nested dict:
 import os
 import torch
 from credit.postblock.base import BasePostblock
+from credit.preblock._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+)
 
 
 class Reconstruct(BasePostblock):
@@ -65,8 +70,16 @@ class Reconstruct(BasePostblock):
         y_pred = batch_dict[self.in_key]
         output_map = batch_dict["metadata"]["target"]["_channel_map"]
 
-        # Flatten time dim if input arrived as 5D (B, C, T, H, W) — unflatten needs 4D input
-        if y_pred.dim() == 5:
+        # Fold a singleton frame/time axis at dim=2 into the channel dim before
+        # slicing. Models return this at different total ranks depending on
+        # spatial dimensionality: 5D (B, C, 1, H, W) for 2D lat-lon/tile grids,
+        # 4D (B, C, 1, ncol) for 1D SE/cube-sphere grids. Checking shape[2] == 1
+        # (rather than a hardcoded dim() == 5) generalizes to both -- a plain
+        # (B, C, H, W) input with no frame axis is untouched either way, since a
+        # real spatial dim is never of size 1. Left unhandled, the frame axis
+        # survives as a spurious extra dimension through every downstream
+        # postblock (e.g. SEToLatLonPostBlock's regrid) and breaks netCDF writing.
+        if y_pred.dim() >= 4 and y_pred.shape[2] == 1:
             y_pred = y_pred.flatten(1, 2)
 
         y_processed = {}
@@ -110,6 +123,11 @@ class FlattenToTensor(BasePostblock):
         method: scaler method (default ``"transform"`` — physical -> normalized).
         key: source nested dict (default ``"y_processed"``).
         out_key: flat tensor destination (default ``"y_pred"``).
+        spatial_variables: full keys or partial paths of variables the scaler
+            stores per gridpoint rather than per level. They are flattened to
+            ``(B, H*W)`` before scaling and restored afterward, as in the
+            ``bridgescaler_transform`` pre/postblocks. Must match the
+            ``spatial_variables`` of the preblock that fit ``scaler_path``.
     """
 
     def __init__(
@@ -119,8 +137,11 @@ class FlattenToTensor(BasePostblock):
         method: str = "transform",
         key: str = "y_processed",
         out_key: str = "y_pred",
+        spatial_variables: list[str] | None = None,
     ):
         super().__init__()
+        self.spatial_variables = spatial_variables or []
+        self.spatial_expanded = False
         self.scaler_path = os.path.expandvars(scaler_path) if scaler_path is not None else None
         self.variables = variables
         self.method = method
@@ -142,7 +163,16 @@ class FlattenToTensor(BasePostblock):
             # shallow-copy the nested structure so scale_var_dict (which reassigns
             # leaves in place) does not normalize the physical y_processed.
             work = {source: dict(vars_) for source, vars_ in nested.items()}
+            if self.spatial_variables and not self.spatial_expanded:
+                # expand partial paths against {source: {var_key: tensor}}, wrapped
+                # with a dummy data-type level as in the postblock scaler.
+                self.spatial_variables = _parse_variable_selection(
+                    self.spatial_variables, {"_": nested}, data_types=["_"]
+                )
+                self.spatial_expanded = True
+            work, spatial_shapes = _flatten_spatial_tensors(work, self.spatial_variables)
             work = scale_var_dict(work, self.scaler, self.method, self.variables)
+            work = _unflatten_spatial_tensors(work, spatial_shapes)
         else:
             work = nested
 
@@ -151,9 +181,12 @@ class FlattenToTensor(BasePostblock):
         for var_key in sorted(channel_map, key=lambda k: channel_map[k]["slice"].start):
             source = var_key.split("/")[0]
             tensor = work[source][var_key]
-            # (B, n_levels, n_time, H, W) -> (B, n_levels * n_time, H, W)
-            if tensor.dim() == 5:
-                tensor = tensor.flatten(1, 2)
+            # y_processed tensors are always (B, n_levels, n_time, ...spatial) by
+            # Reconstruct's own contract -- dims 1 and 2 are always (n_levels,
+            # n_time) regardless of spatial rank (H, W for lat-lon grids; ncol
+            # for SE/cube-sphere grids), so this flatten is unconditional rather
+            # than gated on a hardcoded total rank.
+            tensor = tensor.flatten(1, 2)
             pieces.append(tensor)
 
         batch_dict[self.out_key] = torch.cat(pieces, dim=1)

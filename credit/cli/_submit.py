@@ -25,6 +25,7 @@ logger = __import__("logging").getLogger(__name__)
 
 
 def _train(args: argparse.Namespace) -> None:
+    print("Starting credit train: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.train_gen2 import main_cli
 
     sys.argv = ["credit-train", "-c", args.config, "--backend", args.backend]
@@ -32,6 +33,7 @@ def _train(args: argparse.Namespace) -> None:
 
 
 def _preprocess(args: argparse.Namespace) -> None:
+    print("Starting credit preprocess: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.preprocess import main
 
     sys.argv = ["credit-preprocess", "-c", args.config, "--backend", args.backend]
@@ -39,6 +41,7 @@ def _preprocess(args: argparse.Namespace) -> None:
 
 
 def _rollout(args: argparse.Namespace) -> None:
+    print("Starting credit rollout: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.rollout_gen2 import main
 
     argv = ["credit-rollout", "-c", args.config, "-p", str(args.procs)]
@@ -47,6 +50,7 @@ def _rollout(args: argparse.Namespace) -> None:
 
 
 def _realtime(args: argparse.Namespace) -> None:
+    print("Starting credit realtime: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.rollout_realtime_gen2 import main
 
     argv = [
@@ -741,6 +745,19 @@ def _qsub(script: str, save_loc: str | None = None) -> str:
     return result.stdout.strip()
 
 
+def _print_submitted(job_ids: list, cluster: str, scheduler: str, config: str, save_loc: str) -> None:
+    """Print a confirmation of the submitted job number(s), the config, and the log directory.
+
+    qsub returns ``<number>.<server>`` (e.g. ``5875448.casper-pbs``); only the
+    number is shown.  The log directory matches the one the batch scripts write to.
+    """
+    numbers = [str(job_id).split(".", 1)[0] for job_id in job_ids]
+    jobs = f"Job {numbers[0]}" if len(numbers) == 1 else f"Jobs {', '.join(numbers)}"
+    print(f"[SUCCESS] {jobs} submitted to {cluster.capitalize()} ({scheduler}).")
+    print(f"  Config: {config}")
+    print(f"  Logs:   {os.path.join(save_loc, 'logs')}", flush=True)
+
+
 def _compute_chain(args: argparse.Namespace) -> int:
     """Return the number of jobs to chain."""
     if args.chain is not None:
@@ -1019,6 +1036,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
 
     job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
+    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc)
 
 
 def _do_submit_realtime(args: argparse.Namespace) -> None:
@@ -1078,6 +1096,7 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
 
     job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
+    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc)
 
 
 def _submit(args: argparse.Namespace) -> None:
@@ -1126,11 +1145,15 @@ def _submit(args: argparse.Namespace) -> None:
     script = build(args, first_config, repo, depend_on=None, save_loc=save_loc)
     job_id = submit(script, save_loc=save_loc)
     logger.info("[1/%d] %s  %s", n_jobs, job_id, first_config)
+    job_ids = [job_id]
 
     for i in range(2, n_jobs + 1):
         script = build(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
         job_id = submit(script, save_loc=save_loc)
         logger.info("[%d/%d] %s  afterok  (reload)", i, n_jobs, job_id)
+        job_ids.append(job_id)
+
+    _print_submitted(job_ids, args.cluster, ctx["name"], first_config, save_loc)
 
 
 def _build_rollout_pbs_script(
@@ -1351,3 +1374,4 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         save_forecast,
         monitor,
     )
+    _print_submitted(job_ids, args.cluster, ctx["name"], config_abs, rollout_save_loc)

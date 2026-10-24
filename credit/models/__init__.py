@@ -34,7 +34,7 @@ _MODEL_REGISTRY = {
     ),
     # "wxformer" is kept only for config backward compatibility -- prefer
     # "wxformer_base" in new configs. "wxformer" alone is ambiguous now that
-    # "nextgen_wxformer" also exists; "wxformer_base" names this as the
+    # "wxformer_column" also exists; "wxformer_base" names this as the
     # original CrossFormer-backed architecture specifically, not the whole
     # WXFormer family.
     "wxformer": (
@@ -78,10 +78,24 @@ _MODEL_REGISTRY = {
         "DownscalingSegmentationModel",
         "Loading downscaling U-net",
     ),
+    # ── WXFormer next generation ─────────────────────────────────────────────
+    "wxformer_column": (
+        "credit.models.wxformer.wxformer_column",
+        "WXFormerColumn",
+        "Loading WXFormerColumn (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+    ),
+    # "nextgen_wxformer" is kept only for config backward compatibility --
+    # NextGenWXFormer was renamed WXFormerColumn (same parameters and state
+    # dict); prefer "wxformer_column" in new configs.
     "nextgen_wxformer": (
-        "credit.models.wxformer.wxformer_next",
-        "NextGenWXFormer",
-        "Loading NextGen WXFormer (CrossFormer U-Net + spectral GNN bottleneck + column attention) ...",
+        "credit.models.wxformer.wxformer_column",
+        "WXFormerColumn",
+        "Loading WXFormerColumn (nextgen_wxformer is a deprecated alias for wxformer_column) ...",
+    ),
+    "cubed_wxformer": (
+        "credit.models.wxformer.cubed_wxformer",
+        "CubedWXFormer",
+        "Loading CubedWXFormer (CrossFormer encoder-decoder on a cubed-sphere SE grid) ...",
     ),
 }
 

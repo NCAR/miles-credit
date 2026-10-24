@@ -13,82 +13,13 @@ from credit.trainers.utils import cycle, accum_log
 from credit.trainers.base_trainer import BaseTrainer
 from credit.data import concat_and_reshape, reshape_only
 from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+from credit.losses.crps import ring_crps_loss
 import optuna
 
 logger = logging.getLogger(__name__)
 
 
-class Gather(torch.autograd.Function):
-    """Custom autograd function for gathering tensors from all processes while preserving gradients.
-
-    This layer performs an all_gather operation on the provided tensor across all
-    distributed processes and concatenates them along the batch dimension (dim=0).
-    The backward pass correctly routes gradients back to the originating processes.
-
-    This is useful for operations like computng ensembles where you need to compute
-    the CRPS between samples across all GPUs, while still being able to backpropagate
-    through the gathered tensor.
-    """
-
-    @staticmethod
-    def forward(ctx, input):
-        """Gather tensors from all ranks and concatenate them on the batch dimension.
-
-        Args:
-            ctx: Context object to store information for backward pass
-            input: Tensor to be gathered across processes
-
-        Returns:
-            Concatenated tensor from all processes
-        """
-        ctx.world_size = dist.get_world_size()
-        ctx.rank = dist.get_rank()
-
-        gathered = [torch.zeros_like(input) for _ in range(ctx.world_size)]
-        dist.all_gather(gathered, input)
-        return torch.cat(gathered, dim=0)
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        """Distribute gradients back to their originating processes.
-
-        Args:
-            ctx: Context object with stored information from forward pass
-            grad_output: Gradient with respect to the forward output
-
-        Returns:
-            Gradient for the input tensor
-        """
-        # Each rank gets its corresponding chunk of grad_output
-        input_grad = grad_output.chunk(ctx.world_size, dim=0)[ctx.rank]
-        return input_grad
-
-
-def gather_tensor(tensor):
-    """Gathers tensors from all ranks and preserves autograd graph.
-
-    This function allows you to gather tensors from all processes in a distributed
-    setting while maintaining the autograd graph for backward passes. This is critical
-    for operations that need to compute losses across all samples in a distributed
-    training environment.
-
-    Args:
-        tensor: The tensor to gather across processes
-
-    Returns:
-        Tensor concatenated from all processes along dimension 0
-
-    Example:
-        >>> # On each GPU
-        >>> local_tensor = torch.randn(8, 128)  # local batch of embeddings
-        >>> # Gather embeddings from all GPUs (total batch_size * world_size)
-        >>> gathered_tensor = gather_tensor(local_tensor)
-        >>> # Now you can compute a loss that depends on all samples
-    """
-    return Gather.apply(tensor)
-
-
-class TrainerERA5Ensemble(BaseTrainer):
+class TrainerEnsembleGen1(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Trainer class for handling the training, validation, and checkpointing of models.
@@ -327,31 +258,12 @@ class TrainerERA5Ensemble(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    lat_size = y.shape[3]
-                    total_loss = 0
-                    total_std = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y)
+                    total_std = (y_pred - y).detach().std()
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
-                        # y_slice = gather_tensor(y_slice)
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
-
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
-                        total_std += std
-
-                        # Track per-channel loss
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
-
-                    # Single backward call for the accumulated loss
                     scaler.scale(total_loss).backward()
 
                 if distributed:
@@ -670,26 +582,11 @@ class TrainerERA5Ensemble(BaseTrainer):
                     if flag_clamp:
                         y = torch.clamp(y, min=clamp_min, max=clamp_max)
 
-                    lat_size = y.shape[3]
-                    total_loss = 0
-                    for i in range(lat_size):
-                        # Slice the tensors
-                        y_pred_slice = y_pred[:, :, :, i : i + 1].contiguous()
-                        y_slice = y[:, :, :, i : i + 1].contiguous()
+                    total_loss = ring_crps_loss(y_pred.to(y.dtype), y)
+                    total_std = (y_pred - y).detach().std()
 
-                        # Gather the tensor
-                        y_pred_slice = gather_tensor(y_pred_slice)
-
-                        # Compute loss for this slice
-                        loss = criterion(y_slice.to(y_pred_slice.dtype), y_pred_slice).mean() / lat_size
-                        total_loss += loss
-
-                        # Compute the std
-                        std = ((y_pred_slice - y_slice.to(y_pred_slice.dtype)).detach().std()) / lat_size
-
-                        # Track per-channel loss, std
-                        accum_log(logs, {"loss": loss.item()})
-                        accum_log(logs, {"std": std.item()})
+                    accum_log(logs, {"loss": total_loss.item()})
+                    accum_log(logs, {"std": total_std.item()})
 
                     # ----------------------------------------------------------------------- #
 

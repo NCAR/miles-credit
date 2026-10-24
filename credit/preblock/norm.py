@@ -77,6 +77,13 @@ class ERA5Normalizer(BasePreblock):
 
     def _normalize_tensor(self, key: str, tensor: torch.Tensor) -> torch.Tensor:
         """Normalize *tensor* using the variable name extracted from *key*."""
+        # Autoregressive Gen2 rollout can feed previous-step predictions back
+        # through the per-step preblock chain. Those tensors are already on the
+        # unstructured SE grid and already normalized: (B, C, T, 1, ncol).
+        # Source-grid fields still have real 2D spatial dimensions here.
+        if tensor.dim() == 5 and tensor.shape[-2] == 1 and tensor.shape[-1] > 1:
+            return tensor
+
         # key format: "era5/{field_type}/{dim}/{varname}"
         parts = key.split("/")
         varname = parts[-1] if len(parts) >= 1 else key

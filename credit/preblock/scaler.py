@@ -157,6 +157,11 @@ class BridgeScalerTransform(BasePreblock):
         self.spatial_variables = spatial_variables or []
         if scaler_params is None:
             scaler_params = {}
+        # bridgescaler defaults to channels_last=True, but CREDIT tensors are always
+        # channels-first — leaving this unset silently fits statistics over the
+        # spatial axis instead of the channel axis. Default it to False here unless
+        # a config explicitly overrides it.
+        scaler_params.setdefault("channels_last", False)
         self.scaler_params = scaler_params
         # ``scaler`` holds the nested dict of fitted scalers used for transform /
         # inverse_transform (loaded from disk, or accumulated by fit_scaler_batch).

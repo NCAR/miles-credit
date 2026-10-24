@@ -22,12 +22,14 @@ _POSTBLOCK_REGISTRY = {
     "global_water_fixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
     "global_energy_fixer": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
     "global_energy_fixer_updown": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
+    "global_energy_fixer_net": ("credit.postblock.conservation", "GlobalNetEnergyFixer"),
     "geopotential_diagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "pressure_interp_diagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "hybrid_level_interp": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
     "fill_values": ("credit.preblock.fill_values", "FillValues"),
+    "se_to_latlon": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -42,11 +44,13 @@ _CLASS_SOURCES = {
     "GlobalMassFixer": ("credit.postblock.conservation", "GlobalMassFixer"),
     "GlobalWaterFixer": ("credit.postblock.conservation", "GlobalWaterFixer"),
     "GlobalEnergyFixerUpDown": ("credit.postblock.conservation", "GlobalEnergyFixerUpDown"),
+    "GlobalNetEnergyFixer": ("credit.postblock.conservation", "GlobalNetEnergyFixer"),
     "GeopotentialDiagnostic": ("credit.postblock.geopotential", "GeopotentialDiagnostic"),
     "PressureInterpDiagnostic": ("credit.postblock.pressure_interp", "PressureInterpDiagnostic"),
     "HybridLevelInterpPost": ("credit.postblock.hybrid_interp", "HybridLevelInterpPost"),
     "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
+    "SEToLatLonPostBlock": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
 }
 
 
