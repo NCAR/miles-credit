@@ -130,6 +130,29 @@ def test_missing_scaler_is_not_backed_up(tmp_path):
     assert _backup_existing_file(str(tmp_path / "missing.json")) is None
 
 
+@pytest.mark.parametrize("shape", [(4, 1, 1, 6, 8), (4, 3, 1, 50)], ids=["latlon", "ncol"])
+def test_log_fitted_scalers_handles_spatial_scalers(shape, caplog):
+    """Per-location scalers store (C, *grid) stats; logging must summarize them, not index per channel."""
+    import logging
+
+    from credit.applications.preprocess import log_fitted_scalers
+    from credit.preblock._utils import _spatial_scaler_template
+
+    x = torch.randn(*shape) * 2 + 280
+    x[..., :3] = float("nan")  # cells never observed, like land in an ocean field
+    scaler = _spatial_scaler_template(len(shape))
+    scaler.fit(x)
+
+    logger = logging.getLogger("test_spatial_log")
+    with caplog.at_level(logging.INFO, logger="test_spatial_log"):
+        log_fitted_scalers({"input": {"src": {"SST": scaler}}}, logger)
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    lines = [r.getMessage() for r in caplog.records if "never-observed" in r.getMessage()]
+    assert len(lines) == shape[1]
+    assert all("inv[-4 -> 4]" in line and "nan" not in line for line in lines)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

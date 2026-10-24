@@ -114,12 +114,55 @@ def _scaler_device(scaler):
     return torch.device("cpu")
 
 
+def _log_spatial_scaler(scaler, columns, lo, hi, logger):
+    """Log a per-location scaler as per-channel ranges over its grid cells.
+
+    ``mean_x_`` / ``var_x_`` / ``n_`` have shape ``(C, *spatial_shape_)``, so each
+    channel gets the min/max of its per-cell mean and std, the count of cells that
+    were never observed (NaN in every sample), and the physical range the probe
+    endpoints map to across all cells.
+    """
+    spatial_shape = [int(s) for s in scaler.spatial_shape_]
+    logger.info("    spatial shape %s", spatial_shape)
+
+    inv = None
+    try:
+        device = _scaler_device(scaler)
+        # (2, C, time=1, *spatial) mirrors the (batch, level, time, *grid) layout the scaler was fit on.
+        probe = torch.empty((2, len(columns), 1, *spatial_shape), dtype=torch.float32, device=device)
+        probe[0], probe[1] = lo, hi
+        with torch.no_grad():
+            inv = scaler.inverse_transform(probe).detach().cpu().reshape(2, len(columns), -1)
+    except Exception as exc:  # noqa: BLE001 - logging-only, never fail preprocessing
+        logger.warning("  could not inverse-transform probe: %s", exc)
+
+    mean = torch.as_tensor(scaler.mean_x_).detach().cpu().reshape(len(columns), -1)
+    std = torch.as_tensor(scaler.var_x_).detach().cpu().reshape(len(columns), -1).sqrt()
+    n = None if scaler.n_ is None else torch.as_tensor(scaler.n_).detach().cpu().reshape(len(columns), -1)
+
+    def _rng(t):
+        t = t[~torch.isnan(t)]
+        return (float(t.min()), float(t.max())) if t.numel() else (float("nan"), float("nan"))
+
+    for i, col in enumerate(columns):
+        parts = ["mean∈[%.4g, %.4g]" % _rng(mean[i]), "std∈[%.4g, %.4g]" % _rng(std[i])]
+        if n is not None:
+            parts.append(f"never-observed={int((n[i] == 0).sum())}/{n.shape[1]}")
+        if inv is not None:
+            parts.append(f"inv[{lo:g} -> {hi:g}]=[{_rng(inv[0, i])[0]:.4g}, {_rng(inv[1, i])[1]:.4g}]")
+        logger.info("    %s: %s", col + 1 if isinstance(col, int) else col, "  ".join(parts))
+
+
 def _log_single_scaler(scaler, name, logger):
     """Log the fitted parameters of one leaf scaler, one line per channel/level."""
     columns = list(getattr(scaler, "x_columns_", []) or [])
     cls = type(scaler).__name__
     lo, hi, label = _scaler_probe_range(scaler)
     logger.info("Scaler '%s' [%s] — %d channel(s), probe range %s", name, cls, len(columns), label)
+
+    if columns and getattr(scaler, "spatial_shape_", None) is not None:
+        _log_spatial_scaler(scaler, columns, lo, hi, logger)
+        return
 
     mean = getattr(scaler, "mean_x_", None)
     var = getattr(scaler, "var_x_", None)
