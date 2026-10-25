@@ -1029,6 +1029,47 @@ def test_file_paths_are_not_mistaken_for_variable_refs(conf):
     assert _wheres(_run(conf)) == set()
 
 
+def _write_weights(path, rows, cols, S, n_a, n_b, normalization="destarea"):
+    import numpy as np
+    import xarray as xr
+
+    xr.Dataset(
+        {
+            "row": ("n_s", np.asarray(rows, dtype=np.int32)),
+            "col": ("n_s", np.asarray(cols, dtype=np.int32)),
+            "S": ("n_s", np.asarray(S, dtype=np.float64)),
+            "mask_a": ("n_a", np.ones(n_a, dtype=np.int32)),
+            "mask_b": ("n_b", np.ones(n_b, dtype=np.int32)),
+        },
+        attrs={"normalization": normalization},
+    ).to_netcdf(path)
+    return str(path)
+
+
+def test_regrid_with_uncovered_cells_warns_until_renormalized(conf, tmp_path):
+    """An ocean-only mesh: one cell partly covered, one not at all -> 0 instead of NaN."""
+    path = _write_weights(tmp_path / "ocn.nc", rows=[1, 1, 2], cols=[1, 2, 3], S=[0.5, 0.5, 0.3], n_a=3, n_b=3)
+    conf["preblocks"]["ic_only"] = {
+        "ocnregrid": {"type": "regrid", "args": {"weight_file": path, "variables": ["ERA5/prognostic/3d/T"]}}
+    }
+    where = "preblocks.ic_only.ocnregrid.args.renormalize"
+    rep = _run(conf)
+    assert where in _wheres(rep, "warning"), _text(rep, "warning")
+    assert "1 of 3 destination cells with no source" in _text(rep, "warning")
+    assert "1 partly covered" in _text(rep, "warning")
+
+    conf["preblocks"]["ic_only"]["ocnregrid"]["args"]["renormalize"] = True
+    assert where not in _wheres(_run(conf), "warning")
+
+
+def test_regrid_with_full_coverage_is_silent(conf, tmp_path):
+    path = _write_weights(tmp_path / "full.nc", rows=[1, 1, 2], cols=[1, 2, 3], S=[0.5, 0.5, 1.0], n_a=3, n_b=2)
+    conf["preblocks"]["ic_only"] = {
+        "rg": {"type": "regrid", "args": {"weight_file": path, "variables": ["ERA5/prognostic/3d/T"]}}
+    }
+    assert not any(w.endswith(".renormalize") for w in _wheres(_run(conf), "warning"))
+
+
 # ===========================================================================
 # YAML numeric strings
 # ===========================================================================

@@ -196,6 +196,83 @@ def test_regrid_flip_axis_ignores_positive_leading_axes(weight_file, caplog):
     assert "invalid flip_axis values [2]" in caplog.text
 
 
+@pytest.fixture
+def partial_coverage_weight_file(tmp_path):
+    """4 source cells -> 3 destination cells with ``destarea``-style weights.
+
+    dst 0: fully covered (0.5 * src0 + 0.5 * src1); dst 1: 30% covered (0.3 * src2),
+    like a coastal cell regridded from an ocean-only mesh; dst 2: no source at all
+    (land). src3 overlaps nothing.
+    """
+    rows = np.array([1, 1, 2], dtype=np.int32)
+    cols = np.array([1, 2, 3], dtype=np.int32)
+    ds = xr.Dataset(
+        {
+            "dst_grid_dims": xr.DataArray(np.array([3, 1], dtype=np.int32), dims=("dst_grid_rank",)),
+            "mask_a": xr.DataArray(np.ones(4, dtype=np.int32), dims=("n_a",)),
+            "mask_b": xr.DataArray(np.ones(3, dtype=np.int32), dims=("n_b",)),
+            "row": xr.DataArray(rows, dims=("n_s",)),
+            "col": xr.DataArray(cols, dims=("n_s",)),
+            "S": xr.DataArray(np.array([0.5, 0.5, 0.3]), dims=("n_s",)),
+        }
+    )
+    path = tmp_path / "partial_weights.nc"
+    ds.to_netcdf(path)
+    return str(path)
+
+
+def _regrid_flat(path, x, **kwargs):
+    var = "OCN/prognostic/2d/SSS"
+    out = Regridder(path, variables=[var], **kwargs)({"input": {"OCN": {var: x}}})
+    return out["input"]["OCN"][var]
+
+
+def test_regrid_default_dilutes_partial_cells_and_zeros_empty_ones(partial_coverage_weight_file):
+    """Documents the plain W @ x behavior that ``renormalize`` exists to fix."""
+    x = torch.tensor([[10.0, 20.0, 35.0, 99.0]])
+    out = _regrid_flat(partial_coverage_weight_file, x)
+    torch.testing.assert_close(out, torch.tensor([[[15.0, 10.5, 0.0]]]))
+
+
+def test_regrid_renormalize_restores_partial_cells_and_nans_empty_ones(partial_coverage_weight_file):
+    x = torch.tensor([[10.0, 20.0, 35.0, 99.0]])
+    out = _regrid_flat(partial_coverage_weight_file, x, renormalize=True)
+    torch.testing.assert_close(out[..., :2], torch.tensor([[[15.0, 35.0]]]))
+    assert torch.isnan(out[..., 2]).all()
+
+
+def test_regrid_renormalize_skips_nan_sources(partial_coverage_weight_file):
+    """A NaN source drops out of the mean instead of poisoning the cell; all-NaN -> NaN."""
+    x = torch.tensor([[10.0, float("nan"), float("nan"), 99.0]])
+    plain = _regrid_flat(partial_coverage_weight_file, x)
+    renorm = _regrid_flat(partial_coverage_weight_file, x, renormalize=True)
+    assert torch.isnan(plain[..., 0]).all()
+    torch.testing.assert_close(renorm[..., 0], torch.tensor([[10.0]]))
+    assert torch.isnan(renorm[..., 1:]).all()
+
+
+def test_regrid_renormalize_uses_each_samples_own_mask(partial_coverage_weight_file):
+    """The valid mask differs per leading index (sample/level/time), so must the weight sum."""
+    x = torch.tensor([[[10.0, float("nan"), 35.0, 0.0]], [[float("nan"), 20.0, 35.0, 0.0]]])  # (2, 1, 4)
+    out = _regrid_flat(partial_coverage_weight_file, x, renormalize=True)
+    assert out.shape == (2, 1, 1, 3)
+    torch.testing.assert_close(out[:, 0, 0, 0], torch.tensor([10.0, 20.0]))
+
+
+def test_regrid_renormalize_is_a_no_op_with_full_coverage(weight_file):
+    """Every weight sum is 1 and nothing is NaN, so both modes agree."""
+    path, *_ = weight_file
+    variables = ["Test_ERA5/prognostic/3d/T"]
+    batch = create_synthetic_data()
+    plain = Regridder(path, variables=variables)(copy.deepcopy(batch))
+    renorm = Regridder(path, variables=variables, renormalize=True)(copy.deepcopy(batch))
+    for split in ("input", "target"):
+        torch.testing.assert_close(
+            renorm[split]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
+            plain[split]["Test_ERA5"]["Test_ERA5/prognostic/3d/T"],
+        )
+
+
 def test_grid_schema_resolve_accepts_unstructured_native_grid():
     """An unstructured source resolves on its native mesh — no Regridder needed.
 

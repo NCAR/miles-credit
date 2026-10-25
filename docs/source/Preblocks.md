@@ -113,6 +113,37 @@ args:
   reshape_to_xy: true
 ```
 
+**Partial-coverage sources (`renormalize`).** The plain product `W @ x` is right when
+the source covers the whole destination grid. It goes wrong when the source does not,
+as with an MPAS ocean or sea-ice mesh (which has no land cells) regridded onto a global
+grid:
+
+- a destination cell that no source cell overlaps gets an empty sum, so it comes out
+  **0** rather than NaN, and the scaler and loss treat land as data;
+- with `destarea`-normalized weights (the ESMF default), a coastal cell that is 30% ocean
+  gets 0.3 × the ocean value.
+
+Set `renormalize: true` on that regrid block to compute `Σ w·x / Σ w` over the valid
+(non-NaN) source cells instead. Coastal cells then get the true mean of their covered
+part, and cells with no valid source come out NaN, ready for a later `fill_values`
+NaN → 0 rule.
+
+NaN source cells are skipped rather than propagated, so with a land field (ocean stored
+as NaN) a coastal cell keeps the mean of its land part instead of becoming NaN. For a
+source with full coverage and no NaN, both modes give the same result. `credit check`
+warns when a regrid block's weight file leaves destination cells empty or partly covered
+and `renormalize` is not set.
+
+```yaml
+ocnregrid:
+  type: "regrid"
+  args:
+    weight_file: "/path/to/EC30to60E2r2_to_CESMf09.nc"   # destarea weights, ocean-only source
+    variables:
+      - "E3SM_OCN/prognostic/2d/SSS"
+    renormalize: true
+```
+
 ### `era5_normalizer` (ERA5Normalizer)
 
 **AutoAPI:** {py:obj}`credit.preblock.norm.ERA5Normalizer`
