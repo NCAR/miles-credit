@@ -633,6 +633,50 @@ def _check_ic_only_phase(conf: dict, rep: _Report) -> None:
             )
 
 
+def _check_regrid_coverage(conf: dict, rep: _Report) -> None:
+    """Warn when a ``regrid`` weight file leaves destination cells empty or partly covered.
+
+    The plain ``W @ x`` product writes 0 (an empty sum) where no source cell overlaps
+    a destination cell, and with ``destarea`` weights scales a partly covered cell by
+    its covered fraction. That is what an ocean-only mesh regridded onto a global grid
+    gives: land comes out 0 instead of NaN, so the scaler and the loss treat it as data,
+    and coastal values are diluted. ``renormalize: true`` fixes both. Only the weight
+    sums are read; an unreadable or missing file is left to ``_check_paths``.
+    """
+    import numpy as np
+
+    for phase in ("ic_only", "per_step"):
+        for name, block in ((conf.get("preblocks") or {}).get(phase) or {}).items():
+            if not isinstance(block, dict) or block.get("type") != "regrid":
+                continue
+            args = block.get("args") or {}
+            if args.get("renormalize") or not args.get("weight_file"):
+                continue
+            path = os.path.expandvars(str(args["weight_file"]))
+            if not os.path.isfile(path):
+                continue
+            try:
+                import xarray as xr
+
+                with xr.open_dataset(path) as w:
+                    sums = np.bincount(
+                        w["row"].values.astype(np.int64) - 1, weights=w["S"].values, minlength=w.sizes["n_b"]
+                    )
+                    norm = w.attrs.get("normalization", "unknown")
+            except Exception:  # noqa: BLE001 — unreadable weights are not this check's business
+                continue
+            empty = int((sums == 0).sum())
+            partial = int(((sums > 0) & (sums < 0.999)).sum())
+            if empty or partial:
+                rep.warn(
+                    f"preblocks.{phase}.{name}.args.renormalize",
+                    f"{path} leaves {empty} of {sums.size} destination cells with no source "
+                    f"(they come out 0, not NaN) and {partial} partly covered (normalization: {norm}; "
+                    "their values are scaled down by the uncovered fraction).",
+                    fix="Set renormalize: true to divide by the covered weight and NaN the empty cells.",
+                )
+
+
 # Field type used by postblocks that synthesise a variable (mslp, geopotential,
 # pressure interpolation). It never comes from a dataset source, so a reference to
 # one is not a typo.
@@ -1656,6 +1700,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_model_geometry,
             _check_loss_pipeline,
             _check_log_variance_weights,
+            _check_regrid_coverage,
             _check_trainer,
             _check_channel_schema,
             _check_pbs,
