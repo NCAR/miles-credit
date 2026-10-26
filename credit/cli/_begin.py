@@ -946,4 +946,3 @@ def _begin(args) -> None:
     else:
         print(f"  credit preprocess -c {config_path}")
         print(f"  credit train -c {config_path}")
-    print("  The scaler JSON is created by credit preprocess; its absence during credit check is expected.")
