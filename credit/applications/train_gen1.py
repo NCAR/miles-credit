@@ -7,7 +7,6 @@ import os
 import sys
 import yaml
 import optuna
-import shutil
 import logging
 import warnings
 
@@ -30,7 +29,7 @@ from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load
 
 from credit.metrics import LatWeightedMetrics
 from credit.metrics_downscaling import UnWeightedMetrics
-from credit.pbs import launch_script, launch_script_mpi
+from credit.pbs import launch_script, launch_script_mpi, sync_run_config
 from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,
@@ -412,8 +411,7 @@ def main_cli():
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
 
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+    sync_run_config(config, save_loc)
 
     # Launch PBS jobs
     if launch:

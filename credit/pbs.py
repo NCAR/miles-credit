@@ -2,12 +2,100 @@ import re
 import os
 import yaml
 import shutil
+import filecmp
 import logging
 import subprocess
+from datetime import datetime, timezone
 
 from credit.conda_env import torchrun_path
 
 logger = logging.getLogger(__name__)
+
+_GIT_IGNORE = "*\n!.gitignore\n!model.yml\n"
+
+
+def _git(save_loc, *args, identity=False):
+    cmd = ["git", "-c", "commit.gpgsign=false"]
+    if identity:
+        cmd += ["-c", "user.name=credit", "-c", "user.email=credit@localhost"]
+    return subprocess.run(cmd + list(args), cwd=save_loc, capture_output=True, text=True, timeout=60)
+
+
+def _git_commit_model_yml(save_loc, message):
+    """Stage model.yml and commit it if it differs from HEAD. Returns the short hash, or None if unchanged."""
+    res = _git(save_loc, "add", "-f", "model.yml")
+    if res.returncode != 0:
+        raise RuntimeError(f"`git add` failed: {res.stderr.strip()}")
+    if _git(save_loc, "diff", "--cached", "--quiet").returncode == 0:
+        return None
+    has_identity = all(_git(save_loc, "config", k).stdout.strip() for k in ("user.name", "user.email"))
+    res = _git(save_loc, "commit", "-q", "-m", message, "--", "model.yml", identity=not has_identity)
+    if res.returncode != 0:
+        raise RuntimeError(f"`git commit` failed: {res.stderr.strip() or res.stdout.strip()}")
+    return _git(save_loc, "rev-parse", "--short", "HEAD").stdout.strip()
+
+
+def sync_run_config(config_path, save_loc):
+    """Copy ``config_path`` to ``save_loc/model.yml`` and record the change in a git repo inside ``save_loc``.
+
+    The saved ``model.yml`` always reflects the most recent run; previous versions are kept in git history
+    (``git -C <save_loc> log -p model.yml``). Git must be installed and on PATH. Tracking is best-effort: if git
+    is missing or fails, a warning is logged and ``model.yml`` is still copied.
+
+    Call from a single rank only.
+
+    Args:
+        config_path (str): The config file used for this run.
+        save_loc (str): The run directory (created if missing).
+
+    Returns:
+        str: Path to ``save_loc/model.yml``.
+    """
+    save_loc = os.path.expandvars(save_loc)
+    os.makedirs(save_loc, exist_ok=True)
+    dest = os.path.join(save_loc, "model.yml")
+
+    exists = os.path.exists(dest)
+    same_file = exists and os.path.realpath(config_path) == os.path.realpath(dest)
+    replaced = exists and not same_file and not filecmp.cmp(config_path, dest, shallow=False)
+
+    no_history = (
+        f"git is required to track config history in {save_loc}; "
+        "model.yml was still copied but its history is NOT being recorded. "
+        "Install git (e.g. `module load git` on Casper/Derecho)."
+    )
+    use_git = False
+    if shutil.which("git") is None:
+        logger.warning("git was not found on PATH. %s", no_history)
+    else:
+        try:
+            if not os.path.isdir(os.path.join(save_loc, ".git")):
+                res = _git(save_loc, "init", "-q")
+                if res.returncode != 0:
+                    raise RuntimeError(f"`git init` failed: {res.stderr.strip()}")
+                with open(os.path.join(save_loc, ".gitignore"), "w") as f:
+                    f.write(_GIT_IGNORE)
+            if replaced:
+                # Preserve whatever is on disk (e.g. a run dir created before git tracking) before overwriting.
+                _git_commit_model_yml(save_loc, "Previous model.yml (before this run)")
+            use_git = True
+        except Exception as e:
+            logger.warning("%s. %s", e, no_history)
+
+    if not same_file:
+        shutil.copy(config_path, dest)
+    if replaced:
+        logger.warning("%s already existed with different contents; replaced by %s.", dest, config_path)
+
+    if use_git:
+        try:
+            stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            commit = _git_commit_model_yml(save_loc, f"Update model.yml ({stamp})")
+            if commit:
+                logger.info("Recorded %s in git (commit %s).", dest, commit)
+        except Exception as e:
+            logger.warning("%s. %s", e, no_history)
+    return dest
 
 
 def launch_script(config_file, script_path, launch=True, backend="nccl"):
@@ -105,16 +193,8 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     source_path = config_file
     destination_path = config_save_path
 
-    # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-        os.remove(destination_path)
-        logger.info(f"Removed the old model.yml at {destination_path}")
-
-    try:
-        shutil.copy(source_path, destination_path)
-        logger.info(f"Copied the new {source_path} to {destination_path}")
-    except shutil.SameFileError:
-        pass
+    os.makedirs(save_loc, exist_ok=True)
+    sync_run_config(source_path, save_loc)
 
     # Generate the PBS script
     script = f"""#!/bin/bash

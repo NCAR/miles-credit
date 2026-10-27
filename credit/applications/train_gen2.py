@@ -12,7 +12,6 @@ For the legacy flat schema (v1), use ``applications/train.py``.
 
 import logging
 import os
-import shutil
 import sys
 import warnings
 from argparse import ArgumentParser
@@ -23,6 +22,7 @@ import yaml
 from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
 from credit.losses import effective_loss_name, is_crps_loss
 from credit.models import load_model
+from credit.pbs import sync_run_config
 from credit.seed import seed_everything
 from credit.trainers import load_trainer
 from credit.trainers.utils import (
@@ -132,8 +132,8 @@ def main_cli():
 
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
+    if rank == 0:
+        sync_run_config(config, save_loc)
 
     _trainer_conf = conf["trainer"]
     assert "parallelism" in _trainer_conf, (
