@@ -14,7 +14,7 @@ def _pbs_account(pbs_options):
     """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
     account = pbs_options.get("project") or pbs_options.get("account") or os.environ.get("PBS_ACCOUNT")
     if not account:
-        raise ValueError("No PBS account: set pbs.project in the config or export PBS_ACCOUNT.")
+        raise ValueError("No PBS account. Set pbs.project in the config or export PBS_ACCOUNT.")
     return account
 
 

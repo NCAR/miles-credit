@@ -784,7 +784,7 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "mem": defaults["mem"] if system == "derecho" else "128GB",
             "queue": defaults["queue"],
         }
-        # Only write the account when the user types one: left out, `credit submit`
+        # Only write the account when the user types one. When left out, `credit submit`
         # falls back to $PBS_ACCOUNT at submit time, which keeps the config portable.
         env_account = os.environ.get("PBS_ACCOUNT")
         if env_account:

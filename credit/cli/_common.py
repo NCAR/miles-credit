@@ -120,7 +120,7 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        # No default: a PBS account is per-user, so it must come from --account,
+        # Default account is none. It must come from --account,
         # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
         "account": None,
         "job_name": "credit_gen2",
@@ -133,7 +133,7 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        # No default: a PBS account is per-user, so it must come from --account,
+        # Default account is none. It must come from --account,
         # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
         "account": None,
         "job_name": "credit_gen2",
