@@ -1604,7 +1604,7 @@ class TestResolvePbsOptsEnv:
             _resolve_pbs_opts(args, {})
 
     def test_all_none_uses_hardcoded_defaults(self, monkeypatch):
-        """All fields None + empty pbs_cfg → _first() returns None path is exercised."""
+        """All CLI fields None and no pbs_cfg settings except the account → cluster defaults fill the rest."""
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1618,7 +1618,7 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {"project": "CFG_ACCOUNT"})
+        r = _resolve_pbs_opts(args, {"project": "TEST_ACCOUNT"})
         # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
         assert r.gpu_type is None
         assert r.walltime == "12:00:00"
