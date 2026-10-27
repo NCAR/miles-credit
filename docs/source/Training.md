@@ -421,3 +421,11 @@ reload_epoch: True   # auto-detects next epoch from checkpoint
 
 `reload_epoch: True` causes the trainer to read the epoch from the checkpoint and set
 `start_epoch = checkpoint_epoch + 1`, so the epoch counter is always continuous.
+
+For long epochs, `trainer.checkpoints_per_epoch` limits how much a killed job loses:
+`checkpoints_per_epoch: 4` also saves `checkpoint.pt` at 1/4, 1/2 and 3/4 of each epoch.
+With `reload_epoch: True`, such a checkpoint resumes at the saved batch with the same
+sample order and RNG state as an uninterrupted run; if the GPU count or
+`train_batch_size` changed, the order is only approximate and a warning is logged.
+With `data: fsdp2`, each save gathers the full model to rank 0, so keep the count low
+for large models.

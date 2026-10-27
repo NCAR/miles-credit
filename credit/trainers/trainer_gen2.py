@@ -1,4 +1,5 @@
 import gc
+import itertools
 import logging
 import os
 from collections import defaultdict
@@ -296,7 +297,12 @@ class TrainerERA5Gen2(BaseTrainer):
         if self.ensemble_size > 1:
             logger.info(f"ensemble training with ensemble_size {self.ensemble_size}")
 
-        if self.use_scheduler and self.scheduler_type == "lambda":
+        # Mid-epoch resume: set by fit() from checkpoint.pt, consumed here once.
+        resume, self._pending_resume = self._pending_resume, None
+        start_batch = resume.batch if resume else 0
+
+        # The saved scheduler state already includes this epoch's lambda step.
+        if self.use_scheduler and self.scheduler_type == "lambda" and start_batch == 0:
             scheduler.step()
 
         from torch.utils.data import IterableDataset
@@ -321,19 +327,52 @@ class TrainerERA5Gen2(BaseTrainer):
         _sampler = getattr(trainloader, "batch_sampler", None) or getattr(trainloader, "sampler", None)
         if hasattr(_sampler, "set_epoch"):
             _sampler.set_epoch(epoch)
+        sampler_layout = {
+            "num_replicas": getattr(_sampler, "num_replicas", None),
+            "batch_size": getattr(_sampler, "batch_size", None),
+        }
+
+        if start_batch > 0:
+            start_batch = self._rescale_start_batch(start_batch, resume.sampler_layout, sampler_layout)
+            if start_batch >= batches_per_epoch:
+                logger.warning(
+                    f"Resume batch {start_batch} >= batches_per_epoch {batches_per_epoch}; the epoch is already "
+                    "complete, so it is not re-trained."
+                )
+                start_batch = batches_per_epoch
+            if not hasattr(_sampler, "skip_first_batches"):
+                raise RuntimeError(
+                    "Mid-epoch resume needs a sampler with skip_first_batches() (DistributedMultiStepBatchSampler); "
+                    f"got {type(_sampler).__name__}."
+                )
+            _sampler.skip_first_batches(start_batch)
+            logger.info(f"Resuming epoch {epoch} at batch {start_batch}/{batches_per_epoch}")
+
+        ckpt_interval = self._mid_epoch_checkpoint_interval(batches_per_epoch, grad_accum_every)
+        if start_batch % grad_accum_every:
+            logger.warning(
+                f"Resume batch {start_batch} is not a multiple of grad_accum_every={grad_accum_every}; "
+                "accumulation boundaries shift for the rest of this epoch."
+            )
 
         batch_group_generator = tqdm.tqdm(
             range(batches_per_epoch),
             total=batches_per_epoch,
+            initial=start_batch,
             leave=True,
             disable=not any(h.level <= logging.INFO for h in logging.getLogger().handlers),
         )
         self.model.train()
 
-        dl = cycle(trainloader)
-        results_dict = defaultdict(list)
+        # Create the iterator up front: it draws its base seed from the global
+        # RNG, which must happen before a mid-epoch RNG restore, as it did
+        # before the checkpoint was taken.
+        dl = itertools.chain(iter(trainloader), cycle(trainloader))
+        if resume and resume.rng_state is not None:
+            self._set_rng_state(resume.rng_state)
+        results_dict = defaultdict(list, (resume.train_results if resume else None) or {})
 
-        for steps in range(batches_per_epoch):
+        for steps in range(start_batch, batches_per_epoch):
             logs = {}
             loss = 0
             full_data_dict = {}
@@ -549,6 +588,22 @@ class TrainerERA5Gen2(BaseTrainer):
 
             if self.use_scheduler and self.scheduler_type in update_on_batch:
                 scheduler.step()
+
+            # Mid-epoch restart point. The interval is a multiple of
+            # grad_accum_every, so this is always just after an optimizer step.
+            done = steps + 1
+            if ckpt_interval and self._save_mid_epoch and done % ckpt_interval == 0 and done < batches_per_epoch:
+                self._save_checkpoint(
+                    epoch,
+                    optimizer,
+                    scheduler,
+                    scaler,
+                    resume_state={
+                        "batch_in_epoch": done,
+                        "train_results": dict(results_dict),
+                        "sampler_layout": sampler_layout,
+                    },
+                )
 
         batch_group_generator.close()
         torch.cuda.empty_cache()

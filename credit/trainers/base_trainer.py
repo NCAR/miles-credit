@@ -12,11 +12,14 @@ Content:
 
 import gc
 import logging
+import math
 import os
+import random
 import shutil
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -42,6 +45,23 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 DEFAULT_DISPLAY_METRICS = ("rmse", "r2score", "bias")
+
+
+def _atomic_save(obj: Any, path: str) -> None:
+    """torch.save via a temp file + rename, so a killed job never leaves a truncated checkpoint."""
+    tmp = f"{path}.tmp"
+    torch.save(obj, tmp)
+    os.replace(tmp, path)
+
+
+@dataclass
+class _MidEpochResume:
+    """Where a mid-epoch checkpoint left off, read from checkpoint.pt."""
+
+    batch: int
+    train_results: dict | None
+    sampler_layout: dict | None
+    rng_state: dict | None  # None keeps the startup seeds
 
 
 class EMATracker:
@@ -254,8 +274,12 @@ class BaseTrainer(ABC):
             or int(_p.get("domain", 1)) > 1
             or int(_p.get("tensor", 1)) > 1
         ) and (torch.distributed.is_available() and torch.distributed.is_initialized())
-        self.start_epoch = trainer_conf.get("start_epoch", 0)
         self.epochs = trainer_conf.get("epochs", 1)
+        self.start_epoch = trainer_conf.get("start_epoch", 0)
+        self.resume_at_batch = int(trainer_conf.get("resume_at_batch", 0) or 0)
+        self.checkpoints_per_epoch = int(trainer_conf.get("checkpoints_per_epoch", 0) or 0)
+        if self.checkpoints_per_epoch < 0:
+            raise ValueError(f"trainer.checkpoints_per_epoch must be >= 0, got {self.checkpoints_per_epoch}")
         self.skip_validation = trainer_conf.get("skip_validation", False)
         self.load_weights = trainer_conf.get("load_weights", False)
         self.use_scheduler = trainer_conf.get("use_scheduler", True)
@@ -331,6 +355,12 @@ class BaseTrainer(ABC):
                 logger.info(f"View with: tensorboard --logdir {tb_dir}")
         else:
             self.tb_writer = None
+
+        # ---- Mid-epoch resume state ----
+        # Set by _restore_resume_state(), consumed once by the next train_one_epoch().
+        self._pending_resume: _MidEpochResume | None = None
+        # fit() turns this off for trial runs; True so direct train_one_epoch() calls still save.
+        self._save_mid_epoch = True
 
     # ------------------------------------------------------------------
     # Helpers
@@ -456,14 +486,127 @@ class BaseTrainer(ABC):
     # Checkpointing
     # ------------------------------------------------------------------
 
+    def _mid_epoch_checkpoint_interval(self, batches_per_epoch: int, grad_accum_every: int = 1) -> int:
+        """Batches between mid-epoch checkpoints, or 0 if disabled.
+
+        k checkpoints per epoch includes the end-of-epoch one. Rounded up to a
+        multiple of grad_accum_every so saves never split an accumulation.
+        """
+        if self.checkpoints_per_epoch <= 0:
+            return 0
+        n = math.ceil(batches_per_epoch / self.checkpoints_per_epoch)
+        return math.ceil(n / grad_accum_every) * grad_accum_every
+
+    @staticmethod
+    def _rescale_start_batch(start_batch: int, saved_layout: dict | None, layout: dict) -> int:
+        """Map a saved per-rank batch position onto the current sampler layout.
+
+        On a replica-count or batch-size change, skips the same number of global
+        samples; the remaining order then only approximates an uninterrupted run.
+        """
+        if not saved_layout or None in saved_layout.values() or None in layout.values() or saved_layout == layout:
+            return start_batch
+        samples_seen = start_batch * saved_layout["batch_size"] * saved_layout["num_replicas"]
+        rescaled = samples_seen // (layout["batch_size"] * layout["num_replicas"])
+        logger.warning(
+            f"Sampler layout changed since the checkpoint ({saved_layout} -> {layout}); resuming at batch "
+            f"{rescaled} instead of {start_batch}. The rest of this epoch's sample order will not match "
+            "an uninterrupted run exactly."
+        )
+        return rescaled
+
+    @staticmethod
+    def _gather_rng_states() -> list[dict]:
+        """Every rank's host + device RNG states, indexed by rank. Collective: all ranks must call it.
+
+        The numpy key is stored as a tensor so checkpoint.pt stays loadable with weights_only=True.
+        """
+        np_kind, np_key, np_pos, np_has_gauss, np_gauss = np.random.get_state()
+        state = {
+            "python": random.getstate(),
+            "numpy": (np_kind, torch.from_numpy(np_key.copy()), np_pos, np_has_gauss, np_gauss),
+            "torch": torch.get_rng_state(),
+            "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
+        }
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            states = [None] * torch.distributed.get_world_size()
+            torch.distributed.all_gather_object(states, state)
+            return states
+        return [state]
+
+    def _restore_resume_state(self, start_epoch: int) -> None:
+        """Restore RNG states and partial-epoch metrics from checkpoint.pt.
+
+        No-op unless the checkpoint matches this run's resume position.
+        """
+        path = os.path.join(self.save_loc, "checkpoint.pt")
+        if not (self.load_weights and os.path.exists(path)):
+            return
+        # mmap: only the small resume fields are read, not the model/optimizer tensors.
+        ckpt = torch.load(path, map_location="cpu", mmap=True)
+        saved_batch = int(ckpt.get("batch_in_epoch") or 0)
+        expected_epoch = start_epoch if self.resume_at_batch > 0 else start_epoch - 1
+        if ckpt.get("epoch") != expected_epoch or saved_batch != self.resume_at_batch:
+            if self.resume_at_batch > 0:
+                logger.warning(
+                    f"trainer.resume_at_batch={self.resume_at_batch} (epoch {start_epoch}) does not match "
+                    f"checkpoint.pt (epoch {ckpt.get('epoch')}, batch {saved_batch}); epoch {start_epoch} "
+                    "restarts from batch 0."
+                )
+            return
+
+        rng_states = ckpt.get("rng_states")
+        world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        rng_state = None
+        if rng_states and len(rng_states) != world_size:
+            logger.warning(
+                f"Checkpoint RNG states are for {len(rng_states)} rank(s) but this run has {world_size}; "
+                "keeping the startup seeds (dropout/noise streams will differ from an uninterrupted run)."
+            )
+        elif rng_states:
+            rng_state = rng_states[self.rank]
+
+        if self.resume_at_batch > 0:
+            # A mid-epoch snapshot was taken after that epoch's DataLoader
+            # iterator drew its base seed from the global RNG, so
+            # train_one_epoch applies rng_state once its own iterator exists.
+            self._pending_resume = _MidEpochResume(
+                batch=self.resume_at_batch,
+                train_results=ckpt.get("train_results"),
+                sampler_layout=ckpt.get("sampler_layout"),
+                rng_state=rng_state,
+            )
+        elif rng_state is not None:
+            self._set_rng_state(rng_state)
+
+    @staticmethod
+    def _set_rng_state(state: dict) -> None:
+        """Inverse of one rank's entry from _gather_rng_states()."""
+        py_version, py_internal, py_gauss = state["python"]
+        random.setstate((py_version, tuple(py_internal), py_gauss))
+        np_kind, np_key, np_pos, np_has_gauss, np_gauss = state["numpy"]
+        np.random.set_state((np_kind, np_key.numpy(), np_pos, np_has_gauss, np_gauss))
+        torch.set_rng_state(state["torch"])
+        if state["cuda"] is not None and torch.cuda.is_available():
+            torch.cuda.set_rng_state(state["cuda"])
+        logger.info("Restored RNG states from checkpoint")
+
     def _save_checkpoint(
         self,
         epoch: int,
         optimizer: Optimizer,
         scheduler: LRScheduler,
         scaler: GradScaler,
+        resume_state: dict | None = None,
     ) -> None:
-        """Save model, optimizer, scheduler, and scaler state."""
+        """Save model, optimizer, scheduler, and scaler state.
+
+        Mid-epoch saves pass ``resume_state`` (``batch_in_epoch``, ``train_results``,
+        ``sampler_layout``), stored at the top level of checkpoint.pt.
+        """
+        resume_state = resume_state or {}
+        mid_epoch = int(resume_state.get("batch_in_epoch") or 0) > 0
+        resume_fields = {"batch_in_epoch": 0, **resume_state, "rng_states": self._gather_rng_states()}
         _p_save = self.conf.get("trainer", {}).get("parallelism", {})
         _tp_native = getattr(getattr(self, "_raw_model", None), "_tp_native", False)
         if int(_p_save.get("tensor", 1)) > 1 and not (_tp_native and self.mode == "fsdp2"):
@@ -505,14 +648,15 @@ class BaseTrainer(ABC):
                     "optimizer_state_dict": optim_sd,
                     "scheduler_state_dict": sched_state,
                     "scaler_state_dict": scaler.state_dict(),
+                    **resume_fields,
                 }
-                torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                _atomic_save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
                 if ema_sd is not None:
-                    torch.save(
-                        {"epoch": epoch, "model_state_dict": ema_sd},
+                    _atomic_save(
+                        {"epoch": epoch, "batch_in_epoch": resume_fields["batch_in_epoch"], "model_state_dict": ema_sd},
                         os.path.join(self.save_loc, "checkpoint_ema.pt"),
                     )
-                if self.save_every_epoch:
+                if self.save_every_epoch and not mid_epoch:
                     copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
         elif self.mode != "fsdp":
             if self.rank == 0:
@@ -523,16 +667,21 @@ class BaseTrainer(ABC):
                     "optimizer_state_dict": optimizer.state_dict(),
                     "scheduler_state_dict": sched_state,
                     "scaler_state_dict": scaler.state_dict(),
+                    **resume_fields,
                 }
-                torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                _atomic_save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
 
                 if self.ema is not None:
-                    torch.save(
-                        {"epoch": epoch, "model_state_dict": self.ema.state_dict()},
+                    _atomic_save(
+                        {
+                            "epoch": epoch,
+                            "batch_in_epoch": resume_fields["batch_in_epoch"],
+                            "model_state_dict": self.ema.state_dict(),
+                        },
                         os.path.join(self.save_loc, "checkpoint_ema.pt"),
                     )
 
-                if self.save_every_epoch:
+                if self.save_every_epoch and not mid_epoch:
                     copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
         else:
             logger.info(f"Saving FSDP checkpoint to {self.save_loc}")
@@ -554,9 +703,10 @@ class BaseTrainer(ABC):
                 "epoch": epoch,
                 "scheduler_state_dict": sched_state,
                 "scaler_state_dict": scaler.state_dict(),
+                **resume_fields,
             }
             torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
-            if self.save_every_epoch:
+            if self.save_every_epoch and not mid_epoch:
                 copy_checkpoint(os.path.join(self.save_loc, "model_checkpoint.pt"), epoch)
 
     # ------------------------------------------------------------------
@@ -648,6 +798,10 @@ class BaseTrainer(ABC):
         # Re-sync all ranks after rank-0-only preflight before training begins
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.barrier()
+
+        # After preflight, so its synthetic steps don't advance the restored RNG.
+        self._save_mid_epoch = not trial
+        self._restore_resume_state(start_epoch)
 
         for epoch in range(start_epoch, epoch_limit):
             # Backup previous epoch's checkpoint

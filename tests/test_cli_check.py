@@ -635,6 +635,11 @@ def test_num_epoch_exceeding_epochs_warns(conf):
     assert "trainer.num_epoch" in _wheres(_run(conf), "warning")
 
 
+def test_negative_checkpoints_per_epoch_errors(conf):
+    conf["trainer"]["checkpoints_per_epoch"] = -1
+    assert "trainer.checkpoints_per_epoch" in _wheres(_run(conf), "error")
+
+
 def test_removed_ensemble_gen2_trainer_points_to_ring_crps(conf):
     conf["trainer"]["type"] = "ensemble-gen2"
     rep = _run(conf)
