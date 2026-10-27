@@ -109,6 +109,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
     p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
     p.add_argument(
+        "--run-mode",
+        default=None,
+        choices=["batch", "single"],
+        dest="run_mode",
+        help="Override inference.run_mode from config.",
+    )
+    p.add_argument(
+        "--init-time",
+        default=None,
+        metavar="ISO8601",
+        dest="init_time",
+        help="Single-forecast init time, e.g. 2020-06-01T00. "
+        "Overrides inference.single_forecast.start_datetime and implies --run-mode single.",
+    )
+    p.add_argument(
+        "--save-dir",
+        default=None,
+        metavar="DIR",
+        dest="save_dir",
+        help="Output directory. Overrides inference.save_forecast.",
+    )
+    p.add_argument(
         "--ensemble-size",
         type=int,
         default=None,
