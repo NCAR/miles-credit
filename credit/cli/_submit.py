@@ -113,8 +113,20 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     d = _PBS_DEFAULTS["casper" if is_casper else "derecho"]
 
     r.account = _first(
-        args.account, pbs_cfg.get("project") or pbs_cfg.get("account"), os.environ.get("PBS_ACCOUNT"), d["account"]
+        args.account,
+        pbs_cfg.get("project") or pbs_cfg.get("account"),
+        os.environ.get("PBS_ACCOUNT") or None,
+        d["account"],
     )
+    if not r.account:
+        print(
+            "ERROR: no PBS account to charge. Set one of (highest priority first):\n"
+            "  credit submit --account <PROJECT> ...\n"
+            "  pbs:\n    project: <PROJECT>      # in the config\n"
+            "  export PBS_ACCOUNT=<PROJECT>",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     r.walltime = _first(args.walltime, pbs_cfg.get("walltime"), d["walltime"])
     r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))

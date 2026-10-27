@@ -1170,7 +1170,16 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
                 f"'{name}' is a {targets[0].capitalize()} queue; "
                 f"`credit submit --cluster {targets[0]}` is the matching target.",
             )
-    for key in ("project", "job_name", "walltime", "queue"):
+    if not (pbs.get("project") or pbs.get("account")):
+        if os.environ.get("PBS_ACCOUNT"):
+            rep.info("pbs.project", f"Unset; `credit submit` will charge $PBS_ACCOUNT ({os.environ['PBS_ACCOUNT']}).")
+        else:
+            rep.warn(
+                "pbs.project",
+                "No PBS account: `credit submit` will fail unless you pass --account or export PBS_ACCOUNT.",
+                fix="project: <YOUR_ACCOUNT>",
+            )
+    for key in ("job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
 

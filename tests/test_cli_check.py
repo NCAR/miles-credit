@@ -833,3 +833,22 @@ def test_checks_do_not_mutate_the_config(conf):
     before = copy.deepcopy(conf)
     _run(conf)
     assert conf == before
+
+
+@pytest.mark.parametrize(
+    ("pbs", "env_account", "severity"),
+    [
+        ({"queue": "main"}, None, "warning"),  # submit would fail: nothing to charge
+        ({"queue": "main"}, "ENV_ACCOUNT", "info"),  # $PBS_ACCOUNT covers it
+        ({"queue": "main", "project": "ABCD0001"}, None, None),
+    ],
+)
+def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
+    if env_account:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    conf["pbs"] = pbs
+    rep = _run(conf)
+    found = {f.severity for f in rep.findings if f.where == "pbs.project"}
+    assert found == ({severity} if severity else set())

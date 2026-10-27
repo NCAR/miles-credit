@@ -219,10 +219,28 @@ def test_padding_totals_known_grid():
     assert h_total >= 0 and w_total >= 0
 
 
-def test_pbs_config_derecho():
+def test_pbs_config_derecho(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
     result = _pbs_config("ncar", "exp", nodes=2, gpus=4)
     assert result["nodes"] == 2 and result["ngpus"] == 4
     assert {"queue", "walltime", "mem", "job_name"} <= set(result)
+
+
+def test_pbs_config_writes_typed_account(monkeypatch):
+    monkeypatch.setattr("builtins.input", lambda _prompt: "ABCD0001")
+    assert _pbs_config("derecho", "exp", nodes=1, gpus=4)["project"] == "ABCD0001"
+
+
+@pytest.mark.parametrize("env_account", [None, "ENV_ACCOUNT"])
+def test_pbs_config_blank_account_is_omitted(monkeypatch, env_account):
+    # A blank answer leaves the account out so `credit submit` resolves $PBS_ACCOUNT at submit time.
+    if env_account:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    result = _pbs_config("derecho", "exp", nodes=1, gpus=4)
+    assert "project" not in result and "account" not in result
 
 
 @pytest.mark.parametrize(

@@ -1376,7 +1376,7 @@ For running CREDIT on **NCAR HPC systems (Derecho, Casper)**:
 ```yaml
 pbs: 
     conda: "credit-derecho"
-    project: "NAML0001"
+    project: "YOUR_ACCOUNT"   # or omit and export PBS_ACCOUNT
     job_name: "train_model"
     walltime: "12:00:00"
     nodes: 8
