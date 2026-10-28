@@ -111,6 +111,19 @@ table](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/#ca
 | unset (any GPGPU) / `v100` | 8 (1152GB) | 64GB | 224GB | 512GB | 1088GB |
 | `a100_80gb` / `h100` | 4 (1024GB) | 64GB | 368GB | 960GB | — |
 
+**Config-derived memory (`mem: auto`)** — `credit begin` writes `mem: 'auto'`. For train and
+preprocess jobs, `credit submit` then sizes the request from the config:
+`GPUs/node × (training DataLoader + validation DataLoader + 4 GiB overhead) × 1.3`. Each DataLoader
+term is `workers × prefetch_factor × batch_size × H × W × channels × 2 (input + target)`, with every
+value **assumed to be float32** (4 bytes), using `thread_workers` / `train_batch_size` for training
+and `valid_thread_workers` / `valid_batch_size` (and `validation_data`) for validation. Validation is
+left out for preprocess jobs and when `trainer.skip_validation` is set. The request is rounded up to a
+multiple of 32GB and capped at what one node offers; a capped request is logged as a warning. The
+calculation is logged at submit time and reported by `credit check` (which `credit begin` runs),
+which also warns when a numeric (or unset) `mem` is below the training estimate or the estimate
+exceeds a node. Rollout and realtime jobs treat `auto` as unset, and an explicit `--mem` or a
+numeric `mem` still wins.
+
 **Queue / cluster mismatch** — a `pbs:` block written for one machine is easy to reuse against the
 other, and PBS only rejects the bad queue after the job is submitted. `credit submit` therefore fails
 up front when the resolved queue belongs to the other cluster:

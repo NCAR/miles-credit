@@ -21,12 +21,13 @@ import difflib
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_QUEUES
+from ._common import _PBS_DEFAULTS, _PBS_QUEUES, auto_mem, casper_mem
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -1155,6 +1156,7 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     # machine this block was written for.  Say so — reusing a Derecho block on
     # Casper (or vice versa) is rejected by `credit submit`.
     queue = pbs.get("queue")
+    targets = []
     if queue:
         name = str(queue).split("@", 1)[0].strip().lower()
         targets = sorted(c for c, queues in _PBS_QUEUES.items() if name in queues)
@@ -1173,6 +1175,65 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     for key in ("project", "job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
+    if len(targets) == 1:
+        _check_pbs_memory(conf, pbs, targets[0], rep)
+
+
+def _mem_gb(value) -> float | None:
+    """A PBS memory string ("480GB", "1tb", "512mb") in GB, or None if it does not parse."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?)b?\s*", str(value).lower())
+    if not match:
+        return None
+    return float(match.group(1)) * {"k": 2.0**-20, "m": 2.0**-10, "g": 1.0, "t": 1024.0, "": 2.0**-30}[match.group(2)]
+
+
+def _check_pbs_memory(conf: dict, pbs: dict, cluster: str, rep: _Report) -> None:
+    """Compare the config-derived memory estimate (``auto_mem``, float32 data) with ``pbs.mem``.
+
+    ``pbs.mem: auto`` reports what ``credit submit`` will request; a numeric (or
+    unset, i.e. the built-in default) request below the training estimate, or an
+    estimate that exceeds one node, is a warning.
+    """
+    gpus = pbs.get("ngpus") or pbs.get("gpus") or _PBS_DEFAULTS[cluster]["gpus"]
+    gpu_type = pbs.get("gpu_type")
+    train = auto_mem(conf, cluster, gpus, gpu_type)
+    if train is None:
+        return
+    train_mem, explanation, exceeds_node = train
+    preprocess_mem = auto_mem(conf, cluster, gpus, gpu_type, include_validation=False)[0]
+    mem = pbs.get("mem")
+    if str(mem).lower() == "auto":
+        rep.info(
+            "pbs.mem",
+            f"auto: `credit submit` will request {train_mem} per node for training ({explanation}) "
+            f"and {preprocess_mem} for preprocessing (training DataLoader only).",
+        )
+    else:
+        requested = (
+            mem
+            if mem is not None
+            else (casper_mem(gpus, gpu_type) if cluster == "casper" else _PBS_DEFAULTS[cluster]["mem"])
+        )
+        requested_gb = _mem_gb(requested)
+        if requested_gb is not None and requested_gb < _mem_gb(train_mem):
+            shown = (
+                f"pbs.mem {mem}"
+                if mem is not None
+                else f"pbs.mem is unset, so `credit submit` requests {requested}, which"
+            )
+            rep.warn(
+                "pbs.mem",
+                f"{shown} is below the estimated {train_mem} per node for training ({explanation}). "
+                "The job may run out of host memory.",
+                fix=f"mem: auto   # or at least {train_mem}",
+            )
+    if exceeds_node:
+        rep.warn(
+            "pbs.mem",
+            f"The estimated memory is more than one {cluster} node offers ({explanation}).",
+            fix="Reduce train_batch_size / valid_batch_size, thread_workers / valid_thread_workers or "
+            "prefetch_factor, or use fewer levels.",
+        )
 
 
 # ---------------------------------------------------------------------------

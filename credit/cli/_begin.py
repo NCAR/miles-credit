@@ -17,7 +17,7 @@ from pathlib import Path
 import yaml
 
 from ._common import _CASPER_GPU_NODES, _PBS_DEFAULTS, _SLURM_CLUSTER_DEFAULTS, _is_ncar_system, _prompt
-from ._convert import _FlowSeqDumper
+from ._convert import _DEFAULT_LEVELS_16, _FlowSeqDumper
 
 
 _PI_DIGITS = "31415926535897932384626433832795028841971693993751058209749445923078164062862089986280348253421170679"
@@ -151,6 +151,30 @@ def _prompt_list(prompt: str, default: list[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _arco_levels() -> list[int]:
+    """Ask which of ARCO-ERA5's 137 model levels to use (all of them by default)."""
+    print("  ARCO-ERA5 has 137 model levels (1 = top, 137 = lowest); all 137 at 0.25 deg need a lot of memory.")
+    print(f"  'wxformer' selects the 16 WXFormer v1 levels {_DEFAULT_LEVELS_16}.")
+    while True:
+        answer = _prompt("Levels: 'all', 'wxformer', or a comma-separated list of level numbers", "all").lower()
+        if answer == "all":
+            levels = list(range(1, 138))
+        elif answer == "wxformer":
+            levels = list(_DEFAULT_LEVELS_16)
+        else:
+            # Numbers are always level numbers: "16" is level 16, not the WXFormer set.
+            try:
+                levels = sorted({int(item) for item in answer.replace(",", " ").split()})
+            except ValueError:
+                levels = []
+            if not levels or not all(1 <= level <= 137 for level in levels):
+                print("  Enter 'all', 'wxformer', or level numbers between 1 and 137.")
+                continue
+        shown = "all 137 levels" if len(levels) == 137 else f"{len(levels)} level(s): {levels}"
+        print(f"  Using {shown}.")
+        return levels
+
+
 def _select_dataset() -> tuple[str, dict]:
     print("\n  Available datasets:")
     for index, name in enumerate(_DATASET_CHOICES, 1):
@@ -165,7 +189,7 @@ def _select_dataset() -> tuple[str, dict]:
         preset = {
             "dataset_type": selection,
             "level_coord": "hybrid",
-            "levels": list(range(1, 138)),
+            "levels": _arco_levels(),
             "vars_3D": ["temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"],
             "vars_2D": ["surface_pressure", "2m_temperature", "10m_u_component_of_wind", "10m_v_component_of_wind"],
             "static": ["geopotential_at_surface", "land_sea_mask", "sea_ice_cover"],
@@ -782,7 +806,7 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "nodes": nodes,
             "ncpus": defaults["cpus"],
             "ngpus": gpus,
-            "mem": defaults["mem"] if system == "derecho" else "128GB",
+            "mem": "auto",  # credit submit sizes it from the config; credit check reports the estimate
             "queue": defaults["queue"],
         }
         if system == "casper":
