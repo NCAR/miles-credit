@@ -711,6 +711,14 @@ def _build_pbs_script(
         return header + _derecho_launch(args, repo, "train_gen2.py")
 
 
+def _resolve_save_loc(save_loc: str, config: str) -> str:
+    """Expand *save_loc*; anchor a relative one to the config's directory, not the cwd."""
+    save_loc = os.path.expandvars(save_loc)
+    if not os.path.isabs(save_loc):
+        save_loc = os.path.join(os.path.dirname(os.path.abspath(config)), save_loc)
+    return os.path.normpath(save_loc)
+
+
 def _qsub(script: str, save_loc: str | None = None) -> str:
     """Write *script* to save_loc/pbs_scripts/, call qsub, and return the job ID string."""
     import datetime
@@ -1001,7 +1009,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
 
     with open(args.config) as f:
         conf = yaml.safe_load(f)
-    save_loc = os.path.expandvars(conf.get("save_loc", "."))
+    save_loc = _resolve_save_loc(conf.get("save_loc", "."), args.config)
     config_abs = os.path.abspath(args.config)
 
     sep = "=" * 52
@@ -1120,7 +1128,7 @@ def _submit(args: argparse.Namespace) -> None:
     submit = ctx["submit"]
     with open(args.config) as f:
         _full_conf = yaml.safe_load(f)
-    save_loc = os.path.expandvars(_full_conf.get("save_loc", "."))
+    save_loc = _resolve_save_loc(_full_conf.get("save_loc", "."), args.config)
     n_jobs = _compute_chain(args)
 
     _print_job_plan(args, n_jobs)
