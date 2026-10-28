@@ -137,6 +137,23 @@ class GOES10kmDataset(Dataset):
         self.era5dataset = era5dataset
         self.padding = padding
         logger.info(f"{'  ' if self.padding else 'NOT '}padding GOES input")
+
+        # Pad to the next multiple of 64, extra pixel on the leading edge. This
+        # reproduces the 10 km values that used to be hardcoded — (19, 18, 11, 10)
+        # for 923 -> 960 and 1003 -> 1024 — and gives (31, 31, 26, 25) at 3 km for
+        # 3074 -> 3136 and 3341 -> 3392, matching static_master_3km.nc's own
+        # goes_lat_index 26:3367 / goes_lon_index 31:3105.
+        def _pad_pair(n, mult=64):
+            total = (-n) % mult
+            return (total + 1) // 2, total // 2
+        _lat_n = int(_meta_ds.sizes["latitude"])
+        _lon_n = int(_meta_ds.sizes["longitude"])
+        _l, _r = _pad_pair(_lon_n)
+        _t_, _b = _pad_pair(_lat_n)
+        self.pad_spec = (_l, _r, _t_, _b)
+        if self.padding:
+            logger.info(f"padding {_lat_n}x{_lon_n} -> "
+                        f"{_lat_n + _t_ + _b}x{_lon_n + _l + _r}  spec {self.pad_spec}")
         logger.info(
             f"GOES10km Dataset with{'  ' if self.era5dataset else 'out'} ERA5 forcing"
         )
@@ -149,7 +166,11 @@ class GOES10kmDataset(Dataset):
             self.start_datetime = time_config["start_datetime"]
             self.end_datetime = time_config["end_datetime"]
 
-        self.valid_init_dir = valid_init_dir
+        # Config wins over the constructor default: the loader never passes
+        # valid_init_dir, so without this the 10 km path is always used — and that
+        # directory also caches lon_vals.npy / lat_size.npy for the 923-wide grid.
+        self.valid_init_dir = data_conf.get("valid_init_dir", valid_init_dir)
+        logger.info(f"valid_init_dir: {self.valid_init_dir}")
         if not self.evaluate:
             # DIAG: _timestamps() either loads a cached .nc file (fast) or generates
             # valid init times from scratch (~5 min). Timing here confirms which.
@@ -184,6 +205,12 @@ class GOES10kmDataset(Dataset):
         _diag(f"loading scaler_ds from {base_scaler_path}")
         self.scaler_ds = xr.open_dataset(base_scaler_path).load()
         _diag(f"scaler_ds loaded in {time.time()-_t:.2f}s")
+
+        self.mask_abi_artifacts = data_conf.get("mask_abi_artifacts", True)
+        self.abi_range = self._build_abi_range(
+            margin_k=data_conf.get("abi_range_margin_k", 10.0),
+            margin_refl=data_conf.get("abi_range_margin_refl", 0.15))
+        logger.info(f"ABI artifact masking {'on' if self.mask_abi_artifacts else 'off'}")
 
         # Optionally apply log-normal scaling to visible/near-IR channels (C01-C06)
         self.log_normal_scaling = data_conf.get("log_normal_scaling", False)
@@ -565,6 +592,45 @@ class GOES10kmDataset(Dataset):
         # 3. Normalize
         return (da - mean_vals) / std_vals
 
+    # The stats file's IR 'min' is itself polluted by floor values (C15 at 43 K,
+    # C16 at 40 K), so a lower bound of min-margin would readmit exactly what the
+    # floor mask removes. Use a fixed physical floor instead.
+    IR_MIN_K = 150.0
+
+    def _build_abi_range(self, margin_k=10.0, margin_refl=0.15):
+        """
+        Per-channel (lo, hi) bounds. IR comes from the stats file; reflective does
+        NOT — its 'max' there is 81.3, contaminated by DQF-flagged radiances that
+        process_L1b never screened. Bidirectional reflectance can exceed 1 over
+        bright cloud but not by much; clean data tops out at 1.29.
+        A single IR ceiling would not do either: C07 (3.9 um) legitimately reaches
+        412 K in daytime sunglint.
+        """
+        rng = {}
+        for i, c in enumerate(np.atleast_1d(self.scaler_ds.channel.values)):
+            c = int(c)
+            if c <= 6:
+                rng[c] = (-margin_refl, 1.0 + margin_refl)
+            else:
+                rng[c] = (self.IR_MIN_K,
+                          float(self.scaler_ds["max"][i]) + margin_k)
+        return rng
+
+    def _mask_abi_range(self, da, time_str, warn_frac=0.001):
+        """NaN out physically impossible values so _nanfill_ABI repairs them."""
+        vals = da.values
+        for i, ch in enumerate(np.atleast_1d(da.channel.values)):
+            lo, hi = self.abi_range[int(ch)]
+            m = (vals[i] < lo) | (vals[i] > hi)
+            frac = float(m.mean())
+            if frac > 0:
+                vals[i][m] = np.nan
+                if frac > warn_frac:
+                    logger.warning(
+                        f"{time_str} C{int(ch):02d}: {frac:.3%} outside "
+                        f"[{lo:.4g}, {hi:.4g}] — masked to NaN")
+        return da
+
     # Planck floor values measured from frames 144521 and 139327. np.clip(Rad, 1e-8,
     # None) in the download script pushes non-positive radiances through the Planck
     # conversion; each IR channel emerges pinned at its own constant rather than NaN.
@@ -641,8 +707,10 @@ class GOES10kmDataset(Dataset):
             # DYNAMIC FIX: Slice ONLY the channels requested in config
             da = ds["BT_or_R"].sel(channel=self.active_channels).copy()
 
-            # must precede log scaling and normalisation — floor values are in K
-            da = self._mask_abi_floor(da, time_str)
+            # must precede log scaling and normalisation — bounds are in K / reflectance
+            if self.mask_abi_artifacts:
+                da = self._mask_abi_floor(da, time_str)
+                da = self._mask_abi_range(da, time_str)
 
             # FIX: Apply log norm to the visible reflective channels present
             if self.log_normal_scaling:  # channels is the first axis
@@ -660,8 +728,7 @@ class GOES10kmDataset(Dataset):
                 data = self.inverse_transform_ABI(da)
 
             if self.padding:
-                data = torch.nn.functional.pad(data, (19, 18, 11, 10), "constant", 0.0)
-            # coerce to c, t, 1024, 960 to work with wxformer
+                data = torch.nn.functional.pad(data, self.pad_spec, "constant", 0.0)
 
         if self.era5dataset and mode != "stop":  # always draw era5 if not stopping
             return_data["era5"] = self.get_era5(ds)

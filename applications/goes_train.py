@@ -40,6 +40,8 @@ from credit.models.checkpoint import (
     load_state_dict_error_handler,
 )
 
+from credit.losses.btd_loss import BTDAugmentedLoss
+
 
 warnings.filterwarnings("ignore")
 
@@ -375,8 +377,14 @@ def main(rank, world_size, conf, backend=None, trial=False):
     )
 
     # Train and validation losses
-    train_criterion = load_loss(conf)
+    train_criterion = BTDAugmentedLoss(load_loss(conf), conf, device)
     valid_criterion = load_loss(conf, validation=True)
+
+    # valid_criterion = BTDAugmentedLoss(load_loss(conf, validation=True))
+    
+    # Train and validation losses
+    # train_criterion = load_loss(conf)
+    # valid_criterion = load_loss(conf, validation=True)
 
     # Set up some metrics
     if is_downscaling:

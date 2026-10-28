@@ -35,6 +35,8 @@ from credit.forecast import load_forecasts
 from credit.distributed import distributed_model_wrapper, setup
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 
+from credit.grid_align import align_spatial, padded_hw
+
 
 logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore")
@@ -788,25 +790,22 @@ def predict(rank, world_size, conf, p):
                     # the wrong spatial size, causing a shape mismatch inside the
                     # model's padding layer.
                     # ---------------------------------------------------------- #
+                    pad_conf = conf["model"].get("padding_conf", {})
+                    pad_lat = tuple(pad_conf.get("pad_lat", [0, 0]))
+                    pad_lon = tuple(pad_conf.get("pad_lon", [0, 0]))
+
+                    # Forcing grids differ by resolution: at 10 km ERA5/static were on the padded
+                    # grid and static needed cropping; at 3 km both are native and x_era5 needs
+                    # padding instead. Derive from shapes rather than assuming either.
+                    native = x.shape[-2:]
                     concat_x_list = [x]
-
                     if era5_static is not None:
-                        h_end = era5_static.shape[-2] - pad_lat[1]  # 1024 - 10 = 1014
-                        w_end = era5_static.shape[-1] - pad_lon[1]  #  960 - 18 = 942
-                        era5_static_cropped = era5_static[
-                            :, :, :, pad_lat[0]:h_end, pad_lon[0]:w_end
-                        ]  # → [..., 1003, 923]
-                        concat_x_list.append(era5_static_cropped)
-
-                    # Temporal forcing is already on the native GOES grid — no crop
+                        concat_x_list.append(align_spatial(era5_static, native, pad_lat, pad_lon))
                     if "temporal_forcing_10m" in batch_era5:
-                            tf = batch_era5["temporal_forcing_10m"].to(device)
-                            if ensemble_size > 1:
-                                tf = torch.repeat_interleave(tf, ensemble_size, 0)
-                            concat_x_list.append(tf)
-
-                    # x is now 35 channels at native GOES resolution (1003×923).
-                    # The model will pad it to 1024×960 via padding_conf internally.
+                        tf = batch_era5["temporal_forcing_10m"].to(device)
+                        if ensemble_size > 1:
+                            tf = torch.repeat_interleave(tf, ensemble_size, 0)
+                        concat_x_list.append(align_spatial(tf, native, pad_lat, pad_lon))
                     x = torch.concat(concat_x_list, dim=1).float()
 
                     # Build FiLM input: prognostic (3D+2D) + dynamic_forcing

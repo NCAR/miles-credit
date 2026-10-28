@@ -18,6 +18,8 @@ from credit.losses.crps import ring_crps_loss
 
 import optuna
 
+from credit.grid_align import align_spatial, padded_hw
+
 logger = logging.getLogger(__name__)
 
 
@@ -289,29 +291,19 @@ class Trainer(BaseTrainer):
 
                     # 1. Build the main model input (x) by concatenating GOES with the
                     #    bypass-FiLM variables (static + 10-min temporal).
-                    #
-                    #    Static and temporal are on the larger ERA5 grid (1024×960).
-                    #    We crop them back to the native GOES grid (1003×923) here so
-                    #    that padding_conf.activate=True can pad the ENTIRE tensor once,
-                    #    cleanly, inside the model.  No pre-padding in the trainer.
-                    concat_x_list = [x]   # x is still 1003×923 — DO NOT pad it here
-
+                    
+                    # Forcing grids differ by resolution: at 10 km ERA5/static were on the padded
+                    # grid and static needed cropping; at 3 km both are native and x_era5 needs
+                    # padding instead. Derive from shapes rather than assuming either.
+                    native = x.shape[-2:]
+                    concat_x_list = [x]
                     if era5_static is not None:
-                        h_end = era5_static.shape[-2] - pad_lat[1]   # 1024 - 10 = 1014
-                        w_end = era5_static.shape[-1] - pad_lon[1]   #  960 - 18 = 942
-                        era5_static_cropped = era5_static[
-                            :, :, :, pad_lat[0]:h_end, pad_lon[0]:w_end
-                        ]   # → [..., 1003, 923]
-                        concat_x_list.append(era5_static_cropped)
-
+                        concat_x_list.append(align_spatial(era5_static, native, pad_lat, pad_lon))
                     if "temporal_forcing_10m" in batch_era5:
                         tf = batch_era5["temporal_forcing_10m"].to(self.device)
                         if ensemble_size > 1:
                             tf = torch.repeat_interleave(tf, ensemble_size, 0)
-                        concat_x_list.append(tf)  # already native GOES resolution, no crop needed
-
-                    # x is now 35 channels at native GOES resolution (1003×923).
-                    # The model will pad it to 1024×960 via padding_conf.
+                        concat_x_list.append(align_spatial(tf, native, pad_lat, pad_lon))
                     x = torch.concat(concat_x_list, dim=1).float()
 
                     # 2. Build x_era5: variables that go through the FiLM layer (1-hourly ERA5).
@@ -334,6 +326,10 @@ class Trainer(BaseTrainer):
                             x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
                     else:
                         x_era5 = None
+
+                    # Align ERA5 spatial dimensions to the padded model grid.
+                    if x_era5 is not None:
+                        x_era5 = align_spatial(x_era5, padded_hw(native, pad_lat, pad_lon), pad_lat, pad_lon)
 
                 # NEW: SQUASH OCEAN NANS BEFORE FORWARD PASS
                 x = torch.nan_to_num(x, nan=0.0)
@@ -684,28 +680,18 @@ class Trainer(BaseTrainer):
                         # 1. Build the main model input (x) by concatenating GOES with the
                         #    bypass-FiLM variables (static + 10-min temporal).
                         #
-                        #    Static and temporal are on the larger ERA5 grid (1024×960).
-                        #    We crop them back to the native GOES grid (1003×923) here so
-                        #    that padding_conf.activate=True can pad the ENTIRE tensor once,
-                        #    cleanly, inside the model.  No pre-padding in the trainer.
-                        concat_x_list = [x]   # x is still 1003×923 — DO NOT pad it here
-
+                        # Forcing grids differ by resolution: at 10 km ERA5/static were on the padded
+                        # grid and static needed cropping; at 3 km both are native and x_era5 needs
+                        # padding instead. Derive from shapes rather than assuming either.
+                        native = x.shape[-2:]
+                        concat_x_list = [x]
                         if era5_static is not None:
-                            h_end = era5_static.shape[-2] - pad_lat[1]   # 1024 - 10 = 1014
-                            w_end = era5_static.shape[-1] - pad_lon[1]   #  960 - 18 = 942
-                            era5_static_cropped = era5_static[
-                                :, :, :, pad_lat[0]:h_end, pad_lon[0]:w_end
-                            ]   # → [..., 1003, 923]
-                            concat_x_list.append(era5_static_cropped)
-
+                            concat_x_list.append(align_spatial(era5_static, native, pad_lat, pad_lon))
                         if "temporal_forcing_10m" in batch_era5:
                             tf = batch_era5["temporal_forcing_10m"].to(self.device)
                             if ensemble_size > 1:
                                 tf = torch.repeat_interleave(tf, ensemble_size, 0)
-                            concat_x_list.append(tf)  # already native GOES resolution, no crop needed
-
-                        # x is now 35 channels at native GOES resolution (1003×923).
-                        # The model will pad it to 1024×960 via padding_conf.
+                            concat_x_list.append(align_spatial(tf, native, pad_lat, pad_lon))
                         x = torch.concat(concat_x_list, dim=1).float()
 
                         # 2. Build x_era5: variables that go through the FiLM layer (1-hourly ERA5).
@@ -728,6 +714,11 @@ class Trainer(BaseTrainer):
                                 x_era5 = torch.clamp(x_era5, min=clamp_min, max=clamp_max)
                         else:
                             x_era5 = None
+
+                        # Align ERA5 spatial dimensions to the padded model grid.
+                        if x_era5 is not None:
+                            x_era5 = align_spatial(x_era5, padded_hw(native, pad_lat, pad_lon), pad_lat, pad_lon)
+                            
                     # --------------------------------------------- #
                     # clamp
                     if flag_clamp:
