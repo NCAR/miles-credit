@@ -100,8 +100,12 @@ Key behaviors:
 
 - **`run_mode`** selects `batch` (a schedule of init times from `batch_forecast`)
   or `single` (one init time from `single_forecast.start_datetime`). The CLI flags
-  `--run-mode`, `--init-time`, and `--save-dir` override the corresponding config
-  entries; `--init-time` implies `run_mode: single`.
+  `--run-mode`, `--init-time`, `--save-dir`, and `-m/--mode` override the corresponding
+  config entries; `--init-time` implies `run_mode: single`.
+- **`mode`** is the distributed backend (`none` | `ddp` | `fsdp`), independent of
+  `run_mode`. `ddp`/`fsdp` need one process per GPU from a launcher (`torchrun` or
+  `mpiexec`); a plain `credit rollout` is a single process, so pass `-m none` to run a
+  config whose `mode` is `ddp` without one.
 - **`noise_scale`** (optional) multiplies the learned noise amplitude of every
   Stochastic Decomposition Layer in an SDL ensemble model before the rollout:
   `0.0` gives the deterministic mean member, and leaving it unset (or `1.0`) keeps
@@ -289,9 +293,14 @@ credit rollout -c config.yml
 # Ensemble rollout — override ensemble_size from the CLI
 credit rollout -c config.yml --ensemble-size 50
 
-# Multi-GPU on a single node
-credit rollout -c config.yml -m ddp
+# Single process, even if the config sets inference.mode: ddp
+credit rollout -c config.yml -m none
+
+# Multi-GPU on a single node (one process per GPU via torchrun; run from the repo root)
+torchrun --standalone --nproc-per-node=4 credit/applications/rollout_gen2.py -c config.yml
 ```
+
+On Casper/Derecho, `credit submit --mode rollout` (below) generates this launch for you.
 
 #### Submitting PBS jobs
 
