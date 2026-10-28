@@ -49,6 +49,7 @@ def _rollout(args: argparse.Namespace) -> None:
         ("--run-mode", getattr(args, "run_mode", None)),
         ("--init-time", getattr(args, "init_time", None)),
         ("--save-dir", getattr(args, "save_dir", None)),
+        ("--mode", getattr(args, "mode", None)),
     ):
         if value is not None:
             argv += [flag, value]

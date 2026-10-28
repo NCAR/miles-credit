@@ -1102,7 +1102,7 @@ class TestBuildParser:
     def test_rollout_defaults(self):
         parser = _build_parser()
         args = parser.parse_args(["rollout", "-c", "cfg.yml"])
-        assert args.mode == "none"
+        assert args.mode is None  # inference.mode from the config applies unless -m is given
         assert args.procs == 4
         assert args.run_mode is None and args.init_time is None and args.save_dir is None
 
@@ -1114,7 +1114,19 @@ class TestBuildParser:
         monkeypatch.setattr(rollout_gen2, "main", lambda: seen.setdefault("argv", list(sys.argv)))
         monkeypatch.setattr(sys, "argv", sys.argv)
         args = _build_parser().parse_args(
-            ["rollout", "-c", "cfg.yml", "--run-mode", "single", "--init-time", "2020-06-01T00", "--save-dir", "/out"]
+            [
+                "rollout",
+                "-c",
+                "cfg.yml",
+                "--run-mode",
+                "single",
+                "--init-time",
+                "2020-06-01T00",
+                "--save-dir",
+                "/out",
+                "-m",
+                "none",
+            ]
         )
         _rollout(args)
         assert seen["argv"] == [
@@ -1129,6 +1141,8 @@ class TestBuildParser:
             "2020-06-01T00",
             "--save-dir",
             "/out",
+            "--mode",
+            "none",
         ]
 
     def test_rollout_rejects_unknown_run_mode(self):

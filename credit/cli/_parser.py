@@ -106,7 +106,13 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- rollout ----
     p = sub.add_parser("rollout", help="Batch forecast rollout to NetCDF")
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
-    p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
+    p.add_argument(
+        "-m",
+        "--mode",
+        default=None,
+        choices=["none", "ddp", "fsdp"],
+        help="Distributed mode. Overrides inference.mode; use 'none' to run a single process without torchrun.",
+    )
     p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
     p.add_argument(
         "--run-mode",

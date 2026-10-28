@@ -137,6 +137,7 @@ These flags override the config for a single run:
 | `--run-mode {batch,single}` | `inference.run_mode` | |
 | `--init-time ISO8601` | `inference.single_forecast.start_datetime` | Implies `--run-mode single` |
 | `--save-dir DIR` | `inference.save_forecast` | |
+| `-m, --mode {none,ddp,fsdp}` | `inference.mode` | Use `none` to run without `torchrun` |
 
 **When to use it:** after training is complete and you want forecast fields for
 evaluation or downstream analysis.
