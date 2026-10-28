@@ -45,6 +45,14 @@ def _rollout(args: argparse.Namespace) -> None:
     from credit.applications.rollout_gen2 import main
 
     argv = ["credit-rollout", "-c", args.config, "-p", str(args.procs)]
+    for flag, value in (
+        ("--run-mode", getattr(args, "run_mode", None)),
+        ("--init-time", getattr(args, "init_time", None)),
+        ("--save-dir", getattr(args, "save_dir", None)),
+        ("--mode", getattr(args, "mode", None)),
+    ):
+        if value is not None:
+            argv += [flag, value]
     sys.argv = argv
     main()
 

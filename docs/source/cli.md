@@ -123,11 +123,21 @@ use `credit submit --mode train` instead so the job goes through the scheduler.
 ```bash
 credit rollout -c my_run.yml
 credit rollout -c my_run.yml --ensemble-size 10
+credit rollout -c my_run.yml --init-time 2020-06-01T00 --save-dir /scratch/$USER/fcst
 ```
 
 Runs autoregressive forecasts from a trained checkpoint and saves the output
 to NetCDF or Zarr.  The `inference:` section of your config controls the
 forecast length, init times, output format, and variable selection.
+
+These flags override the config for a single run:
+
+| Flag | Overrides | Notes |
+|---|---|---|
+| `--run-mode {batch,single}` | `inference.run_mode` | |
+| `--init-time ISO8601` | `inference.single_forecast.start_datetime` | Implies `--run-mode single` |
+| `--save-dir DIR` | `inference.save_forecast` | |
+| `-m, --mode {none,ddp,fsdp}` | `inference.mode` | Use `none` to run without `torchrun` |
 
 **When to use it:** after training is complete and you want forecast fields for
 evaluation or downstream analysis.
