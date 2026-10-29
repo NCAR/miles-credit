@@ -1041,10 +1041,10 @@ def _check_paths(conf: dict, rep: _Report) -> None:
         if os.path.exists(expanded):
             continue
         if "scaler" in where:
-            rep.warn(
+            rep.info(
                 where,
-                f"Scaler file does not exist yet: {expanded}",
-                fix="Run `credit preprocess -c <config>` to fit it before training.",
+                f"Scaler file not found yet: {expanded}",
+                fix="If you've just set up this config, run `credit preprocess -c <config>` to create it before training.",
             )
         else:
             rep.error(where, f"File not found: {expanded}")
