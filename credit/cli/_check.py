@@ -496,11 +496,13 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
     _check_scaler_spatial_variables_consistent(conf, rep)
 
 
-def _iter_bridgescaler_blocks(conf: dict, top: str, sections: tuple[str, ...]):
-    """Yield (where, args) for every bridgescaler_transform block under `top`."""
+def _iter_bridgescaler_blocks(
+    conf: dict, top: str, sections: tuple[str, ...], types: tuple[str, ...] = ("bridgescaler_transform",)
+):
+    """Yield (where, args) for every block under `top` whose type is in `types`."""
     for section in sections:
         for name, block in ((conf.get(top) or {}).get(section) or {}).items():
-            if isinstance(block, dict) and block.get("type") == "bridgescaler_transform":
+            if isinstance(block, dict) and block.get("type") in types:
                 yield f"{top}.{section}.{name}", (block.get("args") or {})
 
 
@@ -520,6 +522,8 @@ def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None
     `spatial_variables` that the preblock didn't, the postblock flattens it to
     `n_lat * n_lon` columns before calling the scaler, which no longer matches
     the fitted column count and raises at runtime on the very first batch.
+    `flatten_to_tensor` forward-scales with its `scaler_path` too, so it is held
+    to the same rule.
     """
     preblock_specs: dict[str, tuple[str, set]] = {}
     for where, args in _iter_bridgescaler_blocks(conf, "preblocks", ("ic_only", "per_step")):
@@ -527,7 +531,9 @@ def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None
         if resolved is not None:
             preblock_specs[resolved] = (where, set(args.get("spatial_variables") or []))
 
-    for where, args in _iter_bridgescaler_blocks(conf, "postblocks", ("per_step", "post_rollout")):
+    for where, args in _iter_bridgescaler_blocks(
+        conf, "postblocks", ("per_step", "post_rollout"), types=("bridgescaler_transform", "flatten_to_tensor")
+    ):
         resolved = _resolve_scaler_path(args.get("scaler_path"))
         if resolved is None or resolved not in preblock_specs:
             continue
@@ -1406,6 +1412,9 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
 
 
 def _check(args: argparse.Namespace) -> None:
+    # --json output must stay parseable, so the progress line goes to stderr there.
+    stream = sys.stderr if getattr(args, "json", False) else sys.stdout
+    print(f"Checking config: {args.config} ...", file=stream, flush=True)
     rep = _Report(args.config)
     conf = _load_config(args.config, rep)
     if conf is not None:
