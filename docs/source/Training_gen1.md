@@ -134,8 +134,11 @@ reports which cluster a config's queue implies.
 | 2 | `pbs:` section in config | `project: "NCAR0001"` |
 | 3 | Built-in cluster default | 4 GPUs, 12 h walltime, etc. |
 
-You can also export `PBS_ACCOUNT` in your shell as a global fallback for the account code
-(useful if you work across multiple configs but always charge the same project).
+The account has no built-in default: it comes from `--account`, then `pbs.project`, then the
+`PBS_ACCOUNT` environment variable. Exporting `PBS_ACCOUNT` in your shell is the easiest option if you
+always charge the same project — `credit begin` leaves `project:` out of the config when you skip its
+account prompt, so the variable applies at submit time. If none of the three is set, `credit submit`
+exits with an error before calling `qsub`.
 
 ## Running on Casper vs. Derecho
 

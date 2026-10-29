@@ -1567,8 +1567,8 @@ class TestResolvePbsOptsEnv:
         r = _resolve_pbs_opts(args, {})
         assert r.account == "ENV_ACCOUNT"
 
-    def test_ultimate_fallback_naml0001(self, monkeypatch):
-        # Remove PBS_ACCOUNT if set
+    def test_missing_account_exits(self, monkeypatch, capsys):
+        # No flag, no pbs.project, no $PBS_ACCOUNT: there is no built-in account to fall back to.
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1582,11 +1582,29 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
-        assert r.account == "NAML0001"
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
+        assert "PBS_ACCOUNT" in capsys.readouterr().err
+
+    def test_empty_env_account_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "")
+        args = argparse.Namespace(
+            cluster="casper",
+            account=None,
+            walltime=None,
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            queue=None,
+            gpu_type=None,
+            conda_env=None,
+        )
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
 
     def test_all_none_uses_hardcoded_defaults(self, monkeypatch):
-        """All fields None + empty pbs_cfg → _first() returns None path is exercised."""
+        """All CLI fields None and no pbs_cfg settings except the account → cluster defaults fill the rest."""
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1600,7 +1618,7 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
+        r = _resolve_pbs_opts(args, {"project": "TEST_ACCOUNT"})
         # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
         assert r.gpu_type is None
         assert r.walltime == "12:00:00"

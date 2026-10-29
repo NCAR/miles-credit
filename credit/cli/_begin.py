@@ -776,7 +776,6 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
         defaults = _PBS_DEFAULTS[system]
         result = {
             "conda": env or ("credit-derecho" if system == "derecho" else "credit-casper"),
-            "project": defaults["account"],
             "job_name": experiment,
             "walltime": defaults["walltime"],
             "nodes": nodes,
@@ -785,6 +784,16 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "mem": defaults["mem"] if system == "derecho" else "128GB",
             "queue": defaults["queue"],
         }
+        # Only write the account when the user types one. When left out, `credit submit`
+        # falls back to $PBS_ACCOUNT at submit time, which keeps the config portable.
+        env_account = os.environ.get("PBS_ACCOUNT")
+        if env_account:
+            hint = f"PBS account (Enter to use $PBS_ACCOUNT={env_account} at submit time)"
+        else:
+            hint = "PBS project code to charge (Enter to skip; then export PBS_ACCOUNT before submitting)"
+        account = _prompt(hint, "")
+        if account:
+            result["project"] = account
         if system == "casper":
             choices = ["any"] + sorted(t for t in _CASPER_GPU_NODES if t)
             hint = ", ".join(choices)

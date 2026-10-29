@@ -15,6 +15,8 @@ validated separately on real Derecho hardware.
 
 import argparse
 
+import pytest
+
 from credit.cli import _build_pbs_script
 from credit.pbs import PBSDSH_DERECHO_MODULES, _build_pbsdsh_script, _pbsdsh_launch_block
 
@@ -196,14 +198,21 @@ class TestPbsdshLauncher:
         assert '> "${LOGDIR}/node_${i}.pbsdsh" 2>&1 &' in script
         assert 'cat "${LOGDIR}/node_${i}.out"' in script
 
-    def test_defaults_when_pbs_options_sparse(self):
-        # Only nodes/ngpus provided -- everything else should fall back to defaults.
+    def test_defaults_when_pbs_options_sparse(self, monkeypatch):
+        # Only nodes/ngpus provided -- everything else should fall back to defaults,
+        # with the account coming from $PBS_ACCOUNT.
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
         script = _build_pbsdsh_script({"nodes": 1, "ngpus": 4}, FAKE_SCRIPT_PATH, FAKE_CONFIG_SAVE_PATH)
-        assert "#PBS -A NAML0001" in script
+        assert "#PBS -A ENV_ACCOUNT" in script
         assert "#PBS -N credit_v2_pbsdsh" in script
         assert "#PBS -l walltime=01:00:00" in script
         assert "select=1:ncpus=64:ngpus=4:mem=480GB" in script
         assert "conda activate credit" in script
+
+    def test_missing_account_raises(self, monkeypatch):
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+        with pytest.raises(ValueError, match="PBS_ACCOUNT"):
+            _build_pbsdsh_script({"nodes": 1, "ngpus": 4}, FAKE_SCRIPT_PATH, FAKE_CONFIG_SAVE_PATH)
 
     def test_launch_block_terminator_at_column_zero(self):
         # The per-node heredoc terminator must not be indented, or the heredoc never closes.

@@ -10,6 +10,14 @@ from credit.conda_env import torchrun_path
 logger = logging.getLogger(__name__)
 
 
+def _pbs_account(pbs_options):
+    """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
+    account = pbs_options.get("project") or pbs_options.get("account") or os.environ.get("PBS_ACCOUNT")
+    if not account:
+        raise ValueError("No PBS account. Set pbs.project in the config or export PBS_ACCOUNT.")
+    return account
+
+
 def launch_script(config_file, script_path, launch=True, backend="nccl"):
     """Generates and optionally launches a PBS script for a single-node MPI job on Casper.
 
@@ -118,7 +126,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     # Generate the PBS script
     script = f"""#!/bin/bash
-    #PBS -A {pbs_options.get("project", "default_project")}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -N {pbs_options.get("job_name", "default_job")}
     #PBS -l walltime={pbs_options.get("walltime", "00:10:00")}
     #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 1)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "4GB")}
@@ -252,7 +260,7 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
     torchrun_line = f"TORCHRUN={torchrun}\n" if num_nodes == 1 else ""
 
     script = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
@@ -486,7 +494,7 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
     torchrun = f"{conda}/bin/torchrun" if "/" in str(conda) else "torchrun"
 
     header = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2_pbsdsh")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
