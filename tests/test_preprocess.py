@@ -462,6 +462,12 @@ def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     # 3 batches * batch_size 2 * 64 * 32 grid points per level.
     assert int(np.asarray(t_scaler.n_).reshape(-1)[0]) == 3 * 2 * 64 * 32
 
+    # The log-transformed humidity also gets exact physical-unit target stats.
+    physical = load_scaler_dict(str(tmp_path / "scaler_physical.json"))["target"][SOURCE]
+    assert set(physical) == {VAR_Q}
+    q_mean = np.asarray(physical[VAR_Q].mean_x_)
+    assert ((q_mean > 0) & (q_mean < 0.05)).all(), f"implausible physical humidity means: {q_mean}"
+
 
 def test_preprocess_main_two_scalers_writes_both_files(tmp_path, monkeypatch):
     """Two BridgeScalerTransform blocks (standard for temperature, quantile for

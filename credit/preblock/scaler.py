@@ -2,7 +2,7 @@ import torch
 from bridgescaler import load_scaler_dict, scale_var_dict
 from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScalerTensor, DMinMaxScalerTensor
 from credit.preblock.base import BasePreblock
-from os.path import exists, expandvars
+from os.path import exists, expandvars, splitext
 from os import makedirs
 from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
 
@@ -11,6 +11,36 @@ _SCALER_REGISTRY = {
     "quantile": DQuantileScalerTensor,
     "minmax": DMinMaxScalerTensor,
 }
+
+
+def physical_stats_path(scaler_path: str) -> str:
+    """Sidecar file holding physical-unit target statistics for a scaler file.
+
+    ``credit preprocess`` writes it next to ``scaler_path`` (``scaler.json`` ->
+    ``scaler_physical.json``) when log-transformed target variables are scaled
+    there: a standard scaler fit on their values *before* the ``log_transform``
+    preblock, so the loss and metrics can weight them by their exact
+    physical-unit variance (see ``credit.losses.base._load_target_variances``).
+    """
+    root, ext = splitext(expandvars(scaler_path))
+    return f"{root}_physical{ext or '.json'}"
+
+
+def fit_physical_target_stats(log_block, batch: dict, accumulated: dict | None = None) -> dict | None:
+    """Fit standard scalers on the target variables a ``LogTransform`` block log-transforms.
+
+    ``batch`` is the batch as it reaches ``log_block`` (still in physical units).
+    Returns ``{"target": {source: {var_key: scaler}}}`` merged into ``accumulated``,
+    or ``accumulated`` unchanged when the block transforms no target variables.
+    """
+    if "target" not in log_block.data_types or "target" not in batch:
+        return accumulated
+    variables = _parse_variable_selection(log_block.variables, batch, ["target"])
+    fitted = scale_var_dict({"target": batch["target"]}, DStandardScalerTensor(channels_last=False), "fit", variables)
+    fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
+    if not fitted["target"]:
+        return accumulated
+    return fitted if accumulated is None else _combine_scaler_dicts(accumulated, fitted)
 
 
 def _move_leaf_scaler_to_cpu(scaler):

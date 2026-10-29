@@ -1,5 +1,7 @@
 """Tests for credit.losses.base.BaseLoss and the Reconstruct in_key/out_key extension."""
 
+import math
+
 import numpy as np
 import pytest
 import torch
@@ -166,6 +168,104 @@ def test_load_target_variances(tmp_path):
     assert variances[VAR_SP] == pytest.approx(1.0e6)
     assert variances[VAR_T] == pytest.approx(np.mean(VARIANCES[VAR_T]))
     assert variances[VAR_PRECIP] == pytest.approx(1.0e-8)
+
+
+def _make_log_scaler_file(tmp_path, x, eps=1e-8):
+    """Scaler fit on y = ln(x + eps) - ln(eps), the LogTransform preblock's output."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    y = torch.log(x + eps) - math.log(eps)
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = y.mean(dim=0, keepdim=False).double()
+    s.var_x_ = y.var(dim=0, unbiased=False).double()
+    s.x_columns_ = list(range(x.shape[1]))
+    s.n_ = x.shape[0]
+    s._fit = True
+    path = str(tmp_path / "log_scaler.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_SP: s}}}, path)
+    return path
+
+
+def test_load_target_variances_converts_exp_transformed_vars(tmp_path):
+    """A log-scaled variable scored in physical units gets its physical variance."""
+    torch.manual_seed(0)
+    # Lognormal "surface pressure": ~1e5 Pa with a few percent spread.
+    x = torch.exp(11.5 + 0.1 * torch.randn(200000, 1, dtype=torch.float64))
+    path = _make_log_scaler_file(tmp_path, x)
+
+    log_space = _load_target_variances(path)
+    physical = _load_target_variances(path, [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}])
+    assert log_space[VAR_SP] == pytest.approx(0.01, rel=0.02)
+    assert physical[VAR_SP] == pytest.approx(float(x.var(unbiased=False)), rel=0.05)
+
+
+def test_log_variance_conversion_stays_bounded_for_skewed_fields(tmp_path):
+    """Humidity-like fields are left-skewed in log space (a dry tail); the estimate
+    must stay near the true variance rather than blow up with the log variance."""
+    torch.manual_seed(0)
+    wet = torch.exp(-5.0 + 0.3 * torch.randn(90000, 1, dtype=torch.float64))
+    dry = torch.exp(-12.0 + 0.3 * torch.randn(10000, 1, dtype=torch.float64))
+    x = torch.cat([wet, dry])
+    path = _make_log_scaler_file(tmp_path, x)
+    physical = _load_target_variances(path, [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}])
+    true_var = float(x.var(unbiased=False))
+    assert true_var / 10 < physical[VAR_SP] < true_var * 10
+
+
+def test_load_target_variances_prefers_exact_physical_stats(tmp_path):
+    """The scaler_physical.json sidecar's exact variance replaces the first-order estimate."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    from credit.preblock.scaler import physical_stats_path
+
+    torch.manual_seed(0)
+    # Zero-inflated "precipitation": the first-order estimate is far too small here.
+    x = torch.exp(-8.0 + 1.5 * torch.randn(50000, 1, dtype=torch.float64))
+    x[torch.rand(50000) < 0.7] = 0.0
+    path = _make_log_scaler_file(tmp_path, x)
+    spec = [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}]
+    first_order = _load_target_variances(path, spec)[VAR_SP]
+    log_space = _load_target_variances(path)[VAR_SP]
+
+    s = DStandardScalerTensor(channels_last=False)
+    s.fit(x.float().reshape(-1, 1, 1))
+    assert physical_stats_path(path) == str(tmp_path / "log_scaler_physical.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_SP: s}}}, physical_stats_path(path))
+
+    true_var = float(x.var(unbiased=False))
+    assert first_order < true_var / 100
+    assert _load_target_variances(path, spec)[VAR_SP] == pytest.approx(true_var, rel=1e-3)
+    # Only exp-transformed variables use the sidecar; a log-space loss keeps the log variance.
+    assert _load_target_variances(path)[VAR_SP] == pytest.approx(log_space)
+
+
+def test_load_target_variances_partial_path_and_non_matching(tmp_path):
+    torch.manual_seed(0)
+    x = torch.exp(11.5 + 0.1 * torch.randn(1000, 1, dtype=torch.float64))
+    path = _make_log_scaler_file(tmp_path, x)
+    by_prefix = _load_target_variances(path, [{"variables": ["ERA5/prognostic"], "base": "e", "eps": 1e-8}])
+    other = _load_target_variances(path, [{"variables": ["ERA5/prognostic/3d"], "base": "e", "eps": 1e-8}])
+    assert by_prefix[VAR_SP] > 1e6
+    assert other[VAR_SP] == pytest.approx(0.01, rel=0.2)
+
+
+def test_exp_transform_specs_from_conf():
+    from credit.losses.base import exp_transform_specs
+
+    conf = {
+        "postblocks": {
+            "per_step": {
+                "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+                "exp": {"type": "exp_transform", "args": {"variables": [VAR_SP]}},
+                # The target twin is not what the weights describe; y_processed is.
+                "exp_target": {"type": "exp_transform", "args": {"variables": [VAR_T], "key": "y_target_processed"}},
+            }
+        }
+    }
+    assert exp_transform_specs(conf) == [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}]
+    assert exp_transform_specs({}) == []
 
 
 # ---------------------------------------------------------------------------
