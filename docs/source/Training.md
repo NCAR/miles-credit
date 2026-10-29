@@ -38,6 +38,21 @@ automatically from the config.
 edits required to get started.
 :::
 
+### Config history in `save_loc`
+
+Every `credit train` / `credit preprocess` / `credit submit` run copies its config to `<save_loc>/model.yml`, so
+that file always reflects the most recent run (rollout and evaluation read it). To keep an audit trail,
+`save_loc` is automatically turned into a small git repository that tracks only `model.yml`; each time the
+config changes a commit is made:
+
+```bash
+git -C <save_loc> log -p model.yml
+```
+
+**git must be installed and on your `PATH`** (on Casper/Derecho: `module load git`). If git is missing or the
+repository cannot be initialized, CREDIT logs a warning, still copies `model.yml`, but config history is not
+recorded.
+
 ## How many jobs do I need?
 
 Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.

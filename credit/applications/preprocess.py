@@ -16,6 +16,7 @@ from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
+from credit.pbs import sync_run_config
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.seed import seed_everything
@@ -210,8 +211,8 @@ Examples:
     logger.info("Loaded config file: %s", args.model_config)
     save_loc = expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(args.model_config, os.path.join(save_loc, "model.yml"))
+    if rank == 0:
+        sync_run_config(args.model_config, save_loc)
 
     # Write the channel schema alongside the scaler. Always refreshed (unlike
     # model.yml) so a re-run after a config change never leaves a stale layout;
