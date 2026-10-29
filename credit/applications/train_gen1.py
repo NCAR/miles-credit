@@ -407,11 +407,9 @@ def main_cli():
 
     # ======================================================== #
 
-    # Create directories if they do not exist and copy yml file
+    # Create directories if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
-
-    sync_run_config(config, save_loc)
 
     # Launch PBS jobs
     if launch:
@@ -426,6 +424,9 @@ def main_cli():
         sys.exit()
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    # main_cli runs once per rank, so only rank 0 may write model.yml / touch its git repo
+    if world_rank == 0:
+        sync_run_config(config, save_loc)
     main(world_rank, world_size, conf, backend)
 
 

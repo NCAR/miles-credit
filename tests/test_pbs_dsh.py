@@ -378,3 +378,29 @@ def test_sync_run_config_git_init_failure_still_copies_and_warns(tmp_path, monke
         sync_run_config(_cfg(tmp_path, "a: 1\n"), str(save))
     assert (save / "model.yml").read_text() == "a: 1\n"
     assert "boom" in caplog.text and "git is required" in caplog.text
+
+
+def test_sync_run_config_expands_env_vars_in_save_loc(tmp_path, monkeypatch):
+    monkeypatch.setenv("CREDIT_TEST_RUNS", str(tmp_path))
+    dest = sync_run_config(_cfg(tmp_path, "a: 1\n"), "$CREDIT_TEST_RUNS/run")
+    assert dest == str(tmp_path / "run" / "model.yml")
+    assert (tmp_path / "run" / "model.yml").read_text() == "a: 1\n"
+
+
+@needs_git
+def test_sync_run_config_git_commit_failure_still_copies_and_warns(tmp_path, monkeypatch, caplog):
+    import credit.pbs as pbs
+
+    real_git = pbs._git
+
+    def fail_commit(save_loc, *args, **kwargs):
+        if args and args[0] == "commit":
+            return subprocess.CompletedProcess(args, 1, stdout="", stderr="commit boom")
+        return real_git(save_loc, *args, **kwargs)
+
+    monkeypatch.setattr(pbs, "_git", fail_commit)
+    save = tmp_path / "run"
+    with caplog.at_level(logging.WARNING):
+        sync_run_config(_cfg(tmp_path, "a: 1\n"), str(save))
+    assert (save / "model.yml").read_text() == "a: 1\n"
+    assert "commit boom" in caplog.text

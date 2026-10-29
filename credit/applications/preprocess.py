@@ -15,8 +15,8 @@ from bridgescaler import save_scaler_dict
 from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
-from credit.pbs import sync_run_config
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
+from credit.pbs import sync_run_config
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
 from credit.seed import seed_everything
