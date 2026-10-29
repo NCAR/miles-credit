@@ -16,6 +16,7 @@ import math
 import os
 import random
 import shutil
+import time
 from abc import ABC, abstractmethod
 from collections import OrderedDict, defaultdict
 from collections.abc import Callable
@@ -604,6 +605,8 @@ class BaseTrainer(ABC):
         Mid-epoch saves pass ``resume_state`` (``batch_in_epoch``, ``train_results``,
         ``sampler_layout``), stored at the top level of checkpoint.pt.
         """
+        # Includes the collective gathers, which dominate under FSDP2 / tensor parallel.
+        t0 = time.perf_counter()
         resume_state = resume_state or {}
         mid_epoch = int(resume_state.get("batch_in_epoch") or 0) > 0
         resume_fields = {"batch_in_epoch": 0, **resume_state, "rng_states": self._gather_rng_states()}
@@ -708,6 +711,10 @@ class BaseTrainer(ABC):
             torch.save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
             if self.save_every_epoch and not mid_epoch:
                 copy_checkpoint(os.path.join(self.save_loc, "model_checkpoint.pt"), epoch)
+
+        if self.rank == 0:
+            where = f"batch {resume_fields['batch_in_epoch']}" if mid_epoch else "end"
+            logger.info(f"Checkpoint saved (epoch {epoch}, {where}) in {time.perf_counter() - t0:.1f}s")
 
     # ------------------------------------------------------------------
     # Main training loop
