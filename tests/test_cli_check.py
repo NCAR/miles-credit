@@ -905,7 +905,15 @@ def test_log_variance_weight_large_spread_warns(conf, tmp_path):
     found = _log_variance_warnings(_run(conf))
     assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
     assert "ERA5/prognostic/3d/Q" in found[0].message and "differ by" in found[0].message
-    assert "variable_weights" in found[0].fix
+    assert "variable_weights" in found[0].fix and "credit preprocess" in found[0].fix
+
+
+def test_log_variance_weight_silent_with_exact_physical_stats(conf, tmp_path):
+    """The scaler_physical.json sidecar from credit preprocess gives the exact variance."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    _write_standard_scaler(tmp_path / "scaler_physical.json", [1e-3, 2e-3], [1e-6, 4e-6])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
 
 
 def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):

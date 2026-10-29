@@ -171,6 +171,8 @@ def _physical_variance_from_log(mean: torch.Tensor, var: torch.Tensor, base: str
     specific humidity are strongly skewed in log space (log variance > 2 near the
     surface), where the lognormal formula overestimates the physical variance by an
     order of magnitude. The two agree when ``s2`` is small (e.g. surface pressure).
+    This is a fallback for scalers fit before ``credit preprocess`` recorded exact
+    physical-unit statistics (``_load_physical_scalers``).
     """
     ln_base = {"e": 1.0, "2": math.log(2.0), "10": math.log(10.0)}[base]
     log_b_eps = math.log(eps) / ln_base
@@ -179,17 +181,40 @@ def _physical_variance_from_log(mean: torch.Tensor, var: torch.Tensor, base: str
     return torch.exp(2 * m) * s2
 
 
+def _load_physical_scalers(scaler_path: str) -> dict:
+    """``{var_key: scaler}`` from the physical-unit stats sidecar of ``scaler_path``, or ``{}``."""
+    from bridgescaler import load_scaler_dict
+
+    from credit.preblock.scaler import physical_stats_path
+
+    path = physical_stats_path(scaler_path)
+    if not os.path.isfile(path):
+        return {}
+    return {
+        var_key: scaler
+        for source_scalers in load_scaler_dict(path).get("target", {}).values()
+        for var_key, scaler in source_scalers.items()
+    }
+
+
 def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = None) -> dict:
     """Flatten a bridgescaler dict's ``"target"`` slice to ``{var_key: variance}``.
 
     ``exp_transforms`` (from ``exp_transform_specs``) marks variables whose scaler
     was fit in log space but which are scored in physical units; their variances
     are converted to physical units so inverse-variance weights match the loss.
+    The exact physical variance from the ``*_physical.json`` sidecar that
+    ``credit preprocess`` writes (``credit.preblock.scaler.physical_stats_path``)
+    is used when present; otherwise it is estimated from the log-space statistics
+    (``_physical_variance_from_log``).
     """
     from bridgescaler import load_scaler_dict
 
+    from credit.preblock.scaler import physical_stats_path
+
     exp_transforms = exp_transforms or []
     target_scalers = load_scaler_dict(os.path.expandvars(scaler_path))["target"]
+    physical_scalers = _load_physical_scalers(scaler_path) if exp_transforms else {}
     variances = {}
     for source_scalers in target_scalers.values():
         for var_key, scaler in source_scalers.items():
@@ -197,7 +222,17 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
             if channel_var is None or not torch.isfinite(channel_var).all():
                 continue
             spec = _matching_exp_spec(var_key, exp_transforms)
-            if spec is not None:
+            exact = _scaler_channel_variance(physical_scalers[var_key]) if var_key in physical_scalers else None
+            if spec is not None and exact is not None and torch.isfinite(exact).all():
+                logger.info(
+                    "'%s' is scored in physical units but scaled in log space: using the exact "
+                    "physical variance %.4g from %s.",
+                    var_key,
+                    float(exact.mean()),
+                    physical_stats_path(scaler_path),
+                )
+                channel_var = exact
+            elif spec is not None:
                 mean = getattr(scaler, "mean_x_", None)
                 if mean is None:
                     logger.warning(

@@ -17,7 +17,13 @@ from torch.distributed import barrier, gather_object
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
-from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
+from credit.preblock.log import LogTransform
+from credit.preblock.scaler import (
+    combine_scaler_dicts,
+    fit_physical_target_stats,
+    move_scaler_dict_to_cpu,
+    physical_stats_path,
+)
 from credit.seed import seed_everything
 from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
 
@@ -125,6 +131,42 @@ def log_fitted_scalers(scaler_dict, logger, path=()):
             log_fitted_scalers(value, logger, path + (key,))
         else:
             _log_single_scaler(value, "/".join(path + (key,)), logger)
+
+
+def _save_physical_stats(all_physical, preblocks, scaler_block_keys):
+    """Write each scaler's ``*_physical.json`` sidecar of exact physical-unit target stats.
+
+    ``all_physical`` holds one ``{log_block_key: {"target": {source: {var: scaler}}}}``
+    dict per rank. The fits are combined across ranks, then each scaler file gets the
+    physical statistics of the log-transformed target variables it scales.
+    """
+    fits = [p for p in all_physical if p]
+    if not fits:
+        return
+    by_var = {}  # var_key -> (source, scaler); the first log block to transform a variable wins
+    for log_stats in combine_scaler_dicts(fits).values():
+        for source, scalers in log_stats["target"].items():
+            for var_key, scaler in scalers.items():
+                by_var.setdefault(var_key, (source, scaler))
+    for scaler_key in scaler_block_keys:
+        scaler_block = preblocks[scaler_key]
+        scaled_vars = {
+            var_key for scalers in (scaler_block.scaler or {}).get("target", {}).values() for var_key in scalers
+        }
+        sidecar = {}
+        for var_key in sorted(scaled_vars & set(by_var)):
+            source, scaler = by_var[var_key]
+            sidecar.setdefault(source, {})[var_key] = scaler
+        if not sidecar:
+            continue
+        path = physical_stats_path(scaler_block.scaler_path)
+        _backup_existing_file(path)
+        save_scaler_dict({"target": sidecar}, path)
+        logger.info(
+            "Saved physical-unit statistics of log-transformed targets %s to %s",
+            sorted(v for s in sidecar.values() for v in s),
+            path,
+        )
 
 
 def main():
@@ -259,6 +301,11 @@ Examples:
                 f"scaler_path '{path}'. Each scaler preblock must use a distinct scaler_path."
             )
         seen_paths[path] = scaler_key
+    # Log-transformed targets are scored in physical units by BaseLoss and the gen2
+    # metrics, but their scaler only sees log-space values. Fit their exact
+    # physical-unit statistics alongside, on the batch as it reaches each log block.
+    log_block_keys = [k for k, v in preblocks.items() if isinstance(v, LogTransform) and "target" in v.data_types]
+    physical_stats = {}
 
     # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
     # Using forecast_len > 1 would feed the same timestamps at multiple step
@@ -292,6 +339,11 @@ Examples:
         for scaler_key in scaler_block_keys:
             processed_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=scaler_key)
             preblocks[scaler_key].fit_scaler_batch(processed_batch)
+        for log_key in log_block_keys:
+            pre_log_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=log_key)
+            fitted = fit_physical_target_stats(preblocks[log_key], pre_log_batch, physical_stats.get(log_key))
+            if fitted is not None:
+                physical_stats[log_key] = fitted
     del dl  # iterator lives only here; refcount → 0, workers shut down immediately
     del train_loader
 
@@ -318,6 +370,15 @@ Examples:
             logger.info("Saved fitted scaler for preblock '%s' to %s", scaler_key, scaler_path)
             logger.info("Fitted scaler values for preblock '%s' by variable:", scaler_key)
             log_fitted_scalers(combined_scaler, logger)
+
+    if log_block_keys:
+        if dist.is_initialized() and world_size > 1:
+            all_physical = [None] * world_size if rank == 0 else None
+            gather_object(move_scaler_dict_to_cpu(physical_stats), all_physical, dst=0)
+        else:
+            all_physical = [physical_stats]
+        if rank == 0:
+            _save_physical_stats(all_physical, preblocks, scaler_block_keys)
 
     if dist.is_initialized():
         dist.destroy_process_group()

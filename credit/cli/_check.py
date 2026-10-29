@@ -1158,13 +1158,16 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
     spread that wide means the variable's real physical variance, and so its
     weight, is not pinned down by the scaler. Zero-inflated fields (precipitation,
     cloud water) are the worst case: there the first-order estimate can be orders
-    of magnitude too small, so the variable dominates the loss.
+    of magnitude too small, so the variable dominates the loss. Variables with exact
+    physical-unit statistics in the scaler's ``*_physical.json`` sidecar (written
+    by ``credit preprocess``) are weighted by those instead and are not flagged.
     """
     import math
 
     import torch
 
     from credit.losses.base import (
+        _load_physical_scalers,
         _matching_exp_spec,
         _physical_variance_from_log,
         _scaler_channel_variance,
@@ -1195,13 +1198,24 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
         except Exception as exc:  # noqa: BLE001
             rep.warn(f"{tops[0]}.args.scaler_path", f"Could not read scaler {path}: {type(exc).__name__}: {exc}")
             continue
+        try:
+            physical = _load_physical_scalers(path)
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(
+                f"{tops[0]}.args.scaler_path",
+                f"Could not read the physical-unit stats next to {path}: {type(exc).__name__}: {exc}",
+            )
+            physical = {}
         where = f"{tops[0]}.args.var_weighting"
         users = " and ".join(tops)
+        refit = (
+            "Re-run `credit preprocess` (move the existing scaler aside first) to record exact physical-unit statistics"
+        )
         for source_scalers in target.values():
             for var_key, scaler in source_scalers.items():
                 spec = _matching_exp_spec(var_key, specs)
                 var = _scaler_channel_variance(scaler)
-                if spec is None or var is None or not torch.isfinite(var).all():
+                if spec is None or var is None or not torch.isfinite(var).all() or var_key in physical:
                     continue
                 mean = getattr(scaler, "mean_x_", None)
                 if mean is None:
@@ -1210,7 +1224,10 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
                         f"'{var_key}' is exp_transformed back to physical units, but its scaler has no mean "
                         f"to convert the log-space variance, so the {users} weight it with the log-space "
                         "variance (orders of magnitude off).",
-                        fix=f"variable_weights:\n  {var_key}: <1 / physical variance>   # or var_weighting: manual",
+                        fix=(
+                            f"{refit}, or set\n"
+                            f"variable_weights:\n  {var_key}: <1 / physical variance>   # or var_weighting: manual"
+                        ),
                     )
                     continue
                 mean = torch.as_tensor(mean, dtype=torch.float64).flatten()
@@ -1229,7 +1246,7 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
                     f"moment differ by {spread:.3g}x, so the weight is uncertain by at least that much; "
                     "for zero-inflated fields the first-order estimate can be far too small.",
                     fix=(
-                        "Measure the variable's physical-unit variance V (level mean) and set\n"
+                        f"{refit}, or measure the variable's physical-unit variance V (level mean) and set\n"
                         f"variable_weights:\n  {var_key}: {float(first_order.mean()):.3g} / V"
                     ),
                 )

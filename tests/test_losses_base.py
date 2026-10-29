@@ -213,6 +213,34 @@ def test_log_variance_conversion_stays_bounded_for_skewed_fields(tmp_path):
     assert true_var / 10 < physical[VAR_SP] < true_var * 10
 
 
+def test_load_target_variances_prefers_exact_physical_stats(tmp_path):
+    """The scaler_physical.json sidecar's exact variance replaces the first-order estimate."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    from credit.preblock.scaler import physical_stats_path
+
+    torch.manual_seed(0)
+    # Zero-inflated "precipitation": the first-order estimate is far too small here.
+    x = torch.exp(-8.0 + 1.5 * torch.randn(50000, 1, dtype=torch.float64))
+    x[torch.rand(50000) < 0.7] = 0.0
+    path = _make_log_scaler_file(tmp_path, x)
+    spec = [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}]
+    first_order = _load_target_variances(path, spec)[VAR_SP]
+    log_space = _load_target_variances(path)[VAR_SP]
+
+    s = DStandardScalerTensor(channels_last=False)
+    s.fit(x.float().reshape(-1, 1, 1))
+    assert physical_stats_path(path) == str(tmp_path / "log_scaler_physical.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_SP: s}}}, physical_stats_path(path))
+
+    true_var = float(x.var(unbiased=False))
+    assert first_order < true_var / 100
+    assert _load_target_variances(path, spec)[VAR_SP] == pytest.approx(true_var, rel=1e-3)
+    # Only exp-transformed variables use the sidecar; a log-space loss keeps the log variance.
+    assert _load_target_variances(path)[VAR_SP] == pytest.approx(log_space)
+
+
 def test_load_target_variances_partial_path_and_non_matching(tmp_path):
     torch.manual_seed(0)
     x = torch.exp(11.5 + 0.1 * torch.randn(1000, 1, dtype=torch.float64))
