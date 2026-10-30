@@ -3,7 +3,9 @@
 # Scaling decisions come from scripts/scaling_diagnostics.py, tail_scan.py and units_audit.py; see
 # E3SMULATOR_SCALING_DIAGNOSTICS.md and E3SMULATOR_TRAINING_DEBUG.md. In short:
 #   - per-cell (spatial) scaling only for PS, SST, SSS, TLAI; everything else per-channel (global)
-#   - PRECT: sqrt before scaling, square after (prediction and target twin); loss weight corrected
+#   - PRECT: sqrt before scaling, square after (prediction and target twin)
+#   - loss/metric weights: per-level variances measured in loss units (variance_path, written by preprocess),
+#     so PRECT's m/s variance and the masked fields' observed fractions need no hand-set multipliers
 #   - log only on input-only fields (TLAI, canopy heights), so no exp on any output
 #   - clips for two processing artifacts: sithick pile-up cells (> 10 m), QRUNOFF one-step pulses (> 50 mm/6 h)
 #   - land -> NaN for SST (before the ATM regrid) and for the MPAS fields (ocnregrid renormalize: true)
@@ -757,16 +759,18 @@ loss:
     #   ERA5/diagnostic/2d/total_precipitation: {loss: "mae"}
 
     # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
-    # inverse_variance weights each variable by 1/sigma^2 from the bridgescaler
-    # file (approximates normalized-space training). Options:
+    # inverse_variance weights each level of each variable by 1/sigma^2. Options:
     # inverse_variance | manual | learnable | none
     var_weighting: "inverse_variance"
-    scaler_path: *bs_pre_json
-    variable_weights:                 # manual multipliers per var_key (all modes)
-      # The scaler holds PRECT's sqrt-space variance (1.816e-08) but the loss scores PRECT in m/s
-      # (variance 6.578e-15, below the 1e-12 floor). var_sqrt / var_phys turns the weight into
-      # 1 / var_phys = 1.52e14. From the 2,000-sample diagnostic; recompute from the fitted scaler if wanted.
-      'E3SM_ATM/diagnostic/2d/PRECT': 2.76e+6
+    scaler_path: *bs_pre_json         # fallback for any variable the variance file lacks
+    # Per-level target variances measured on y_target_processed (loss units: PRECT in m/s after the square),
+    # written by `credit preprocess` after the scaler fit; `credit preprocess --variance-only` rebuilds it.
+    variance_path: &loss_variances '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator_scaling_test/E3SM_6h_loss_variances.json'
+    variance_type: &variance_type "temporal"  # per-grid-point variance over time, grid-averaged (pooled: time+space)
+    mask_correction: &mask_correction true     # weight / observed fraction: SST/SSS/land fields are NaN off their domain
+    # Every masked field here is NaN outside its domain before the scaler (sst_land_to_nan, ocnregrid renormalize,
+    # land-model fill values -> missing_to_nan), so no variance_masks rules are needed.
+    variable_weights: {}              # manual multipliers per var_key (all modes); none needed with variance_path
     normalize_weights: false          # true divides by the mean weight and shrinks the loss to ~1e-9
 
     # Data diagnostic variables are always scored; postblock-computed
@@ -796,9 +800,9 @@ metrics:
     # Options: inverse_variance | manual | none (no learnable for metrics).
     var_weighting: "inverse_variance"
     scaler_path: *bs_pre_json
-    # No PRECT entry: these weights only form the aggregate score (per-variable columns are unweighted),
-    # and one multiplier cannot be right for rmse/bias (sigma**1) and r2score (sigma**0) at once. PRECT's
-    # share of the aggregate rmse/bias uses its sqrt-space sigma; read its per-variable columns instead.
+    variance_path: *loss_variances    # same loss-unit variances as the loss (level-averaged per variable)
+    variance_type: *variance_type
+    mask_correction: *mask_correction
     variable_weights: {}              # manual multipliers per var_key (all modes)
     normalize_weights: false
 
