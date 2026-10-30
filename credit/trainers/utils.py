@@ -830,7 +830,9 @@ def report_nonfinite_loss(full_data_dict: dict, criterion, logger) -> None:
     if bad_losses:
         logger.error("  %d of %d per-variable loss terms non-finite:", len(bad_losses), len(var_losses))
         for var_key, value in bad_losses.items():
-            logger.error("      %-58s weight=%-12.6g loss=%s", var_key, weights.get(var_key, float("nan")), value)
+            # BaseLoss weights are per-level tensors; report their level mean.
+            weight = float(weights[var_key].mean()) if var_key in weights else float("nan")
+            logger.error("      %-58s weight=%-12.6g loss=%s", var_key, weight, value)
     else:
         logger.error(
             "  all %d per-variable loss terms finite — the combination weights are the problem", len(var_losses)
