@@ -7,8 +7,11 @@
 #   - log only on input-only fields (TLAI, canopy heights), so no exp on any output
 #   - clips for two processing artifacts: sithick pile-up cells (> 10 m), QRUNOFF one-step pulses (> 50 mm/6 h)
 #   - land -> NaN for SST (before the ATM regrid) and for the MPAS fields (ocnregrid renormalize: true)
-#   - fixers: tracer only for now. Water fixer needs precip/evap unit options first (PRECT is m/s,
-#     QFLX kg/m2/s); energy fixer needs flux_units: "W m-2". Fluxes are positive-down, instantaneous.
+#   - Q clipped to |z| <= 50 after the scaler: one-step simulation spikes at the model top (levels 0-9)
+#     reach |z| ~1,500 (E3SMULATOR_DATA_AUDIT.md section 0.1)
+#   - fixers: tracer + net energy (scale_by_mass, PHIS from the regridded static input, flux_units "W m-2").
+#     Water fixer needs precip/evap unit options first (PRECT is m/s, QFLX kg/m2/s). Fluxes are
+#     positive-down, instantaneous.
 #
 # 1. Preprocess (fits the scaler on 4 ranks x 500 batches x batch 2 = 4,000 samples; needs torchrun):
 #      torchrun --standalone --nproc-per-node=4 credit/applications/preprocess.py \
@@ -433,6 +436,24 @@ preblocks:
           channels_last: False
         method: transform
 
+    clip_q_normalized: # Q at the model top (levels 0-9) has one-step spikes from the simulation itself (present in
+                       # the raw eam.h2 files) up to |z| ~1,500 against a background sigma ~1e-7 kg/kg. Clip in
+                       # normalized space so each level is clipped against its own sigma; a physical cap would
+                       # either miss the top-level spikes or clip the moist lower levels. Q >= 0 keeps z >= -8,
+                       # so the lower bound only guards against bad data. Applied to input and target, after the
+                       # scaler, so it does not change the scaler fit
+        type: "fill_values"
+        args:
+            rules:
+                - search: 50.0
+                  op: ">"
+                  fill: 50.0
+                - search: -50.0
+                  op: "<"
+                  fill: -50.0
+            variables:
+                - 'E3SM_ATM/prognostic/3d/Q'
+
     fillnan_post: # NaN (missing data; cells the scaler never observed pass through as NaN) -> 0 after
                   # scaling, so the model only sees finite values
         type: "fill_values"
@@ -613,27 +634,30 @@ postblocks:
 #        evapor_var: E3SM_ATM/diagnostic/2d/QFLX
 
 
-#    energy_fixer_net:
-#      type: GlobalNetEnergyFixer
-#      args:
-##        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
-#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
-#        flux_units: "W m-2"   # the E3SM fluxes are instantaneous W/m2 rates (positive-down), not J/m2
-#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
-#        grid_type: sigma
-#        midpoint: true
-#        lead_time_periods: 6
-#        T_var: E3SM_ATM/prognostic/3d/T
-#        q_var: E3SM_ATM/prognostic/3d/Q
-#        U_var: E3SM_ATM/prognostic/3d/U
-#        V_var: E3SM_ATM/prognostic/3d/V
-#        surface_geopotential_name: E3SM_ATM/static/2d/PHIS
-#        toa_net_solar_var: E3SM_ATM/diagnostic/2d/FSNT
-#        toa_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNT
-#        surf_net_solar_var: E3SM_ATM/diagnostic/2d/FSNS
-#        surf_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNS
-#        surf_sh_var: E3SM_ATM/diagnostic/2d/SHFLX
-#        surf_lh_var: E3SM_ATM/diagnostic/2d/LHFLX
+    energy_fixer_net:
+      type: global_energy_fixer_net
+      args:
+        # grid (lon2d/lat2d) and hybrid coefficients (hyai/hybi) only; PHIS comes from the input below
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        flux_units: "W m-2"   # the E3SM fluxes are instantaneous W/m2 rates (positive-down), not J/m2
+        scale_by_mass: True   # one uniform dT weighted by air mass (as CAM/EAM's own fixer), instead of the
+                              # gen1 total-energy rescale that over-corrects high terrain and moist columns
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        T_var: E3SM_ATM/prognostic/3d/T
+        q_var: E3SM_ATM/prognostic/3d/Q
+        U_var: E3SM_ATM/prognostic/3d/U
+        V_var: E3SM_ATM/prognostic/3d/V
+        sp_var: E3SM_ATM/prognostic/2d/PS
+        surface_geopotential_var: E3SM_ATM/static/2d/PHIS  # the static input, regridded by atmlndregrid_input
+        toa_net_solar_var: E3SM_ATM/diagnostic/2d/FSNT
+        toa_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNT
+        surf_net_solar_var: E3SM_ATM/diagnostic/2d/FSNS
+        surf_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNS
+        surf_sh_var: E3SM_ATM/diagnostic/2d/SHFLX
+        surf_lh_var: E3SM_ATM/diagnostic/2d/LHFLX
 
 
 # ONLY NEEDED FOR TRAINING #
