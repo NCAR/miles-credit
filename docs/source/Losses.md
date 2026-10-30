@@ -111,6 +111,9 @@ That is the minimum. The full option set:
 | `scaler_path` | — | Fitted bridgescaler JSON. Required for `inverse_variance` and `learnable`. |
 | `variable_weights` | `{}` | Manual multipliers per `var_key`, applied on top of **every** mode. |
 | `normalize_weights` | `true` | Rescale the combination weights to mean 1. |
+| `variance_path` | — | Loss-space variance file from `credit preprocess`; see below. |
+| `variance_type` | `"temporal"` | `temporal` or `pooled` (with `variance_path`). |
+| `mask_correction` | `true` | With `variance_path`, divide each level's weight by its observed fraction. |
 | `per_level_variance` | `true` | With `inverse_variance`, weight each level of a 3D variable by its own variance. `false` uses one level-mean variance per variable. |
 | `include_computed_diagnostics` | `true` | Score postblock-computed diagnostics (see below). |
 | `use_latitude_weights` | `false` | Apply cos(lat) spatial weighting per variable. |
@@ -233,6 +236,63 @@ loss:
     var_weighting: "inverse_variance"
     scaler_path: '/path/to/scaler.json'
 ```
+
+### Loss-space variances (`variance_path`)
+
+The scaler's variances describe the values it was fit on, which are *before* any
+inverse transform in the postblocks. A variable that is square-rooted before the
+scaler and squared again by a `square_transform` postblock (e.g. precipitation) gets
+a weight in the wrong units, and the `exp_transform` conversion above is only a
+first-order estimate. Setting `variance_path` replaces both with variances measured
+where the loss actually scores:
+
+```yaml
+loss:
+  type: base
+  args:
+    var_weighting: "inverse_variance"
+    scaler_path: '/path/to/scaler.json'           # still used for variables the file lacks
+    variance_path: '/path/to/loss_variances.json'  # written by credit preprocess
+    variance_type: "temporal"                     # temporal | pooled
+    mask_correction: true
+    use_latitude_weights: true
+    latitude_weights: '/path/to/grid.nc'
+    # variance_batches: 250                       # preprocess only; default half the scaler batches
+    # variance_masks:                             # preprocess only; for masks that are not NaN
+    #   ERA5/prognostic/2d/sst: {op: "!=", value: 0}
+    #   ERA5/prognostic/2d/soil_moisture: {mask_var: ERA5/static/2d/land_sea_mask, op: ">", value: 0.5}
+```
+
+After fitting the scaler, `credit preprocess` runs a second pass: the `per_step`
+preblocks with the fitted scaler, then every `postblocks.per_step` block that writes
+`y_target_processed` (the target twin). That reproduces `y_target_processed` exactly
+as the trainer builds it, so square/exp inverses, clips in normalized space and NaN
+fills are all accounted for. For each variable and level the file records:
+
+| Field | Meaning |
+|-------|---------|
+| `temporal_variance` | Variance over time at each grid point, averaged over observed points. A forecast of each point's climatology scores about 1. |
+| `pooled_variance` | Variance over time and space together, what a per-channel scaler normalizes by. |
+| `observed_fraction` | Fraction of the field that is observed. |
+
+Averages are cos(lat)-weighted when `use_latitude_weights` is on, like the loss.
+A point is observed where the target is finite just before the scaler. Fields
+masked another way (a fill value such as 0, or a separate 0/1 mask variable) need
+a `variance_masks` rule: `op`/`value` compare the variable itself, or `mask_var`
+(any input or target variable, e.g. a static land-sea mask, broadcast over levels),
+using its values just before the scaler. A rule key may be a full var key or a
+`/`-delimited prefix. Converting such fills to NaN with a `fill_values` preblock
+before the scaler is usually better still, since the scaler then skips them too.
+
+With `mask_correction: true`, each level's weight is divided by its observed
+fraction. Unobserved points (land in an ocean field) add almost no error once the
+model learns their fill value, so they shrink a masked variable's loss by that
+fraction; the correction undoes the dilution.
+
+Variables not in the file keep their scaler variance (with a warning). The metrics
+accept the same three keys. `credit check` warns when the file is missing or older
+than the scaler, errors on a level-count mismatch, and notes `variable_weights`
+entries that a unit-correcting multiplier would now apply twice; remove those.
 
 ### `manual`
 

@@ -109,8 +109,8 @@ from torch import nn
 from credit.losses.base import (
     BaseLoss,
     _cos_lat_weights,
-    _load_target_variances,
 )
+from credit.losses.variances import resolve_target_variances
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,10 @@ class BaseVariableMetric(nn.Module, ABC):
         var_weighting: combination weighting — ``"inverse_variance"`` (default),
             ``"manual"``, or ``"none"``. ``"learnable"`` is rejected.
         scaler_path: bridgescaler dict JSON used to read per-variable variances;
-            required for ``inverse_variance``.
+            required for ``inverse_variance`` unless ``variance_path`` is given.
+        variance_path, variance_type, mask_correction: loss-space variances, as
+            in :class:`credit.losses.base.BaseLoss`; reduced to one level-mean
+            variance per variable.
         variable_weights: manual multipliers per var_key (all modes, default 1.0).
         normalize_weights: rescale static combination weights to mean 1.
         include_computed_diagnostics: score postblock-computed diagnostics
@@ -190,6 +193,9 @@ class BaseVariableMetric(nn.Module, ABC):
         latitude_weights: str | None = None,
         channel_schema=None,
         exp_transforms: list | None = None,
+        variance_path: str | None = None,
+        variance_type: str = "temporal",
+        mask_correction: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -226,12 +232,14 @@ class BaseVariableMetric(nn.Module, ABC):
         # A dimensionless metric (scale_power == 0) never consults the scaler,
         # so requiring scaler_path for it would be a pointless config burden.
         if self.var_weighting == "inverse_variance" and self.scale_power != 0:
-            if not scaler_path:
+            if not scaler_path and not variance_path:
                 raise ValueError(
-                    f"scaler_path is required for var_weighting='{self.var_weighting}' "
+                    f"scaler_path or variance_path is required for var_weighting='{self.var_weighting}' "
                     f"with metric '{metric_name}' (scale_power={self.scale_power})."
                 )
-            self._variances = _load_target_variances(scaler_path, exp_transforms)
+            self._variances = resolve_target_variances(
+                scaler_path, exp_transforms, variance_path, variance_type, mask_correction
+            )
 
         self._combination_weights = None  # {var_key: float}; built at first forward
         self.var_keys = None  # full scoring list, resolved at first forward
@@ -296,10 +304,16 @@ class BaseVariableMetric(nn.Module, ABC):
                         var_key,
                     )
                     weights[var_key] = manual
+                elif variance <= 0:
+                    logger.warning(
+                        "BaseVariableMetric: non-positive variance for '%s'; falling back to weight 1.0.", var_key
+                    )
+                    weights[var_key] = manual
                 else:
                     # 1 / sigma**scale_power, so the weighted score is dimensionless
-                    # for any metric order (MSE 2, RMSE/MAE/bias 1).
-                    weights[var_key] = manual / max(variance, 1e-12) ** (self.scale_power / 2)
+                    # for any metric order (MSE 2, RMSE/MAE/bias 1). No absolute floor:
+                    # physical variances can legitimately be ~1e-15 (precipitation in m/s).
+                    weights[var_key] = manual / variance ** (self.scale_power / 2)
             elif self.var_weighting == "manual":
                 if var_key not in self.manual_weights:
                     logger.warning("BaseVariableMetric: no variable_weights entry for '%s'; using 1.0.", var_key)
@@ -473,6 +487,9 @@ class BaseCombinedMetric(nn.Module):
         latitude_weights: str | None = None,
         channel_schema=None,
         exp_transforms: list | None = None,
+        variance_path: str | None = None,
+        variance_type: str = "temporal",
+        mask_correction: bool = True,
         **kwargs,
     ):
         super().__init__()
@@ -490,6 +507,9 @@ class BaseCombinedMetric(nn.Module):
             "latitude_weights": latitude_weights,
             "channel_schema": channel_schema,
             "exp_transforms": exp_transforms,
+            "variance_path": variance_path,
+            "variance_type": variance_type,
+            "mask_correction": mask_correction,
         }
 
         # Local import to avoid a circular import at module load

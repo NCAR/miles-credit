@@ -570,6 +570,61 @@ def test_preprocess_main_duplicate_scaler_path_raises(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+def test_preprocess_writes_loss_variances_end_to_end(tmp_path, monkeypatch):
+    """preprocess.main fits the scaler, then writes physical-unit variances for a
+    log-scaled variable that the target twin exponentiates back."""
+    import json
+
+    import yaml
+    from credit.applications import preprocess
+
+    conf = _make_conf(str(tmp_path / "save"), str(tmp_path / "scaler.json"))
+    conf["trainer"]["batches_per_epoch"] = 4
+    conf["preblocks"]["per_step"]["concat"] = {"type": "concat"}
+    scaler_args = {"scaler_path": str(tmp_path / "scaler.json"), "variables": []}
+    conf["postblocks"] = {
+        "per_step": {
+            "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+            "reconstruct_target": {"type": "reconstruct", "args": {"in_key": "y", "out_key": "y_target_processed"}},
+            "scaler_target": {
+                "type": "bridgescaler_transform",
+                "args": {**scaler_args, "method": "inverse_transform", "key": "y_target_processed"},
+            },
+            "exp_target": {"type": "exp_transform", "args": {"variables": [VAR_Q], "key": "y_target_processed"}},
+        }
+    }
+    variance_path = tmp_path / "save" / "loss_variances.json"
+    conf["loss"] = {
+        "type": "base",
+        "args": {"scaler_path": scaler_args["scaler_path"], "variance_path": str(variance_path)},
+    }
+    config_path = tmp_path / "preprocess.yml"
+    config_path.write_text(yaml.safe_dump(conf, sort_keys=False))  # block order matters
+
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
+    try:
+        preprocess.main()
+    except Exception as err:  # network / GCS issues
+        if "GCS" in str(err) or "gs://" in str(err) or "connect" in str(err).lower():
+            pytest.skip(f"WeatherBench2 GCS store unavailable: {err}")
+        raise
+
+    variables = json.loads(variance_path.read_text())["variables"]
+    assert variables[VAR_T]["n_samples"] == 2 * 2  # half of 4 batches, batch size 2
+    q = variables[VAR_Q]
+    # Physical specific humidity (kg/kg), not the log-space values the scaler was fit on.
+    assert len(q["pooled_variance"]) == len(LEVELS)
+    assert all(1e-10 < v < 1e-4 for v in q["pooled_variance"]), variables
+    assert all(0 < v < p for v, p in zip(q["temporal_variance"], q["pooled_variance"]))
+    assert variables[VAR_T]["observed_fraction"] == pytest.approx([1.0] * len(LEVELS))
+    assert all(1.0 < v < 1000.0 for v in variables[VAR_T]["pooled_variance"])
+
+    # --variance-only rebuilds the file from the existing scaler, backing up the old one.
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path), "--variance-only"])
+    preprocess.main()
+    assert len(list(variance_path.parent.glob("loss_variances_*.json"))) == 1
+
+
 class TestICPhase:
     """`credit preprocess` must fit scalers on the batch the trainer produces at step 0.
 

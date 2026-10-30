@@ -1233,3 +1233,48 @@ def test_dynamic_grad_clip_ignored_without_dynamic_warns(conf):
     conf["trainer"]["grad_max_norm"] = 1.0
     conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0}
     assert "trainer.dynamic_grad_clip" in _wheres(_run(conf), "warning")
+
+
+# --------------------------------------------------------------------------- #
+# variance_path (loss-space variances from credit preprocess)
+# --------------------------------------------------------------------------- #
+def _write_variances(path, levels=None, extra=None):
+    levels = levels or {"ERA5/prognostic/3d/T": 2, "ERA5/prognostic/3d/Q": 2, "ERA5/prognostic/2d/SP": 1}
+    variables = {
+        k: {"temporal_variance": [1.0] * n, "pooled_variance": [2.0] * n, "observed_fraction": [1.0] * n}
+        for k, n in {**levels, **(extra or {})}.items()
+    }
+    path.write_text(json.dumps({"meta": {"scaler_paths": [str(path.parent / "scaler.json")]}, "variables": variables}))
+
+
+def _variance_findings(rep, severity):
+    return [f for f in rep.findings if f.severity == severity and "variance" in f.where]
+
+
+def test_variance_path_missing_warns(conf, tmp_path):
+    conf["loss"]["args"]["variance_path"] = str(tmp_path / "loss_variances.json")
+    found = _variance_findings(_run(conf), "warning")
+    assert any("does not exist yet" in f.message for f in found), found
+
+
+def test_variance_path_reports_uncovered_and_level_mismatch(conf, tmp_path):
+    path = tmp_path / "loss_variances.json"
+    _write_variances(path, {"ERA5/prognostic/3d/T": 3, "ERA5/prognostic/2d/SP": 1})
+    conf["loss"]["args"]["variance_path"] = str(path)
+    rep = _run(conf)
+    warnings = _variance_findings(rep, "warning")
+    assert any("ERA5/prognostic/3d/Q" in f.message and "scaler variance" in f.message for f in warnings), warnings
+    errors = _variance_findings(rep, "error")
+    assert len(errors) == 1 and "ERA5/prognostic/3d/T" in errors[0].message and "3 level" in errors[0].message
+
+
+def test_variance_path_flags_bad_type_and_doubled_weights(conf, tmp_path):
+    path = tmp_path / "loss_variances.json"
+    _write_variances(path, extra={"ERA5/diagnostic/2d/TP": 1})
+    conf["loss"]["args"].update(
+        variance_path=str(path), variance_type="tendency", variable_weights={"ERA5/diagnostic/2d/TP": 2.76e6}
+    )
+    rep = _run(conf)
+    assert any(f.where == "loss.args.variance_type" for f in rep.findings if f.severity == "error"), _text(rep)
+    info = [f for f in rep.findings if f.severity == "info" and f.where == "loss.args.variable_weights"]
+    assert len(info) == 1 and "ERA5/diagnostic/2d/TP" in info[0].message

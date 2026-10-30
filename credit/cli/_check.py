@@ -1104,11 +1104,11 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
                 )
 
     if _get(conf, "loss", "args", "var_weighting", default="inverse_variance") in ("inverse_variance", "learnable"):
-        if not _get(conf, "loss", "args", "scaler_path"):
+        if not _get(conf, "loss", "args", "scaler_path") and not _get(conf, "loss", "args", "variance_path"):
             rep.error(
                 "loss.args.scaler_path",
-                "var_weighting needs per-variable variances from a fitted scaler, but scaler_path is unset.",
-                fix="Set loss.args.scaler_path, or use var_weighting: none / manual.",
+                "var_weighting needs per-variable variances, but neither scaler_path nor variance_path is set.",
+                fix="Set loss.args.scaler_path (or variance_path), or use var_weighting: none / manual.",
             )
     if _get(conf, "loss", "args", "use_latitude_weights", default=False) and not _get(
         conf, "loss", "args", "latitude_weights"
@@ -1359,6 +1359,87 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
                     "scaler and give the now-constant channels a finite mean and a nonzero variance "
                     "in the scaler JSON (e.g. the nearest valid level's variance).",
                 )
+
+
+def _check_loss_variances(conf: dict, rep: _Report) -> None:
+    """Validate ``variance_path`` (loss-space variances from ``credit preprocess``).
+
+    Missing before preprocess is expected (warning). When present, the file must
+    cover every scored variable with the right number of levels, should be newer
+    than the scaler it was measured with, and makes ``variable_weights`` that
+    hand-correct a variable's units (e.g. a sqrt-transformed PRECT) apply twice.
+    """
+    import json
+
+    from credit.datasets.gen_2.channel_utils import ChannelSchema
+    from credit.losses.variances import VARIANCE_TYPES
+
+    for top in ("loss", "metrics"):
+        args = _get(conf, top, "args", default={}) or {}
+        path = args.get("variance_path")
+        if not isinstance(path, str) or not path:
+            continue
+        where = f"{top}.args.variance_path"
+        variance_type = args.get("variance_type", "temporal")
+        if variance_type not in VARIANCE_TYPES:
+            rep.error(f"{top}.args.variance_type", f"'{variance_type}' is not one of {', '.join(VARIANCE_TYPES)}.")
+            variance_type = "temporal"  # keep checking the file
+        expanded = os.path.expandvars(path)
+        if not os.path.isfile(expanded):
+            rep.warn(
+                where,
+                f"{expanded} does not exist yet.",
+                fix="`credit preprocess -c <config>` writes it after fitting the scaler "
+                "(`--variance-only` rebuilds it from an existing scaler).",
+            )
+            continue
+        try:
+            with open(expanded) as f:
+                data = json.load(f)
+            variables = data["variables"]
+        except Exception as exc:  # noqa: BLE001
+            rep.error(where, f"Could not read {expanded}: {type(exc).__name__}: {exc}")
+            continue
+
+        try:
+            layout = ChannelSchema.from_config(conf).target_layout
+        except Exception:  # noqa: BLE001 — schema problems are reported by _check_channel_schema
+            layout = []
+        missing = [e["var_key"] for e in layout if e["var_key"] not in variables]
+        if missing:
+            rep.warn(
+                where,
+                f"{len(missing)} scored variable(s) are not in {expanded} and keep their scaler variance: "
+                + ", ".join(missing[:8])
+                + (" ..." if len(missing) > 8 else ""),
+                fix="Re-run `credit preprocess --variance-only -c <config>` after changing the variables.",
+            )
+        for entry in layout:
+            stats = variables.get(entry["var_key"])
+            if stats is not None and len(stats[f"{variance_type}_variance"]) != entry["n_levels"]:
+                rep.error(
+                    where,
+                    f"'{entry['var_key']}' has {len(stats[f'{variance_type}_variance'])} level(s) in the file "
+                    f"but {entry['n_levels']} in the config.",
+                    fix="Re-run `credit preprocess --variance-only -c <config>`.",
+                )
+
+        for scaler_path in (data.get("meta") or {}).get("scaler_paths") or []:
+            scaler_path = os.path.expandvars(scaler_path)
+            if os.path.isfile(scaler_path) and os.path.getmtime(scaler_path) > os.path.getmtime(expanded):
+                rep.warn(
+                    where,
+                    f"{expanded} is older than the scaler {scaler_path} it was measured with.",
+                    fix="Re-run `credit preprocess --variance-only -c <config>`.",
+                )
+
+        doubled = sorted(k for k in (args.get("variable_weights") or {}) if k in variables)
+        if doubled:
+            rep.info(
+                f"{top}.args.variable_weights",
+                "variance_path already measures these in loss units; a multiplier that corrected their "
+                f"scaler variance (e.g. for a sqrt or log transform) now applies twice: {', '.join(doubled)}",
+            )
 
 
 def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
@@ -1700,6 +1781,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_model_geometry,
             _check_loss_pipeline,
             _check_log_variance_weights,
+            _check_loss_variances,
             _check_regrid_coverage,
             _check_trainer,
             _check_channel_schema,

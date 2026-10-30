@@ -39,6 +39,9 @@ Loss config (``conf["loss"]``, mirroring the preblocks/postblocks structure)::
         variable_weights: {}             # manual multipliers per var_key (all modes)
         normalize_weights: true          # rescale combination weights to mean 1
         per_level_variance: true         # inverse_variance: one variance per level (channel)
+        variance_path: null              # loss-space variances from credit preprocess (credit.losses.variances)
+        variance_type: "temporal"        # temporal | pooled (with variance_path)
+        mask_correction: true            # with variance_path: divide weights by the observed fraction
         include_computed_diagnostics: true
         use_latitude_weights: false      # cos(lat) spatial weighting per variable
         latitude_weights: "/path/static.zarr"
@@ -67,6 +70,12 @@ the largest-scale variables. ``var_weighting`` handles this:
     over its observed grid points. ``per_level_variance: false`` restores the old
     single level-mean variance per variable, which leaves low-variance levels
     (e.g. upper-air specific humidity) almost unweighted.
+
+    The scaler's variances describe the values it was fit on, i.e. *before* any
+    inverse transform in the postblocks (``square_transform``, ``exp_transform``).
+    ``variance_path`` replaces them with variances measured in loss space by
+    ``credit preprocess`` (see :mod:`credit.losses.variances`); variables the
+    file does not cover keep the scaler variance.
   - ``manual``: weights come from ``variable_weights`` alone.
   - ``learnable``: Kendall-Gal uncertainty weighting — per-variable
     ``log sigma_v^2`` is a learnable parameter (initialized from the scaler
@@ -93,6 +102,7 @@ import torch
 from torch import nn
 
 from credit.losses import _load_loss_entry, is_crps_loss
+from credit.losses.variances import resolve_target_variances
 
 logger = logging.getLogger(__name__)
 
@@ -343,12 +353,22 @@ class BaseLoss(nn.Module):
         var_weighting: combination weighting — ``"inverse_variance"`` (default),
             ``"manual"``, ``"learnable"``, or ``"none"``.
         scaler_path: bridgescaler dict JSON used to read per-variable variances;
-            required for ``inverse_variance`` and ``learnable``.
+            required for ``inverse_variance`` and ``learnable`` unless
+            ``variance_path`` is given.
         variable_weights: manual multipliers per var_key (all modes, default 1.0).
         normalize_weights: rescale static combination weights to mean 1.
         per_level_variance: with ``inverse_variance``, weight each level of a
             variable by its own scaler variance (default). False uses one
             level-mean variance per variable (the pre-2026-10 behavior).
+        variance_path: loss-space variance file written by ``credit preprocess``
+            (:mod:`credit.losses.variances`); overrides the scaler variances for
+            the variables it covers.
+        variance_type: ``"temporal"`` (per-grid-point variance over time,
+            averaged over the grid) or ``"pooled"`` (over time and space).
+        mask_correction: with ``variance_path``, scale each level's weight by
+            ``1 / observed_fraction`` so masked fields are not diluted by the
+            points they never observe.
+        variance_batches, variance_masks: used by ``credit preprocess`` only.
         include_computed_diagnostics: score postblock-computed diagnostics
             (variables present in ``y_processed`` but not in the data target
             layout, e.g. from ``mslp_diagnostic``). Data diagnostics are always
@@ -387,6 +407,11 @@ class BaseLoss(nn.Module):
         variable_weights: dict | None = None,
         normalize_weights: bool = True,
         per_level_variance: bool = True,
+        variance_path: str | None = None,
+        variance_type: str = "temporal",
+        mask_correction: bool = True,
+        variance_batches: int | None = None,
+        variance_masks: dict | None = None,
         include_computed_diagnostics: bool = True,
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
@@ -452,9 +477,11 @@ class BaseLoss(nn.Module):
 
         self._variances = None  # {var_key: (C,) per-level variance}
         if self.var_weighting in ("inverse_variance", "learnable"):
-            if not scaler_path:
-                raise ValueError(f"scaler_path is required for var_weighting='{self.var_weighting}'.")
-            self._variances = _load_target_variances(scaler_path, exp_transforms, per_level=True)
+            if not scaler_path and not variance_path:
+                raise ValueError(f"scaler_path or variance_path is required for var_weighting='{self.var_weighting}'.")
+            self._variances = resolve_target_variances(
+                scaler_path, exp_transforms, variance_path, variance_type, mask_correction, per_level=True
+            )
 
         # {var_key: (C,) or (1,) tensor} for static modes; built at first forward
         self._combination_weights = None
