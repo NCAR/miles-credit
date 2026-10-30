@@ -402,6 +402,16 @@ args:
   midpoint: false
 ```
 
+Both energy fixers (this one and `global_energy_fixer_net`) need surface
+geopotential. Give exactly one of:
+
+- `surface_geopotential_name`: a variable in the `save_loc_physics` file, read once
+  at startup. It must already be on the model grid.
+- `surface_geopotential_var`: a static var key in the input dict (`x_physical`), such
+  as `"E3SM_ATM/static/2d/PHIS"`, read on every step. The input dict is captured after
+  the `ic_only` preblocks, so a static that the dataset regrids arrives on the model
+  grid, in physical units, and needs no separate file.
+
 ## Filtering, Masking, and Advection
 
 ### `wind_artifact_filter` (WindArtifactFilter)

@@ -77,6 +77,35 @@ def _pred(batch_dict: dict, var_key: str) -> torch.Tensor:
     return batch_dict["y_processed"][_src(var_key)][var_key]
 
 
+def _init_surface_geopotential(fixer, surface_geopotential_name, surface_geopotential_var, physics):
+    """Set up the energy fixers' surface geopotential source: exactly one of a
+    variable name in the ``save_loc_physics`` statics file, or a static var key
+    read from the input dict on every forward pass."""
+    name = type(fixer).__name__
+    if (surface_geopotential_name is None) == (surface_geopotential_var is None):
+        raise ValueError(
+            f"{name}: set exactly one of surface_geopotential_name (a variable in save_loc_physics) "
+            "or surface_geopotential_var (a static var key in the input, e.g. 'SRC/static/2d/PHIS')."
+        )
+    fixer.surface_geopotential_var = surface_geopotential_var
+    fixer.GPH_surf = None
+    if surface_geopotential_name is not None:
+        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
+        gph_name = (
+            surface_geopotential_name[0]
+            if isinstance(surface_geopotential_name, (list, tuple))
+            else surface_geopotential_name
+        )
+        fixer.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+
+
+def _surface_geopotential(fixer, batch_dict, device) -> torch.Tensor:
+    """Surface geopotential: ``(H, W)`` from the statics file, or ``(B, 1, H, W)`` from the input."""
+    if fixer.surface_geopotential_var is None:
+        return fixer.GPH_surf.to(device)
+    return fixer._input(batch_dict, fixer.surface_geopotential_var)[:, :, -1, ...].to(device)
+
+
 def _set_pred(batch_dict: dict, var_key: str, tensor: torch.Tensor) -> None:
     batch_dict["y_processed"][_src(var_key)][var_key] = tensor
 
@@ -354,7 +383,12 @@ class GlobalNetEnergyFixer(nn.Module):
     Args:
         T_var, q_var, U_var, V_var: 3d atmosphere state keys.
         surface_geopotential_name: variable name of surface geopotential in the
-            statics file (a one-element list is accepted for gen1 parity).
+            ``save_loc_physics`` statics file (a one-element list is accepted for
+            gen1 parity). Set this or ``surface_geopotential_var``.
+        surface_geopotential_var: static var key of surface geopotential in the
+            input dict (``input_source_key``), e.g. ``"E3SM_ATM/static/2d/PHIS"``.
+            It is read after the ic_only preblocks, so it is on the model grid
+            even when the dataset regrids it.
         toa_net_solar_var, toa_net_thermal_var: TOA net flux keys in ``y_processed``.
         surf_net_solar_var, surf_net_thermal_var: surface net radiation keys.
         surf_sh_var, surf_lh_var: surface sensible / latent heat flux keys.
@@ -375,7 +409,6 @@ class GlobalNetEnergyFixer(nn.Module):
         q_var,
         U_var,
         V_var,
-        surface_geopotential_name,
         toa_net_solar_var,
         toa_net_thermal_var,
         surf_net_solar_var,
@@ -383,10 +416,12 @@ class GlobalNetEnergyFixer(nn.Module):
         surf_sh_var,
         surf_lh_var,
         lead_time_periods,
+        surface_geopotential_name=None,
         sp_var=None,
         flux_units="J m-2",
         input_source_key="x_physical",
         scale_by_mass=False,
+        surface_geopotential_var=None,
         **physics,
     ):
         super().__init__()
@@ -417,13 +452,7 @@ class GlobalNetEnergyFixer(nn.Module):
         if self.flag_sigma and self.sp_var is None:
             raise ValueError("GlobalNetEnergyFixer: sp_var is required when grid_type is 'sigma'.")
 
-        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
-        gph_name = (
-            surface_geopotential_name[0]
-            if isinstance(surface_geopotential_name, (list, tuple))
-            else surface_geopotential_name
-        )
-        self.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+        _init_surface_geopotential(self, surface_geopotential_name, surface_geopotential_var, physics)
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -442,7 +471,7 @@ class GlobalNetEnergyFixer(nn.Module):
         U_input = self._input(batch_dict, self.U_var)[:, :, -1, ...].to(device)
         V_input = self._input(batch_dict, self.V_var)[:, :, -1, ...].to(device)
 
-        GPH_surf = self.GPH_surf.to(device)
+        GPH_surf = _surface_geopotential(self, batch_dict, device)
 
         # heat capacity at constant pressure
         CP_t0 = (1 - q_input) * CP_DRY + q_input * CP_VAPOR
@@ -528,6 +557,9 @@ class GlobalEnergyFixerUpDown(nn.Module):
     Args:
         T_var, q_var, U_var, V_var, sp_var: atmosphere state keys.
         surface_geopotential_name: variable name of PHIS in the statics file.
+            Set this or ``surface_geopotential_var``.
+        surface_geopotential_var: static var key of PHIS in the input dict
+            (``input_source_key``); see :class:`GlobalNetEnergyFixer`.
         toa_down_solar_input_var: SOLIN key in the input dict.
         toa_up_solar_var, toa_up_olr_var: TOA upwelling flux keys.
         surf_down_solar_var, surf_up_solar_var, surf_down_lw_var, surf_up_lw_var, surf_sh_var, surf_lh_var:
@@ -544,7 +576,6 @@ class GlobalEnergyFixerUpDown(nn.Module):
         U_var,
         V_var,
         sp_var,
-        surface_geopotential_name,
         toa_down_solar_input_var,
         toa_up_solar_var,
         toa_up_olr_var,
@@ -555,8 +586,10 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surf_sh_var,
         surf_lh_var,
         lead_time_periods,
+        surface_geopotential_name=None,
         input_source_key="x_physical",
         scale_by_mass=False,
+        surface_geopotential_var=None,
         **physics,
     ):
         super().__init__()
@@ -581,13 +614,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
             physics
         )
 
-        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
-        gph_name = (
-            surface_geopotential_name[0]
-            if isinstance(surface_geopotential_name, (list, tuple))
-            else (surface_geopotential_name)
-        )
-        self.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+        _init_surface_geopotential(self, surface_geopotential_name, surface_geopotential_var, physics)
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -609,7 +636,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         if not self.flag_sigma:
             raise NotImplementedError("GlobalEnergyFixerUpDown (gen2) currently supports the hybrid-sigma grid only.")
 
-        GPH_surf = self.GPH_surf.to(device)
+        GPH_surf = _surface_geopotential(self, batch_dict, device)
 
         CP_t0 = (1 - q_input) * CP_DRY + q_input * CP_VAPOR
         CP_t1 = (1 - q_pred) * CP_DRY + q_pred * CP_VAPOR

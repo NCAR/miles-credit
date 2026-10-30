@@ -795,3 +795,70 @@ def test_energy_fixer_updown_scale_by_mass_grad(statics_file_terrain):
     out.sum().backward()
     assert t_in.grad is not None
     assert torch.isfinite(t_in.grad).all()
+
+
+# --------------------------------------------------------------------------- #
+# surface_geopotential_var: PHIS from the input statics instead of the file
+# --------------------------------------------------------------------------- #
+PHIS_KEY = key("static", "2d", "PHIS")
+
+
+def _batch_with_input_phis(phis_hw, perturb=True):
+    batch, _, _ = build_super_dict(requires_grad=False)
+    batch["x_physical"][SRC][PHIS_KEY] = torch.as_tensor(phis_hw, dtype=torch.float32).expand(B, 1, 1, H, W).clone()
+    if perturb:
+        tk = key("prognostic", "3d", "T")
+        batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] * 1.02
+    return batch
+
+
+@pytest.mark.parametrize("scale_by_mass", [False, True])
+def test_energy_fixer_net_phis_from_input_matches_file(statics_file_terrain, scale_by_mass):
+    statics, zs = statics_file_terrain
+    tk = key("prognostic", "3d", "T")
+    from_file = GlobalNetEnergyFixer(**_net_energy_kwargs(statics, scale_by_mass=scale_by_mass))
+    from_input = GlobalNetEnergyFixer(
+        **_net_energy_kwargs(
+            statics,
+            scale_by_mass=scale_by_mass,
+            surface_geopotential_name=None,
+            surface_geopotential_var=PHIS_KEY,
+        )
+    )
+    assert from_input.GPH_surf is None
+    out_file = from_file(_batch_with_input_phis(zs * GRAVITY))["y_processed"][SRC][tk]
+    out_input = from_input(_batch_with_input_phis(zs * GRAVITY))["y_processed"][SRC][tk]
+    assert torch.allclose(out_file, out_input, rtol=1e-6)
+
+
+def test_energy_fixer_updown_phis_from_input_matches_file(statics_file_terrain):
+    statics, zs = statics_file_terrain
+    tk = key("prognostic", "3d", "T")
+    kw = dict(
+        T_var=tk,
+        q_var=key("prognostic", "3d", "Qtot"),
+        U_var=key("prognostic", "3d", "U"),
+        V_var=key("prognostic", "3d", "V"),
+        sp_var=key("prognostic", "2d", "PS"),
+        toa_down_solar_input_var=key("dynamic_forcing", "2d", "SOLIN"),
+        toa_up_solar_var=key("diagnostic", "2d", "FSUTOA"),
+        toa_up_olr_var=key("diagnostic", "2d", "FLUT"),
+        surf_down_solar_var=key("diagnostic", "2d", "FSDS_J"),
+        surf_up_solar_var=key("diagnostic", "2d", "FSUS"),
+        surf_down_lw_var=key("diagnostic", "2d", "FLDS_J"),
+        surf_up_lw_var=key("diagnostic", "2d", "FLUS"),
+        surf_sh_var=key("diagnostic", "2d", "SHFLX"),
+        surf_lh_var=key("diagnostic", "2d", "LHFLX"),
+        lead_time_periods=6,
+        **_physics_args(statics),
+    )
+    out_file = GlobalEnergyFixerUpDown(surface_geopotential_name="PHIS", **kw)(_batch_with_input_phis(zs * GRAVITY))
+    out_input = GlobalEnergyFixerUpDown(surface_geopotential_var=PHIS_KEY, **kw)(_batch_with_input_phis(zs * GRAVITY))
+    assert torch.allclose(out_file["y_processed"][SRC][tk], out_input["y_processed"][SRC][tk], rtol=1e-6)
+
+
+def test_energy_fixer_phis_source_must_be_unique(statics_file):
+    with pytest.raises(ValueError, match="exactly one"):
+        GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, surface_geopotential_var=PHIS_KEY))
+    with pytest.raises(ValueError, match="exactly one"):
+        GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, surface_geopotential_name=None))
