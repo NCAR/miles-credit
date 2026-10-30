@@ -174,9 +174,35 @@ with `afterok` dependencies so each job resumes from the previous checkpoint
 automatically.  `--reload` patches the config to resume from the last
 checkpoint after a failure.
 
+Every submission is recorded as a *run*: `credit submit` prints its run id,
+creates a run directory at `<save_loc>/.credit/runs/<run_id>/` (with a snapshot
+of the config, the exact scripts submitted, and `run.json`), and appends it to
+the run ledger at `~/.credit/runs/index.jsonl` (set `CREDIT_HOME` to move it).
+The jobs run the config snapshot, and chained jobs run `config_reload.yml` from
+the same directory, so editing your config after submitting cannot change a
+queued job.  The batch script also records when each job starts and exits (and
+if it was killed by walltime or `qdel`), and the trainer writes progress
+events there; `credit status` reads them.
+
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /
 `credit rollout` directly.
+
+---
+
+## `credit status` — list submitted runs
+
+```bash
+credit status                                  # every run in the ledger
+credit status train-20261030T153207-a1b2       # one run in detail
+credit status --json                           # machine-readable
+```
+
+Lists the runs recorded by `credit submit` with each run's state (`queued`,
+`running`, `completed`, `stopped`, `failed`, `cancelled`) and the live
+scheduler state of its jobs (one `qstat` per PBS server, or `sacct` on SLURM).
+The detail view adds the job ids, exec host, walltime used, PBS's estimated
+start time for queued jobs, exit codes, and the latest training progress.
 
 ---
 
@@ -256,6 +282,7 @@ reading the docs end-to-end.
 | `credit rollout`    | Generate forecasts                     | Yes                    |
 | `credit realtime`   | Single forecast from a given init time | Yes                    |
 | `credit submit`     | Submit any of the above to a scheduler | Depends on mode        |
+| `credit status`     | List submitted runs and their state    | No                     |
 | `credit convert`    | Upgrade a gen 1 config to gen 2        | No                     |
 | `credit plot`       | Quick truth-vs-prediction map          | Yes                    |
 | `credit metrics`    | WeatherBench2-style skill scores       | Yes                    |

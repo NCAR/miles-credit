@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import tqdm
 
+from credit import events
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema, resolve_num_levels
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
 from credit.losses import BaseLoss, effective_loss_name, is_crps_loss
@@ -497,9 +498,9 @@ class TrainerERA5Gen2(BaseTrainer):
                     if sharded:
                         sq_terms.append(total_grad_norm(sharded, 2.0).square())
                     global_norm = torch.stack(sq_terms).sum().sqrt()
-                    clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
+                    self._grad_norm = clip_grad_norm_(self.model.parameters(), max_norm=global_norm)
                 elif self.grad_max_norm > 0.0:
-                    clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
+                    self._grad_norm = clip_grad_norm_(self.model.parameters(), max_norm=self.grad_max_norm)
 
                 scaler.step(optimizer)
                 scaler.update()
@@ -543,6 +544,7 @@ class TrainerERA5Gen2(BaseTrainer):
                 if self.skip_nan_prune:
                     logger.warning("NaN/Inf loss detected but skip_nan_prune=True; continuing.")
                 else:
+                    events.sink().emit("train.stopped", {"reason": "nan", "epoch": epoch})
                     raise optuna.TrialPruned()
 
             self._log_batch_progress(epoch, results_dict, optimizer, batch_group_generator, phase="train")

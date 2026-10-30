@@ -20,6 +20,7 @@ from argparse import ArgumentParser
 import torch
 import yaml
 
+from credit import events
 from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
 from credit.losses import effective_loss_name, is_crps_loss
 from credit.models import load_model
@@ -129,6 +130,9 @@ def main_cli():
     )
     for h in root.handlers:
         h.setLevel(level)
+
+    # Structured run events for credit status / the MCP (no-op outside a `credit submit` job).
+    events.init(conf, rank=rank, world_size=world_size)
 
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)

@@ -1407,8 +1407,12 @@ class TestSubmitDryRun:
         args = self._submit_args(chain=1, reload=True)
         args.config = str(cfg)
         _submit(args)
-        # reload config should have been written
-        assert (tmp_path / "config_reload.yml").exists()
+        # The job runs the run directory's reload config; a dry run names it
+        # but writes nothing (it is written at submit time).
+        out = capsys.readouterr().out
+        assert f"{tmp_path}/.credit/runs/train-" in out
+        assert "/config_reload.yml" in out
+        assert not (tmp_path / "config_reload.yml").exists()
 
 
 # ---------------------------------------------------------------------------

@@ -10,6 +10,7 @@ from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
+from ._status import _status
 from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
 
@@ -29,6 +30,7 @@ def _build_parser() -> argparse.ArgumentParser:
               credit submit   --cluster casper  -c config.yml --mode rollout --jobs 10
               credit submit   --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00
               credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
+              credit status
         """),
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -283,6 +285,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(train mode) Submit N jobs in sequence using PBS afterok dependencies.",
     )
 
+    # ---- status ----
+    p = sub.add_parser(
+        "status",
+        help="List submitted runs and their scheduler state",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            List the runs recorded by 'credit submit' (the ledger in
+            $CREDIT_HOME/runs/index.jsonl, default ~/.credit) with the live
+            scheduler state of each job, or show one run in detail.
+
+            Examples:
+              credit status
+              credit status train-20261030T153207-a1b2
+              credit status --json
+        """),
+    )
+    p.add_argument("run_id", nargs="?", default=None, metavar="RUN_ID", help="Show one run in detail")
+    p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+
     # ---- plot ----
     p = sub.add_parser(
         "plot",
@@ -434,6 +455,7 @@ def main() -> None:
         "rollout-ensemble": _rollout_ensemble,
         "realtime": _realtime,
         "submit": _submit,
+        "status": _status,
         "convert": _convert,
         "plot": _plot,
         "ask": _ask,

@@ -554,7 +554,7 @@ class TestQsub:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         result = _qsub("#!/bin/bash\necho hello")
-        assert captured["cmd"][0] == "qsub"
+        assert os.path.basename(captured["cmd"][0]) == "qsub"  # /opt/pbs/bin/qsub where that exists
         assert result == "12345.pbs"
 
     def test_strips_whitespace_from_job_id(self, monkeypatch):
@@ -1470,7 +1470,9 @@ class TestCollectRunContext:
 class TestSubmitReload:
     """Test _submit with --reload flag (dry-run so no qsub)."""
 
-    def test_reload_writes_reload_config(self, tmp_path, capsys):
+    def test_reload_uses_run_dir_reload_config(self, tmp_path, capsys):
+        # The reload config now lives in the run directory and is written at
+        # submit time, so a dry run names it but writes nothing.
         config_path = _make_minimal_conf(tmp_path)
         args = _casper_args(
             config=config_path,
@@ -1481,9 +1483,22 @@ class TestSubmitReload:
         )
         with _inject_preflight(0.0):
             cli._submit(args)
-        # reload config should have been written
         save_loc = tmp_path / "save"
-        assert (save_loc / "config_reload.yml").exists()
+        out = capsys.readouterr().out
+        assert f"CONFIG={save_loc}/.credit/runs/train-" in out
+        assert "/config_reload.yml" in out
+        assert not (save_loc / "config_reload.yml").exists()
+        assert not (save_loc / ".credit").exists()
+
+    def test_live_reload_writes_reload_config_in_run_dir(self, tmp_path, capsys, monkeypatch):
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=1, reload=True, torchrun="/usr/bin/torchrun")
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", lambda script, save_loc=None: "1.pbs")
+        with _inject_preflight(0.0):
+            cli._submit(args)
+        (run_dir,) = (tmp_path / "save" / ".credit" / "runs").iterdir()
+        assert (run_dir / "config_reload.yml").exists()
+        assert (run_dir / "config.yml").exists()
 
     def test_submit_live_calls_qsub(self, tmp_path, capsys, monkeypatch):
         """Live submit (non-dry-run) should call _qsub at least once."""
@@ -1512,6 +1527,42 @@ class TestSubmitReload:
         out = capsys.readouterr().out
         assert "[SUCCESS] Job 99999 submitted to Casper (PBS).\n" in out
         assert f"  Logs:   {tmp_path / 'save' / 'logs'}\n" in out
+
+    def test_submit_records_run_and_ledger(self, tmp_path, capsys, monkeypatch):
+        """credit submit writes run.json, the scripts, submit events, and a ledger entry."""
+        import json
+
+        from credit import runs
+
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=2, reload=False, torchrun="/usr/bin/torchrun")
+        ids = iter(["11.casper-pbs", "12.casper-pbs"])
+        scripts = []
+
+        def fake_qsub(script, save_loc=None):
+            scripts.append(script)
+            return next(ids)
+
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", fake_qsub)
+        with _inject_preflight(0.0):
+            cli._submit(args)
+
+        (entry,) = runs.ledger_index().values()
+        run_dir = entry["run_dir"]
+        assert entry["created_by"] == "cli" and run_dir.startswith(str(tmp_path / "save" / ".credit" / "runs"))
+        record = runs.read_run(run_dir)
+        assert [(j["job_id"], j["job_key"], j["depends_on"]) for j in record["jobs"]] == [
+            ("11.casper-pbs", "11", None),
+            ("12.casper-pbs", "12", "11.casper-pbs"),
+        ]
+        assert record["target"]["scheduler"] == "pbs" and record["target"]["server"] == "casper-pbs"
+        assert f"export CREDIT_RUN_DIR={run_dir}" in scripts[0]
+        assert f"CONFIG={run_dir}/config.yml" in scripts[0]
+        assert f"CONFIG={run_dir}/config_reload.yml" in scripts[1]
+        assert open(os.path.join(run_dir, "scripts", "job-2.sh")).read() == scripts[1]
+        with open(os.path.join(run_dir, "events", "submit.jsonl")) as f:
+            assert [json.loads(line)["type"] for line in f] == ["run.created", "job.submitted", "job.submitted"]
+        assert f"  Run:    {record['run_id']}  (credit status {record['run_id']})\n" in capsys.readouterr().out
 
     def test_submit_chain_calls_qsub_multiple(self, tmp_path, capsys, monkeypatch):
         """Chain=3 should call _qsub 3 times."""

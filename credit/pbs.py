@@ -367,7 +367,7 @@ def _pbsdsh_launch_block(torchrun, script_path, config_path, num_gpus, logdir_pa
         script_path (str): Application entrypoint (e.g. ``credit/applications/train_gen2.py``).
         config_path (str): Config the entrypoint reads via ``-c``.
         num_gpus (int): GPUs -- and torchrun processes -- per node.
-        logdir_parent (str): Directory under which a ``pbsdsh_logs/`` dir is created for
+        logdir_parent (str): Directory under which a ``pbsdsh_logs/<job_key>/`` dir is created for
             per-node logs, written to disk independently of the job's own stdout so a
             job killed abruptly still leaves diagnostics behind.
         app_args (str): Extra command-line arguments appended after ``-c <config>``
@@ -393,7 +393,8 @@ NUM_NODES=$(sort -u "$PBS_NODEFILE" | wc -l)
 MASTER_ADDR=$(hostname -i | awk '{print $1}')
 MASTER_PORT=$(( RANDOM % 10000 + 20000 ))
 
-LOGDIR="@@LOGDIR@@/pbsdsh_logs"
+# One subdirectory per job, so chained jobs never overwrite each other's node logs.
+LOGDIR="@@LOGDIR@@/pbsdsh_logs/${PBS_JOBID%%.*}"
 mkdir -p "$LOGDIR"
 echo "Launcher     : pbsdsh + torchrun (static rendezvous)"
 echo "Nodes        : ${NUM_NODES}   GPUs/node: @@NGPUS@@"
@@ -415,6 +416,10 @@ export LOGLEVEL=INFO
 # NCCL_DEBUG=INFO prints the selected transport (expect NET/OFI over libfabric) so a run
 # can be confirmed to use libfabric rather than silently falling back to TCP sockets.
 export NCCL_DEBUG=INFO
+# CREDIT run-record variables (CREDIT_RUN_DIR, ...) for rank 0's event sink, and unbuffered
+# output for the live log. export -p quotes the values safely.
+export PYTHONUNBUFFERED=1
+$(export -p | grep -E '^declare -x CREDIT_')
 # Redirect torchrun's output to a per-node file on the (shared) LOGDIR from inside the
 # per-node script, i.e. written by the remote node itself. PBS routes a pbsdsh task's
 # stdout to the *job's* aggregate stream, not to the launching pbsdsh's redirected stdout,
