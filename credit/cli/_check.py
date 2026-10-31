@@ -1017,6 +1017,10 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
             "their ratio and would submit a single job.",
         )
 
+    num_checkpts = _get(conf, "trainer", "checkpoints_per_epoch", default=0) or 0
+    if not isinstance(num_checkpts, int) or isinstance(num_checkpts, bool) or num_checkpts < 0:
+        rep.error("trainer.checkpoints_per_epoch", f"Expected a non-negative integer, got {num_checkpts!r}.")
+
 
 def _check_paths(conf: dict, rep: _Report) -> None:
     """Existence checks for every file the config names."""
