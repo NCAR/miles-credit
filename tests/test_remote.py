@@ -337,6 +337,17 @@ def test_read_log_holds_back_a_trailing_cr(tmp_path):
     assert _delta.read_log(str(log), 0, 65536)["text"] == "a\n"
 
 
+def test_find_log_pbs_naming(tmp_path):
+    # Casper's PBS with `-k eod` and `-o <dir>/` writes <jobid>.OU, not <jobname>.o<number>.
+    record = {"target": {"scheduler": "pbs", "log_dir": str(tmp_path)}}
+    assert _delta.find_log(record, "6460503") is None
+    (tmp_path / "6460503.casper-pbs.OU").write_text("log\n")
+    (tmp_path / "64605031.casper-pbs.OU").write_text("other job\n")
+    assert _delta.find_log(record, "6460503") == str(tmp_path / "6460503.casper-pbs.OU")
+    (tmp_path / "credit_gen2.o6460504").write_text("classic\n")
+    assert _delta.find_log(record, "6460504") == str(tmp_path / "credit_gen2.o6460504")
+
+
 def test_csv_delta_settle_rows_and_reset(tmp_path):
     p = tmp_path / "training_log.csv"
     p.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n")

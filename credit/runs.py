@@ -616,8 +616,14 @@ def static_roots() -> list:
 
     ``$HOME``; ``$SCRATCH``/``$WORK``/``$PSCRATCH`` when set; the NCAR GLADE work
     and scratch dirs when they exist; and each ``$CREDIT_REMOTE_ALLOW`` entry
-    (colon-separated).
+    (colon-separated).  A ``remote.yaml`` policy with ``roots`` replaces all of
+    these (see :mod:`credit.remote._guard`); the environment can't widen it.
     """
+    from credit.remote import _guard
+
+    policy_roots = _guard.policy()["roots"]
+    if policy_roots is not None:
+        return list(dict.fromkeys(policy_roots))
     roots = []
     for var in ("HOME", "SCRATCH", "WORK", "PSCRATCH"):
         if os.environ.get(var):

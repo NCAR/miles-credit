@@ -33,7 +33,7 @@ import threading
 import time
 
 from credit import runs
-from credit.remote import _delta, _sched
+from credit.remote import _delta, _guard, _sched
 
 PROTOCOL = 1
 SENTINEL = b"\x1eCREDIT\x1e"
@@ -370,8 +370,9 @@ def read(req: dict) -> dict:
     encoding = req.get("encoding", "auto")
     if encoding == "auto":
         encoding = "base64" if b"\0" in sample else "utf-8"
+    redacted = 0
     if encoding == "utf-8":
-        text = data.decode("utf-8", errors="replace")
+        text, redacted = _guard.redact(data.decode("utf-8", errors="replace"))
     elif encoding == "base64":
         text = base64.b64encode(data).decode("ascii")
     else:
@@ -385,6 +386,7 @@ def read(req: dict) -> dict:
         "data": text,
         "encoding": encoding,
         "eof": offset + len(data) >= st.st_size,
+        "redacted": redacted,
     }
 
 
@@ -431,13 +433,24 @@ def logs(req: dict) -> dict:
         except re.error as exc:
             raise RemoteError("bad_request", f"bad grep pattern: {exc}") from exc
         text = "".join(line + "\n" for line in text.splitlines() if pattern.search(line))
-    return {"job_key": job_key, "path": real, "text": text, "current_frame": r["current_frame"]}
+    return {
+        "job_key": job_key,
+        "path": real,
+        "text": _guard.redact(text)[0],
+        "current_frame": _guard.redact(r["current_frame"])[0],
+    }
 
 
 def write(req: dict) -> dict:
     text = _require(req, "text")
     real = runs.resolve_in_scope(_require(req, "path"))
     runs.check_writable(real)
+    if _guard.MARK in text:
+        raise RemoteError(
+            "config_error",
+            f"the new text still contains {_guard.MARK} placeholders, so writing it would erase secrets",
+            fix="edit this file by hand on the HPC system",
+        )
     expected = req.get("if_sha256")
     exists = os.path.exists(real)
     if expected is None and exists:
@@ -661,7 +674,8 @@ def diagnose(req: dict) -> dict:
         size = os.path.getsize(p)
         with open(p, "rb") as f:
             f.seek(max(0, size - DIAGNOSE_LIMIT))
-            texts.append("\n".join(_delta._collapse_lines(f.read().replace(b"\r\n", b"\n") + b"\n")))
+            text = "\n".join(_delta._collapse_lines(f.read().replace(b"\r\n", b"\n") + b"\n"))
+            texts.append(_guard.redact(text)[0])
     lines = "\n".join(texts).splitlines()
     traceback = None
     for i in range(len(lines) - 1, -1, -1):
@@ -920,12 +934,14 @@ def main(argv: list | None = None) -> int:
     out = _Out()
     verb = argv[0] if argv else ""
     if verb == "follow":
+        _guard.audit("follow", {}, {"ok": True})
         try:
             follow(out, sys.stdin)
         except KeyboardInterrupt:
             pass
         return 0
     tee = _TeeStderr(sys.stderr)
+    req = {}
     try:
         if verb not in VERBS:
             raise RemoteError(
@@ -955,5 +971,6 @@ def main(argv: list | None = None) -> int:
         # Bounded: the exception type and message, and at most the last 3 frames.
         frames = "".join(traceback.format_list(traceback.extract_tb(exc.__traceback__)[-3:]))
         response = _error("internal", f"{type(exc).__name__}: {str(exc)[:1000]}\n{frames}")
+    _guard.audit(verb, req, response)
     out.send(response)
     return 0

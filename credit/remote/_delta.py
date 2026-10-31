@@ -18,6 +18,7 @@ import os
 import time
 
 from credit import runs
+from credit.remote import _guard
 
 PROGRESS_TYPES = ("train.progress", "train.vars")
 FRAME_BYTES = 4096
@@ -96,8 +97,8 @@ def read_log(path: str, off: int, cap: int) -> dict:
     nl = consumed.replace(b"\r\n", b"\n").rfind(b"\n")
     lines = _collapse_lines(consumed.replace(b"\r\n", b"\n")[: nl + 1]) if nl >= 0 else []
     return {
-        "text": "".join(line + "\n" for line in lines),
-        "current_frame": current_frame(path, size),
+        "text": _guard.redact("".join(line + "\n" for line in lines))[0],
+        "current_frame": _guard.redact(current_frame(path, size))[0],
         "off": start + last + 1 if last >= 0 else start,
         "size": size,
         "truncated": truncated,
@@ -117,16 +118,17 @@ def tail_log(path: str, tail_bytes: int) -> dict:
         f.seek(r["off"])
         rest = f.read().replace(b"\r\n", b"\n")
     if rest and b"\r" not in rest and b"\n" not in rest:
-        r["text"] += rest.decode("utf-8", errors="replace")
+        r["text"] += _guard.redact(rest.decode("utf-8", errors="replace"))[0]
     return r
 
 
 def find_log(record: dict, job_key: str) -> str | None:
     """Return the scheduler output file of job *job_key* in ``target.log_dir``, or None.
 
-    ``*.o<job_key>`` for PBS (rank 0's ``pbsdsh_logs/<job_key>/node_0.out`` when
-    the job was launched with pbsdsh), ``*-<job_key>.out`` for SLURM, and
-    ``<job_key>.log`` for the local scheduler.
+    For PBS: ``<job_key>.<server>.OU`` (what PBS writes with ``-k eod`` into an
+    ``-o`` directory, as on Casper) or ``*.o<job_key>``, and rank 0's
+    ``pbsdsh_logs/<job_key>/node_0.out`` when the job was launched with pbsdsh.
+    ``*-<job_key>.out`` for SLURM, and ``<job_key>.log`` for the local scheduler.
     """
     target = record.get("target") or {}
     log_dir = target.get("log_dir") or os.path.join(record.get("save_loc", ""), "logs")
@@ -140,7 +142,8 @@ def find_log(record: dict, job_key: str) -> str | None:
         node0 = os.path.join(log_dir, "pbsdsh_logs", job_key, "node_0.out")
         if os.path.isfile(node0):
             return node0
-        matches = glob.glob(os.path.join(glob.escape(log_dir), f"*.o{job_key}"))
+        base = glob.escape(log_dir)
+        matches = glob.glob(os.path.join(base, f"{job_key}.*.OU")) + glob.glob(os.path.join(base, f"*.o{job_key}"))
     return max(matches, key=os.path.getmtime) if matches else None
 
 
@@ -273,6 +276,7 @@ def read_events(run_dir: str, cur: dict, progress: str = "all", budget: list | N
                         keep.add(idx[-1])
             lines = [ln for i, ln in enumerate(lines) if ln[2].get("type") not in PROGRESS_TYPES or i in keep]
         for line_off, _, ev in lines:
+            ev = _guard.redact_event(ev)
             ev["file"], ev["off"] = name, line_off
             events.append(ev)
         cur[name] = new_off
