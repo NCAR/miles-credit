@@ -44,6 +44,7 @@ from ._common import (
 from ._convert import _convert, _init, _write_reload_config
 from ._parser import _build_parser, main
 from ._plot import _build_channel_map, _build_denorm_stats, _metrics, _plot
+from ._remote_setup import _remote_setup
 from ._status import _status
 from ._submit import (
     _build_pbs_script,
@@ -130,6 +131,7 @@ __all__ = [
     "_sbatch",
     "_scheduler_ctx",
     "_setup_logging",
+    "_remote_setup",
     "_status",
     "_submit",
     "_train",

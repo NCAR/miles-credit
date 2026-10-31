@@ -36,6 +36,8 @@ from credit import runs
 from credit.remote import _delta, _guard, _sched
 
 PROTOCOL = 1
+# How a user chooses the folders credit-mcp may serve (an explicit, local action; never an MCP tool).
+SETUP_COMMAND = "credit remote-setup"
 SENTINEL = b"\x1eCREDIT\x1e"
 READ_DEFAULT = 1 << 20
 READ_MAX = 8 << 20
@@ -214,6 +216,13 @@ def hello(req: dict) -> dict:
         "credit_home": runs.credit_home(),
         "allowed_roots": runs.allowed_roots(),
         "repo_root": _repo_root(),
+        "policy": {
+            "configured": runs.policy_configured(),
+            "files": _guard.policy()["files"],
+            "redact": _guard.policy()["redact"],
+            "audit": _guard.policy()["audit"],
+            "setup_command": SETUP_COMMAND,
+        },
     }
 
 
@@ -960,7 +969,10 @@ def main(argv: list | None = None) -> int:
     except RemoteError as exc:
         response = _error(exc.code, exc.message, exc.fix)
     except runs.PathScopeError as exc:
-        response = _error("forbidden_path", str(exc))
+        fix = None
+        if not runs.policy_configured():
+            fix = f"No folders are set up for credit-mcp on this host yet. In a shell on it, run `{SETUP_COMMAND}`."
+        response = _error("forbidden_path", str(exc), fix)
     except runs.SchedulerError as exc:
         response = _error("scheduler_error", str(exc))
     except SystemExit as exc:  # a reused CLI helper gave up

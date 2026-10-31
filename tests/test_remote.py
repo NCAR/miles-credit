@@ -65,8 +65,10 @@ def env(tmp_path, monkeypatch):
     }
     for k, v in values.items():
         monkeypatch.setenv(k, v)
-    for var in ("SCRATCH", "WORK", "PSCRATCH", "CREDIT_REMOTE_ALLOW", "CREDIT_REMOTE_LOCAL_CMD", "CREDIT_RUN_DIR"):
+    for var in ("SCRATCH", "WORK", "PSCRATCH", "CREDIT_REMOTE_LOCAL_CMD", "CREDIT_RUN_DIR"):
         monkeypatch.delenv(var, raising=False)
+    # Without a remote.yaml nothing is served by default, so the tests name the test HOME explicitly.
+    monkeypatch.setenv("CREDIT_REMOTE_ALLOW", str(home))
     return {"home": home, "tmp": tmp_path, "calls": calls}
 
 
@@ -1063,7 +1065,8 @@ def test_outputs_scope(env):
         yaml.safe_dump(conf, f)
     out = call("outputs", {"run_id": run_id})
     assert out["files"] == []  # named, not listed
-    # a ledger run whose save_loc is outside every root
+    # with a remote.yaml, a ledger run whose save_loc is outside its roots is not served
+    (env["home"] / ".credit" / "remote.yaml").write_text(f"roots: [{env['home']}]\n")
     rogue = env["tmp"] / "rogue"
     rid = runs.new_run_id("train")
     runs.append_ledger({"run_id": rid, "run_dir": str(save / ".credit" / "runs" / run_id), "save_loc": str(rogue)})

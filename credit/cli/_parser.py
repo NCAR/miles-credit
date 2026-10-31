@@ -10,6 +10,7 @@ from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
+from ._remote_setup import _remote_setup
 from ._status import _status
 from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
@@ -304,6 +305,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("run_id", nargs="?", default=None, metavar="RUN_ID", help="Show one run in detail")
     p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
 
+    # ---- remote-setup ----
+    p = sub.add_parser(
+        "remote-setup",
+        help="Choose the folders credit-mcp may read and write on this host",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Write ~/.credit/remote.yaml, the policy that limits what credit-mcp
+            (through `python -m credit.remote`) can read, list and write here.
+            Until it exists, only the runs already in the ledger are served.
+            Secret redaction and the audit log are on unless turned off.
+
+            Examples:
+              credit remote-setup
+              credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes
+              credit remote-setup --show
+        """),
+    )
+    p.add_argument("--root", action="append", metavar="DIR", help="Folder to allow (repeatable)")
+    p.add_argument("--yes", action="store_true", help="Don't prompt; use --root or the suggested folders")
+    p.add_argument("--show", action="store_true", help="Print the current policy and exit")
+    p.add_argument("--no-redact", action="store_true", dest="no_redact", help="Don't mask secrets in returned text")
+    p.add_argument("--no-audit", action="store_true", dest="no_audit", help="Don't keep ~/.credit/audit.jsonl")
+    p.add_argument("--policy-file", default=None, dest="policy_file", help=argparse.SUPPRESS)
+
     # ---- plot ----
     p = sub.add_parser(
         "plot",
@@ -456,6 +481,7 @@ def main() -> None:
         "realtime": _realtime,
         "submit": _submit,
         "status": _status,
+        "remote-setup": _remote_setup,
         "convert": _convert,
         "plot": _plot,
         "ask": _ask,

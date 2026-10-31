@@ -206,6 +206,30 @@ start time for queued jobs, exit codes, and the latest training progress.
 
 ---
 
+## `credit remote-setup` — choose what credit-mcp may access
+
+```bash
+credit remote-setup                                            # interactive; suggests folders from your runs
+credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes # non-interactive
+credit remote-setup --show                                     # print the current policy
+```
+
+Run this once in a shell on the HPC system before using credit-mcp. It writes
+`~/.credit/remote.yaml`, the policy that limits what `credit.remote` can read,
+list and write. Until that file exists, only runs already in the ledger are
+visible, never your whole home, work or scratch area. Your home directory
+itself, folders above it, and hidden folders can't be chosen.
+
+The policy also turns on two features, unless you pass `--no-redact` or
+`--no-audit`:
+- masking of secrets (tokens, keys, passwords) in any text sent back
+- an audit log at `~/.credit/audit.jsonl`, with one line per call
+
+Choosing folders is deliberately a command you run yourself. No MCP tool can
+change it. See [remote.md](remote.md).
+
+---
+
 ## `credit convert` — upgrade a v1 config to v2
 
 ```bash

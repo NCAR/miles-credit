@@ -118,7 +118,8 @@ def test_create_run_add_job_and_exclusive(home):
 # ---------------------------------------------------------------------------
 
 
-def test_scope_static_roots_and_escapes(home, tmp_path):
+def test_scope_static_roots_and_escapes(home, tmp_path, monkeypatch):
+    monkeypatch.setenv("CREDIT_REMOTE_ALLOW", str(home))
     inside = home / "data" / "f.txt"
     inside.parent.mkdir()
     inside.write_text("x")
@@ -143,12 +144,38 @@ def test_scope_extra_roots_and_ledger_roots(home, tmp_path, monkeypatch):
     extra.mkdir()
     monkeypatch.setenv("CREDIT_REMOTE_ALLOW", str(extra))
     assert runs.resolve_in_scope(str(extra / "a.yml"))
-    # a ledger run outside every static root does not become a root
     rogue = tmp_path / "rogue"
     runs.append_ledger({"run_id": "train-x", "run_dir": str(rogue / ".credit/runs/train-x"), "save_loc": str(rogue)})
+    # without a policy, a ledger run is served (the user started it) ...
+    assert str(os.path.realpath(rogue)) in runs.allowed_roots()
+    # ... but with a remote.yaml, a ledger run outside its roots does not become a root
+    (home / ".credit").mkdir(exist_ok=True)
+    (home / ".credit" / "remote.yaml").write_text(f"roots: [{extra}]\n")
     assert str(os.path.realpath(rogue)) not in runs.allowed_roots()
     with pytest.raises(runs.PathScopeError):
         runs.resolve_in_scope(str(rogue / "f"))
+
+
+def test_no_policy_serves_nothing_broad(home, tmp_path):
+    # With no remote.yaml and no CREDIT_REMOTE_ALLOW, home/work/scratch are not served.
+    (home / "notes.txt").write_text("private\n")
+    assert runs.allowed_roots() == []
+    with pytest.raises(runs.PathScopeError):
+        runs.resolve_in_scope(str(home / "notes.txt"))
+    # A ledger run whose save_loc is the home dir, above it, or hidden never becomes a root.
+    for i, save in enumerate([home, home.parent, home / ".ssh"]):
+        runs.append_ledger({"run_id": f"train-{i}", "run_dir": str(save / f".credit/runs/train-{i}"),
+                            "save_loc": str(save)})  # fmt: skip
+    roots = runs.allowed_roots()
+    assert not any(r in roots for r in (str(home), str(home.parent), str(home / ".ssh")))
+    assert os.path.realpath(home / ".ssh") not in roots
+    with pytest.raises(runs.PathScopeError):
+        runs.resolve_in_scope(str(home / ".ssh" / "id_rsa"))
+    # an ordinary run folder is served, and its own .credit/runs/<id> dir too
+    exp = home / "CREDIT_runs" / "exp"
+    runs.append_ledger({"run_id": "train-ok", "run_dir": str(exp / ".credit/runs/train-ok"), "save_loc": str(exp)})
+    assert runs.resolve_in_scope(str(exp / "training_log.csv"))
+    assert os.path.realpath(exp / ".credit/runs/train-ok") in runs.allowed_roots()
 
 
 def test_scope_allows_run_dirs_under_save_loc(home):

@@ -611,38 +611,48 @@ def _under(path: str, root: str) -> bool:
     return root == os.sep or path == root or path.startswith(root.rstrip(os.sep) + os.sep)
 
 
+def policy_configured() -> bool:
+    """True when a ``remote.yaml`` policy names the folders ``credit.remote`` may serve."""
+    from credit.remote import _guard
+
+    return _guard.policy()["roots"] is not None
+
+
 def static_roots() -> list:
     """Return the realpaths of the static roots.
 
-    ``$HOME``; ``$SCRATCH``/``$WORK``/``$PSCRATCH`` when set; the NCAR GLADE work
-    and scratch dirs when they exist; and each ``$CREDIT_REMOTE_ALLOW`` entry
-    (colon-separated).  A ``remote.yaml`` policy with ``roots`` replaces all of
-    these (see :mod:`credit.remote._guard`); the environment can't widen it.
+    A ``remote.yaml`` policy's ``roots`` when one exists (see
+    :mod:`credit.remote._guard`; the environment can't widen it).  Without a
+    policy, only the folders named in ``$CREDIT_REMOTE_ALLOW`` (colon-separated):
+    nothing in the home, work or scratch areas is served until the user runs
+    ``credit remote-setup``.
     """
     from credit.remote import _guard
 
     policy_roots = _guard.policy()["roots"]
     if policy_roots is not None:
         return list(dict.fromkeys(policy_roots))
-    roots = []
-    for var in ("HOME", "SCRATCH", "WORK", "PSCRATCH"):
-        if os.environ.get(var):
-            roots.append(os.environ[var])
-    user = os.environ.get("USER") or os.environ.get("LOGNAME")
-    if user:
-        roots += [d for d in (f"/glade/work/{user}", f"/glade/derecho/scratch/{user}") if os.path.isdir(d)]
-    roots += [r.strip() for r in (os.environ.get("CREDIT_REMOTE_ALLOW") or "").split(":") if r.strip()]
-    out = []
-    for r in roots:
-        rp = _real(r)
-        if rp not in out:
-            out.append(rp)
-    return out
+    roots = [r.strip() for r in (os.environ.get("CREDIT_REMOTE_ALLOW") or "").split(":") if r.strip()]
+    return list(dict.fromkeys(_real(r) for r in roots))
+
+
+def _too_broad(real: str) -> bool:
+    """True for ``/`` and for the account's home directory or any folder above it."""
+    from credit.remote import _guard
+
+    homes = {_real(_guard.owner_home()), _real(os.environ.get("HOME") or _guard.owner_home())}
+    return real == os.sep or any(_under(home, real) for home in homes)
 
 
 def ledger_roots(index: dict | None = None, static: list | None = None) -> list:
-    """Return each ledger run's ``run_dir``, ``save_loc`` and config dir that lies inside a static root."""
+    """Return each ledger run's ``run_dir``, ``save_loc`` and config dir that may be served.
+
+    With a policy, only those inside its roots.  Without one, every ledger run
+    (the user created it with ``credit submit``, or through a scoped verb),
+    except a folder that is ``/``, the home directory, or above it.
+    """
     static = static_roots() if static is None else static
+    configured = policy_configured()
     out = []
     for entry in (ledger_index() if index is None else index).values():
         candidates = [entry.get("run_dir"), entry.get("save_loc")]
@@ -652,9 +662,24 @@ def ledger_roots(index: dict | None = None, static: list | None = None) -> list:
             if not c:
                 continue
             rp = _real(c)
-            if rp not in out and any(_under(rp, s) for s in static):
+            if rp in out or _hidden_part(rp):
+                continue
+            inside = any(_under(rp, s) for s in static)
+            if inside or (not configured and not _too_broad(rp)):
                 out.append(rp)
     return out
+
+
+def _hidden_part(real: str) -> bool:
+    """True when *real* has a component starting with ``.``, other than a run's own ``.credit/runs/<id>``.
+
+    A ledger root is never measured against a parent root, so a ``save_loc`` of
+    ``~/.ssh`` would otherwise serve everything inside it.
+    """
+    parts = real.split(os.sep)
+    if len(parts) >= 3 and parts[-3:-1] == [".credit", "runs"]:
+        parts = parts[:-3]
+    return any(p.startswith(".") for p in parts if p)
 
 
 def allowed_roots(index: dict | None = None) -> list:
