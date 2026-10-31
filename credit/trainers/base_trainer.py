@@ -525,7 +525,7 @@ class BaseTrainer(ABC):
         np_kind, np_key, np_pos, np_has_gauss, np_gauss = np.random.get_state()
         state = {
             "python": random.getstate(),
-            "numpy": (np_kind, torch.from_numpy(np_key.copy()), np_pos, np_has_gauss, np_gauss),
+            "numpy": (np_kind, torch.from_numpy(np_key.astype(np.int64)), np_pos, np_has_gauss, np_gauss),
             "torch": torch.get_rng_state(),
             "cuda": torch.cuda.get_rng_state() if torch.cuda.is_available() else None,
         }
@@ -586,7 +586,7 @@ class BaseTrainer(ABC):
         py_version, py_internal, py_gauss = state["python"]
         random.setstate((py_version, tuple(py_internal), py_gauss))
         np_kind, np_key, np_pos, np_has_gauss, np_gauss = state["numpy"]
-        np.random.set_state((np_kind, np_key.numpy(), np_pos, np_has_gauss, np_gauss))
+        np.random.set_state((np_kind, np_key.numpy().astype(np.uint64), np_pos, np_has_gauss, np_gauss))
         torch.set_rng_state(state["torch"])
         if state["cuda"] is not None and torch.cuda.is_available():
             torch.cuda.set_rng_state(state["cuda"])
