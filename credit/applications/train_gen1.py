@@ -413,6 +413,9 @@ def main_cli():
 
     # Launch PBS jobs
     if launch:
+        # Single process here: write model.yml before the generated PBS script (which runs -c <save_loc>/model.yml)
+        # is submitted. launch_script (Casper) does not sync the config itself.
+        sync_run_config(config, save_loc)
         # Where does this script live?
         script_path = Path(__file__).absolute()
         if conf["pbs"]["queue"] == "casper":
