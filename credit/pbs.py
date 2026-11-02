@@ -12,6 +12,8 @@ from credit.conda_env import torchrun_path
 logger = logging.getLogger(__name__)
 
 _GIT_IGNORE = "*\n!.gitignore\n!model.yml\n"
+# Local git config key marking a repo as created (and therefore safe to commit to) by CREDIT
+_GIT_MARKER = "credit.managed"
 
 
 def _git(save_loc: str, *args: str, identity: bool = False) -> subprocess.CompletedProcess:
@@ -93,16 +95,27 @@ def sync_run_config(config_path: str, save_loc: str) -> str:
         warn_no_history("git was not found on PATH")
     else:
         try:
-            if not os.path.isdir(os.path.join(save_loc, ".git")):
+            if not os.path.exists(os.path.join(save_loc, ".git")):
                 res = _git(save_loc, "init", "-q")
                 if res.returncode != 0:
                     raise RuntimeError(f"`git init` failed: {res.stderr.strip()}")
+                res = _git(save_loc, "config", "--local", _GIT_MARKER, "true")
+                if res.returncode != 0:
+                    raise RuntimeError(f"`git config` failed: {res.stderr.strip()}")
                 with open(os.path.join(save_loc, ".gitignore"), "w") as f:
                     f.write(_GIT_IGNORE)
-            if replaced:
-                # Preserve whatever is on disk (e.g. a run dir created before git tracking) before overwriting.
-                _git_commit_model_yml(save_loc, "Previous model.yml (before this run)")
-            use_git = True
+            if _git(save_loc, "config", "--local", "--get", _GIT_MARKER).stdout.strip() != "true":
+                # save_loc is itself someone's repo (e.g. the repo root): never commit onto their branch.
+                logger.warning(
+                    "%s is a git repository not created by CREDIT; skipping config history tracking there. "
+                    "model.yml was still copied.",
+                    save_loc,
+                )
+            else:
+                if replaced:
+                    # Preserve whatever is on disk (e.g. a run dir created before git tracking) before overwriting.
+                    _git_commit_model_yml(save_loc, "Previous model.yml (before this run)")
+                use_git = True
         except Exception as e:
             warn_no_history(str(e))
 

@@ -51,7 +51,8 @@ git -C <save_loc> log -p model.yml
 
 **git must be installed and on your `PATH`** (on Casper/Derecho: `module load git`). If git is missing or the
 repository cannot be initialized, CREDIT logs a warning, still copies `model.yml`, but config history is not
-recorded.
+recorded. If `save_loc` is already a git repository that CREDIT did not create (for example your own
+project root), CREDIT leaves it alone: it logs a warning, copies `model.yml`, and makes no commits there.
 
 ## How many jobs do I need?
 

@@ -404,3 +404,23 @@ def test_sync_run_config_git_commit_failure_still_copies_and_warns(tmp_path, mon
         sync_run_config(_cfg(tmp_path, "a: 1\n"), str(save))
     assert (save / "model.yml").read_text() == "a: 1\n"
     assert "commit boom" in caplog.text
+
+
+@needs_git
+def test_sync_run_config_skips_user_owned_repo_at_save_loc(tmp_path, caplog):
+    save = tmp_path / "userrepo"
+    save.mkdir()
+    subprocess.run(["git", "init", "-q", str(save)], check=True)
+    (save / "x.txt").write_text("x")
+    subprocess.run(["git", "-C", str(save), "add", "x.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(save), "-c", "user.name=u", "-c", "user.email=u@e", "commit", "-q", "-m", "user commit"],
+        check=True,
+    )
+    with caplog.at_level(logging.WARNING):
+        sync_run_config(_cfg(tmp_path, "a: 1\n"), str(save))
+    assert (save / "model.yml").read_text() == "a: 1\n"
+    assert _log(save, "rev-list", "--count", "HEAD").strip() == "1"
+    assert _log(save, "log", "-1", "--format=%s").strip() == "user commit"
+    assert not (save / ".gitignore").exists()
+    assert "not created by CREDIT" in caplog.text
