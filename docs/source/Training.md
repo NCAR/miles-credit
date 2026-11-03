@@ -322,6 +322,25 @@ fully-resolved conda/module environment into a per-node script, because pbsdsh's
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
 libfabric for inter-node communication. Use `--dry-run` to compare the two scripts.
 
+### Extra torchrun flags
+
+`torchrun_args` in the `pbs:` or `slurm:` block (a string or a list of flags) is appended
+to every `torchrun` line `credit submit` generates, single- and multi-node, in every
+`--mode`. The `--torchrun-args` flag overrides it; write it with `=` because the value
+starts with `--`. For example, to bind each rank to its GPU's CPU socket:
+
+```yaml
+slurm:
+  torchrun_args: "--numa-binding=node"
+```
+
+```bash
+credit submit --cluster horizon --scheduler slurm -c config.yml --torchrun-args=--numa-binding=node --dry-run
+```
+
+The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
+`torchrun_args`, and so does the `pbsdsh` launcher.
+
 ## Job submission
 
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
