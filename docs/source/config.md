@@ -1400,9 +1400,12 @@ pbs:
     nodes: 8
     ncpus: 64
     ngpus: 4
+    # torchrun_args: "--numa-binding=node"   # optional extra torchrun flags
 ```
 
 - **`nodes`, `ncpus`, `ngpus`**: Adjust based on compute resources.  
+- **`torchrun_args`** (optional): a string or list of extra flags for the generated
+  `torchrun` line. See "Extra torchrun flags" in the Training page.
 - **For Casper**: Change `queue: 'casper'`. `gpu_type` is optional — omit it to run on any
   available NVIDIA GPGPU (usually a shorter queue wait), or pin a model with e.g. `gpu_type: 'v100'`.
 

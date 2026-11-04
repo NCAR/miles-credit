@@ -84,6 +84,20 @@ _PBS_QUEUES = {
 }
 
 
+def torchrun_args_error(val) -> str:
+    """Return an error message if *val* is not a valid ``torchrun_args`` value.
+
+    ``torchrun_args`` (in a ``pbs:`` or ``slurm:`` block) is either a string, inserted
+    verbatim into the ``torchrun`` line, or a list of strings, one argument each.
+    Returns ``""`` for a valid or unset value.
+    """
+    if val is None or isinstance(val, str):
+        return ""
+    if isinstance(val, list) and all(isinstance(x, str) for x in val):
+        return ""
+    return f"torchrun_args must be a string or a list of strings, not {type(val).__name__}: {val!r}"
+
+
 def queue_cluster_error(queue: str, cluster: str) -> str:
     """Return an error message if *queue* belongs to a cluster other than *cluster*.
 

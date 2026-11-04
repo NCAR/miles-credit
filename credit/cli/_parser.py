@@ -162,6 +162,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Casper GPU type, e.g. a100_80gb/h100/v100 (default: any NVIDIA GPGPU)",
     )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
+    p.add_argument(
+        "--torchrun-args",
+        dest="torchrun_args",
+        default=None,
+        metavar="ARGS",
+        help="Extra flags for every torchrun launch, overriding pbs/slurm torchrun_args in the config. "
+        "Use '=' since the value starts with '--', e.g. --torchrun-args=--numa-binding=node",
+    )
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda env path")
     p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
 
@@ -248,6 +256,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="GPU type, e.g. a100_80gb/h100/v100 (Casper default: any NVIDIA GPGPU)",
     )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
+    p.add_argument(
+        "--torchrun-args",
+        dest="torchrun_args",
+        default=None,
+        metavar="ARGS",
+        help="Extra flags for every torchrun launch, overriding pbs/slurm torchrun_args in the config. "
+        "Use '=' since the value starts with '--', e.g. --torchrun-args=--numa-binding=node",
+    )
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument(
         "--launcher",
