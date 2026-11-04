@@ -129,11 +129,16 @@ def _credit_version() -> str | None:
         return None
 
 
+# Casper's hosts: casper-login* and casper<NN> compute nodes, and since January 2026 the crlogin* login nodes
+# and crhtc* nodes, whose names don't contain "casper".
+CASPER_NAMES = ("casper", "crlogin", "crhtc")
+
+
 def system_name(hostname: str) -> str:
     """Classify a host as casper / derecho / perlmutter / ncar / local (the rules of ``_begin._detect_system``)."""
     hostname = hostname.lower()
     if any(n in hostname for n in ("derecho", "casper", "crhtc", "crlogin")) or re.match(r"dec\d+", hostname):
-        return "derecho" if "derecho" in hostname else "casper" if "casper" in hostname else "ncar"
+        return "derecho" if "derecho" in hostname else "casper" if any(n in hostname for n in CASPER_NAMES) else "ncar"
     if "perlmutter" in hostname or re.match(r"nid\d+", hostname):
         return "perlmutter"
     return "local"

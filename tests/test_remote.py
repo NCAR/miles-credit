@@ -1432,3 +1432,20 @@ def test_jobs_survive_a_crash_between_submitted_and_run_json(env, monkeypatch):
     assert retry["already_submitted"] and [j["index"] for j in retry["jobs"]] == [1, 2, 3]
     assert [j["job_id"] for j in runs.read_run(run_dir)["jobs"]] == ["1001.desched1", "1002.desched1", "1003.desched1"]
     assert sum(" qsub " in f" {c}" and "job-1.sh" in c for c in env["calls"].read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize(
+    ("hostname", "expected"),
+    [
+        ("crlogin1", "casper"),  # the login nodes since January 2026
+        ("crhtc12", "casper"),
+        ("casper23", "casper"),
+        ("derecho4", "derecho"),
+        ("dec0123", "ncar"),
+        ("my-laptop", "local"),
+    ],
+)
+def test_system_name(hostname, expected):
+    from credit.remote import system_name
+
+    assert system_name(hostname) == expected
