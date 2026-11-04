@@ -1318,6 +1318,55 @@ class TestDerechoNodesHonoredInAllModes:
         for launcher in ("mpiexec", "pbsdsh"):
             assert expected in self._script(mode, nodes=2, launcher=launcher)
 
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    @pytest.mark.parametrize("nodes,launcher", [(1, "mpiexec"), (3, "mpiexec"), (3, "pbsdsh")])
+    def test_mpich_gtl_fix_follows_conda_activate(self, mode, nodes, launcher):
+        """Every Derecho script puts the loaded cray-mpich's gtl/lib first after activating the env."""
+        from credit.pbs import DERECHO_MPICH_GTL_FIX
+
+        script = self._script(mode, nodes=nodes, launcher=launcher)
+        assert script.count(DERECHO_MPICH_GTL_FIX) == 1
+        assert script.index("conda activate") < script.index(DERECHO_MPICH_GTL_FIX)
+
+
+class TestDerechoMpichGtlFix:
+    """The GTL fix line must work as shell, not just appear in the script."""
+
+    def _run(self, env):
+        import shutil
+        import subprocess
+
+        from credit.pbs import DERECHO_MPICH_GTL_FIX
+
+        bash = shutil.which("bash")
+        if bash is None:
+            pytest.skip("bash not available")
+        out = subprocess.run(
+            [bash, "-c", f'{DERECHO_MPICH_GTL_FIX}\nprintf "%s" "${{LD_LIBRARY_PATH-<unset>}}"'],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return out.stdout
+
+    def test_prepends_gtl_dir(self):
+        env = {"CRAY_MPICH_ROOTDIR": "/opt/cray/pe/mpich/8.1.29", "LD_LIBRARY_PATH": "/a:/b"}
+        assert self._run(env) == "/opt/cray/pe/mpich/8.1.29/gtl/lib:/a:/b"
+
+    def test_empty_ld_library_path_has_no_trailing_colon(self):
+        assert self._run({"CRAY_MPICH_ROOTDIR": "/opt/cray/pe/mpich/8.1.29"}) == "/opt/cray/pe/mpich/8.1.29/gtl/lib"
+
+    def test_no_op_without_cray_mpich(self):
+        assert self._run({"LD_LIBRARY_PATH": "/a"}) == "/a"
+        assert self._run({}) == "<unset>"
+
+    def test_casper_script_has_no_gtl_fix(self):
+        from credit.pbs import DERECHO_MPICH_GTL_FIX
+
+        script = _build_pbs_script(_casper_args(), FAKE_CONFIG, FAKE_REPO, FAKE_ACCOUNT)
+        assert DERECHO_MPICH_GTL_FIX not in script
+
 
 # ---------------------------------------------------------------------------
 # _submit dry-run — exercises the dry_run branch of _submit

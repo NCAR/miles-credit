@@ -10,6 +10,8 @@ import textwrap
 
 import yaml
 
+from credit.pbs import DERECHO_MPICH_GTL_FIX
+
 from ._common import (
     _PBS_DEFAULTS,
     _SLURM_CLUSTER_DEFAULTS,
@@ -606,6 +608,7 @@ def _derecho_pbsdsh_script(
         module load {PBSDSH_DERECHO_MODULES}
 
         conda activate {args.conda_env}
+        {DERECHO_MPICH_GTL_FIX}
 
         echo "Nodes     : {args.nodes}"
         echo "GPUs/node : {args.gpus}"
@@ -696,6 +699,7 @@ def _build_pbs_script(
                         cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -895,6 +899,7 @@ def _build_realtime_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -975,6 +980,7 @@ def _build_preprocess_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -1223,6 +1229,7 @@ def _build_rollout_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
