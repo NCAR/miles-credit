@@ -1428,10 +1428,51 @@ class TestTorchrunArgs:
     def test_derecho_single_node_every_mode(self, mode):
         assert f"--nproc-per-node=4 {NUMA} \\" in self._pbs_script(mode, "derecho")
 
-    @pytest.mark.parametrize("launcher", ["mpiexec", "pbsdsh"])
-    def test_derecho_multi_node_launchers_unchanged(self, launcher):
-        script = self._pbs_script("train", "derecho", nodes=2, launcher=launcher)
-        assert NUMA not in script
+    def test_derecho_multi_node_mpiexec_unchanged(self):
+        assert NUMA not in self._pbs_script("train", "derecho", nodes=2, launcher="mpiexec")
+
+    def test_derecho_multi_node_mpiexec_warns(self, caplog):
+        with caplog.at_level("WARNING", logger="credit.cli._submit"):
+            self._pbs_args("derecho", nodes=2, launcher="mpiexec")
+        assert "torchrun_args" in caplog.text
+        assert "--launcher pbsdsh" in caplog.text
+
+    @pytest.mark.parametrize(
+        "cluster,nodes,launcher", [("derecho", 1, "mpiexec"), ("derecho", 2, "pbsdsh"), ("casper", 1, "mpiexec")]
+    )
+    def test_no_warning_when_torchrun_runs(self, caplog, cluster, nodes, launcher):
+        with caplog.at_level("WARNING", logger="credit.cli._submit"):
+            self._pbs_args(cluster, nodes=nodes, launcher=launcher)
+        assert "torchrun_args" not in caplog.text
+
+    @pytest.mark.parametrize("mode", ALL_MODES)
+    def test_derecho_multi_node_pbsdsh_every_mode(self, mode):
+        script = self._pbs_script(mode, "derecho", nodes=2, launcher="pbsdsh")
+        assert f"torchrun {NUMA} \\\n    --nnodes=${{NUM_NODES}}" in script
+
+    def test_list_elements_shell_quoted(self):
+        cfg = {**self.SLURM_CFG, "torchrun_args": ["--log-dir=/tmp/my logs", "--x=$HOME;date"]}
+        script = self._slurm_script("train", slurm_cfg=cfg)
+        assert "--nproc-per-node=${NGPUS} '--log-dir=/tmp/my logs' '--x=$HOME;date' \\" in script
+
+    def test_string_inserted_verbatim(self):
+        cfg = {**self.SLURM_CFG, "torchrun_args": f"  {NUMA} --max-restarts=0 "}
+        script = self._slurm_script("train", slurm_cfg=cfg)
+        assert f"--nproc-per-node=${{NGPUS}} {NUMA} --max-restarts=0 \\" in script
+
+    @pytest.mark.parametrize("bad", [{"numa-binding": "node"}, 3, [NUMA, 0]])
+    def test_bad_type_exits(self, bad, capsys):
+        with pytest.raises(SystemExit):
+            _slurm_args(slurm_cfg={**self.SLURM_CFG, "torchrun_args": bad})
+        assert "slurm.torchrun_args must be a string or a list of strings" in capsys.readouterr().err
+        with pytest.raises(SystemExit):
+            self._pbs_args("casper", pbs_cfg={"torchrun_args": bad})
+        assert "pbs.torchrun_args must be a string or a list of strings" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("mode", ["train", "preprocess", "realtime"])
+    def test_casper_honors_torchrun_path(self, mode):
+        assert "TORCHRUN=/opt/bin/torchrun\n" in self._pbs_script(mode, "casper", torchrun="/opt/bin/torchrun")
+        assert "TORCHRUN=$(which torchrun)\n" in self._pbs_script(mode, "casper")
 
     def test_pbs_resolve_cli_overrides_config(self):
         args = self._pbs_args("casper", torchrun_args="--max-restarts=0")
@@ -1446,6 +1487,31 @@ class TestTorchrunArgs:
 
         args = _build_parser().parse_args(["submit", "-c", "c.yml", "--cluster", "horizon", f"--torchrun-args={NUMA}"])
         assert args.torchrun_args == NUMA
+
+    def test_rollout_ensemble_parser_accepts_flag(self):
+        from credit.cli import _build_parser
+
+        args = _build_parser().parse_args(
+            ["rollout-ensemble", "-c", "c.yml", "--cluster", "casper", f"--torchrun-args={NUMA}"]
+        )
+        assert args.torchrun_args == NUMA
+
+    @pytest.mark.parametrize(
+        "conf,severity",
+        [
+            ({"slurm": {"torchrun_args": NUMA}}, None),
+            ({"pbs": {"torchrun_args": [NUMA]}}, None),
+            ({"slurm": {"torchrun_args": 3}}, "error"),
+            ({"pbs": {"torchrun_args": {"a": 1}}}, "error"),
+            ({"pbs": {"torchrun_args": NUMA, "nodes": 2}}, "warning"),
+        ],
+    )
+    def test_credit_check(self, conf, severity):
+        from credit.cli._check import _Report, _check_torchrun_args
+
+        rep = _Report("test.yml")
+        _check_torchrun_args(conf, rep)
+        assert [f.severity for f in rep.findings] == ([severity] if severity else [])
 
     def test_submit_dry_run_horizon(self, tmp_path, capsys):
         import yaml

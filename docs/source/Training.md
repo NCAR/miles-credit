@@ -338,8 +338,18 @@ slurm:
 credit submit --cluster horizon --scheduler slurm -c config.yml --torchrun-args=--numa-binding=node --dry-run
 ```
 
-The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
-`torchrun_args`, and so does the `pbsdsh` launcher.
+A string is inserted as written, so it can hold several flags. In a list, each element
+is shell-quoted and stays one argument, even with spaces or shell metacharacters:
+
+```yaml
+pbs:
+  torchrun_args: ["--numa-binding=node", "--log-dir=/glade/derecho/scratch/me/my logs"]
+```
+
+The `pbsdsh` launcher passes the flags to each node's `torchrun`. Its per-node script is
+written through an unquoted heredoc, so a `$` in the flags expands when that script is
+written. The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
+`torchrun_args`; `credit submit` and `credit check` both warn when that happens.
 
 ## Job submission
 

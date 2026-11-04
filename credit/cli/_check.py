@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_QUEUES
+from ._common import _PBS_QUEUES, torchrun_args_error
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -1175,6 +1175,25 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
 
 
+def _check_torchrun_args(conf: dict, rep: _Report) -> None:
+    for block in ("pbs", "slurm"):
+        sched = conf.get(block) or {}
+        if "torchrun_args" not in sched:
+            continue
+        err = torchrun_args_error(sched["torchrun_args"])
+        if err:
+            rep.error(f"{block}.torchrun_args", err, fix='torchrun_args: "--numa-binding=node"')
+    pbs = conf.get("pbs") or {}
+    # Casper jobs are always single-node, so nodes > 1 means a Derecho block.
+    if pbs.get("torchrun_args") and int(pbs.get("nodes") or 1) > 1:
+        rep.warn(
+            "pbs.torchrun_args",
+            "Multi-node Derecho jobs launch with mpiexec by default, which runs python directly "
+            "and ignores torchrun_args.",
+            fix="credit submit --cluster derecho --launcher pbsdsh ...",
+        )
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -1205,6 +1224,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_trainer,
             _check_channel_schema,
             _check_pbs,
+            _check_torchrun_args,
         ]
     for check in checks:
         try:

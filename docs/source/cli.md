@@ -174,7 +174,7 @@ with `afterok` dependencies so each job resumes from the previous checkpoint
 automatically.  `--reload` patches the config to resume from the last
 checkpoint after a failure.  `--torchrun-args=<flags>` (or `torchrun_args:` in the
 `pbs:`/`slurm:` block) adds extra flags such as `--numa-binding=node` to the
-generated `torchrun` line.
+generated `torchrun` line; `credit rollout-ensemble` accepts the same flag.
 
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /
