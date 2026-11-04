@@ -38,6 +38,29 @@ automatically from the config.
 edits required to get started.
 :::
 
+### Config history in `save_loc`
+
+Every `credit train` and `credit preprocess` run copies its config to `<save_loc>/model.yml` when the job starts
+(on a batch system that is when the job begins running, not when you run `credit submit`), so that file always
+reflects the most recent run (rollout and evaluation read it). To keep an audit trail,
+`save_loc` is automatically turned into a small git repository that tracks only `model.yml`; each time the
+config changes a commit is made:
+
+```bash
+git -C <save_loc> log -p model.yml
+```
+
+**git must be installed and on your `PATH`** (on Casper/Derecho: `module load git`). If git is missing or the
+repository cannot be initialized, CREDIT logs a warning, still copies `model.yml`, but config history is not
+recorded. If `save_loc` is already a git repository that CREDIT did not create (for example your own
+project root), CREDIT leaves it alone: it logs a warning, copies `model.yml`, and makes no commits there. We
+recommend setting `save_loc` to a directory outside the `miles-credit` repository (and outside any other git
+repository), for example under your scratch space, so training outputs never mix with source code.
+
+If `save_loc` is owned by another user (a shared run directory), git's "dubious ownership" check can refuse to
+work in it, and CREDIT will log the same warning on every run (`model.yml` is still copied). To enable history
+tracking there, run `git config --global --add safe.directory <save_loc>`.
+
 ## How many jobs do I need?
 
 Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.

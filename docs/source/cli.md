@@ -97,6 +97,9 @@ Reads your training data and fits a BridgeScaler (standard scaler) JSON file
 that the preblocks, loss, and metrics all reference.  This must run once before
 training; the scaler file is written to `{save_loc}/standard_scaler.json`.
 
+Your config is also saved as `{save_loc}/model.yml` (with its change history tracked by git; see
+[Config history in `save_loc`](Training.md)). Git must be installed.
+
 **When to use it:** once, after `credit begin` and before `credit train`.  If
 you change your variable list or level selection, re-run it.
 
