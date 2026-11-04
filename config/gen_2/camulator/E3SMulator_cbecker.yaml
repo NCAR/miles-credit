@@ -11,9 +11,10 @@
 #   - land -> NaN for SST (before the ATM regrid) and for the MPAS fields (ocnregrid renormalize: true)
 #   - Q clipped to |z| <= 50 after the scaler: one-step simulation spikes at the model top (levels 0-9)
 #     reach |z| ~1,500 (E3SMULATOR_DATA_AUDIT.md section 0.1)
-#   - fixers: tracer + net energy (scale_by_mass, PHIS from the regridded static input, flux_units "W m-2").
-#     Water fixer needs precip/evap unit options first (PRECT is m/s, QFLX kg/m2/s). Fluxes are
-#     positive-down, instantaneous.
+#   - fixers: tracer, then a snapshot the training loss scores (pred_key: y_processed_raw), then mass, water
+#     and net energy (scale_by_mass, PHIS from the regridded static input, flux_units "W m-2"). Validation
+#     scores the fixed prediction. Fluxes are positive-down, instantaneous. On the truth the fixers correct
+#     PS by 0.04 Pa, PRECT by 3.6% (rms) and T by 0.01 K (rms, 0.5 W/m2 mean) per step.
 #
 # 1. Preprocess (fits the scaler on 4 ranks x 500 batches x batch 2 = 4,000 samples; needs torchrun):
 #      torchrun --standalone --nproc-per-node=4 credit/applications/preprocess.py \
@@ -606,34 +607,43 @@ postblocks:
           - E3SM_LND/diagnostic/2d/QRUNOFF
           - E3SM_OCN/diagnostic/2d/dMLD
 
-#    mass_fixer:
-#      type: global_mass_fixer
-#      args:
-##        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
-#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
-#
-#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
-#        grid_type: sigma
-#        midpoint: true
-#        q_var: E3SM_ATM/prognostic/3d/Q
-#        sp_var: E3SM_ATM/prognostic/2d/PS
+    # The training loss scores this snapshot (loss.args.pred_key): the prediction after the tracer clamp but
+    # before the global budget fixers below. A fixer that rescales or shifts a field hides that field's raw
+    # global mean from a loss on its output (the energy fixer's fixed T ignores any offset in the raw T), so
+    # the loss would never pull it back (arXiv:2607.18416). The fixed y_processed still rolls forward, is
+    # what validation scores (valid_pred_key), and is what rollout writes.
+    snapshot_raw:
+      type: snapshot
+      args:
+        key: y_processed
+        out_key: y_processed_raw
 
-# DO NOT ENABLE YET: GlobalWaterFixer assumes precip and evaporation are water depths (m) accumulated
-# over the step (precip * 1000 / N_seconds). Here PRECT is m/s and QFLX kg/m2/s (scripts/units_audit.py),
-# which would multiply PRECT ~1000x. It needs precip_units / evapor_units options first.
-#    water_fixer:
-#      type: global_water_fixer
-#      args:
-##        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
-#        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
-#        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
-#        grid_type: sigma
-#        midpoint: true
-#        lead_time_periods: 6
-#        q_var: E3SM_ATM/prognostic/3d/Q
-#        sp_var: E3SM_ATM/prognostic/2d/PS
-#        precip_var: E3SM_ATM/diagnostic/2d/PRECT
-#        evapor_var: E3SM_ATM/diagnostic/2d/QFLX
+    mass_fixer: # before the energy fixer, which integrates over the corrected PS
+      type: global_mass_fixer
+      args:
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        q_var: E3SM_ATM/prognostic/3d/Q
+        sp_var: E3SM_ATM/prognostic/2d/PS
+
+    water_fixer: # rescales PRECT to close the global water budget; PRECT is not fed back, so it only
+                 # changes the delivered precipitation. On the truth (scripts/fixer_truth_check.py, 60 samples)
+                 # the factor is 1.0004 on average with a 3.6% step-to-step spread (instantaneous fields).
+      type: global_water_fixer
+      args:
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        q_var: E3SM_ATM/prognostic/3d/Q
+        sp_var: E3SM_ATM/prognostic/2d/PS
+        precip_var: E3SM_ATM/diagnostic/2d/PRECT
+        evapor_var: E3SM_ATM/diagnostic/2d/QFLX
+        precip_units: "m s-1"         # PRECT is a liquid-water depth rate
+        evapor_units: "kg m-2 s-1"    # QFLX is a mass flux, positive-down (as the fixer expects)
 
 
     energy_fixer_net:
@@ -776,6 +786,8 @@ loss:
     # Data diagnostic variables are always scored; postblock-computed
     # diagnostics (e.g. from mslp_diagnostic) only when true.
     include_computed_diagnostics: false
+    pred_key: y_processed_raw         # train on the prediction before the budget fixers (postblocks snapshot_raw)
+    valid_pred_key: y_processed       # validate and select checkpoints on the fixed one; also logs valid_loss_raw
     use_latitude_weights: True        # cos(lat) spatial weighting per variable
     latitude_weights: &lat_weights_file "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
 
