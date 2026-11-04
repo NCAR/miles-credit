@@ -29,7 +29,8 @@ from credit.datasets.gen_1.load_dataset_and_dataloader import load_dataset, load
 
 from credit.metrics import LatWeightedMetrics
 from credit.metrics_downscaling import UnWeightedMetrics
-from credit.pbs import launch_script, launch_script_mpi, sync_run_config
+from credit.pbs import launch_script, launch_script_mpi
+from credit.run_config import sync_run_config
 from credit.models import load_model
 from credit.models.checkpoint import (
     FSDPOptimizerWrapper,

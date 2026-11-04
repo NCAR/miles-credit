@@ -16,9 +16,9 @@ from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
-from credit.pbs import sync_run_config
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
 from credit.preblock.scaler import combine_scaler_dicts, move_scaler_dict_to_cpu
+from credit.run_config import sync_run_config
 from credit.seed import seed_everything
 from credit.trainers.utils import cycle, effective_mode, load_dataloader, load_dataset
 
@@ -214,8 +214,8 @@ Examples:
     if rank == 0:
         sync_run_config(args.model_config, save_loc)
 
-    # Write the channel schema alongside the scaler. Always refreshed (unlike
-    # model.yml) so a re-run after a config change never leaves a stale layout;
+    # Write the channel schema alongside the scaler. Like model.yml (synced above), it is
+    # refreshed on every run so a re-run after a config change never leaves a stale layout;
     # inference reads this file to reconstruct diagnostics, which never appear
     # in target-less batches. Training re-derives and re-validates it anyway.
     if rank == 0:

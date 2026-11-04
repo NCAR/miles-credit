@@ -22,7 +22,7 @@ import yaml
 from credit.distributed import distributed_model_wrapper_gen2, get_rank_info, select_device, setup
 from credit.losses import effective_loss_name, is_crps_loss
 from credit.models import load_model
-from credit.pbs import sync_run_config
+from credit.run_config import sync_run_config
 from credit.seed import seed_everything
 from credit.trainers import load_trainer
 from credit.trainers.utils import (

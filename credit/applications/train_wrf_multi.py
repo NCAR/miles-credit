@@ -27,7 +27,8 @@ from credit.trainers import load_trainer
 from credit.parser import credit_main_parser
 
 from credit.metrics import LatWeightedMetrics
-from credit.pbs import launch_script, launch_script_mpi, sync_run_config
+from credit.pbs import launch_script, launch_script_mpi
+from credit.run_config import sync_run_config
 from credit.models import load_model
 from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO
 

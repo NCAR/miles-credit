@@ -38,7 +38,7 @@ import subprocess
 
 from credit.cli._common import _PERLMUTTER_ENV_SETUP
 from credit.conda_env import torchrun_path
-from credit.pbs import sync_run_config
+from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
 
