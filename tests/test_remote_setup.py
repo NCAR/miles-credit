@@ -92,3 +92,26 @@ def test_flags_turn_features_off(env, flag):  # noqa: F811
     assert run_cli("--root", str(d), "--yes", flag, "--policy-file", str(policy)).returncode == 0
     data = yaml.safe_load(policy.read_text())
     assert data["redact"] is (flag != "--no-redact") and data["audit"] is (flag != "--no-audit")
+
+
+def test_budget_flags_write_a_budgets_block_that_survives_reruns(env):  # noqa: F811
+    d = env["home"] / "CREDIT_runs"
+    d.mkdir()
+    policy = env["home"] / ".credit" / "remote.yaml"
+    base = ("--root", str(d), "--yes", "--policy-file", str(policy))
+    r = run_cli(*base, "--max-gpu-hours-per-plan", "200", "--max-gpu-hours-per-day", "1000.5")
+    assert r.returncode == 0, r.stderr
+    assert yaml.safe_load(policy.read_text())["budgets"] == {
+        "max_gpu_hours_per_plan": 200,
+        "max_gpu_hours_per_day": 1000.5,
+    }
+    budgets = call("hello")["policy"]["budgets"]
+    assert budgets["max_gpu_hours_per_plan"] <= 200 and budgets["max_gpu_hours_per_day"] <= 1000.5
+    # changing the folders keeps the budgets; one flag replaces only its own limit
+    assert run_cli(*base).returncode == 0
+    assert yaml.safe_load(policy.read_text())["budgets"]["max_gpu_hours_per_day"] == 1000.5
+    assert run_cli(*base, "--max-gpu-hours-per-day", "50").returncode == 0
+    assert yaml.safe_load(policy.read_text())["budgets"] == {"max_gpu_hours_per_plan": 200, "max_gpu_hours_per_day": 50}
+    for bad in ("0", "-1", "lots", "inf", "nan"):
+        r = run_cli(*base, "--max-gpu-hours-per-plan", bad)
+        assert r.returncode == 2 and "positive number" in r.stderr

@@ -54,21 +54,60 @@ def root_problem(path: str) -> str | None:
     return None
 
 
-def write_policy(path: str, roots: list, redact: bool = True, audit: bool = True) -> str:
-    """Write the policy file (mode 0600, its directory 0700), keeping any previous one as ``.bak``."""
+def write_policy(path: str, roots: list, redact: bool = True, audit: bool = True, budgets: dict | None = None) -> str:
+    """Write the policy file (mode 0600, its directory 0700), keeping any previous one as ``.bak``.
+
+    *budgets* (``max_gpu_hours_per_plan`` / ``max_gpu_hours_per_day``) is written
+    as a ``budgets:`` block when given.
+    """
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     os.chmod(directory, 0o700)
     if os.path.exists(path):
         os.replace(path, path + ".bak")
+    data = {"roots": roots, "redact": redact, "audit": audit}
+    if budgets:
+        data["budgets"] = budgets
     text = (
         "# credit-mcp may read, list and write only inside these folders (written by `credit remote-setup`).\n"
-        + yaml.safe_dump({"roots": roots, "redact": redact, "audit": audit}, sort_keys=False)
+        + yaml.safe_dump(data, sort_keys=False)
     )
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(text)
     return path
+
+
+def positive_hours(text: str):
+    """argparse type for a GPU-hour limit: a positive number."""
+    try:
+        value = float(text)
+    except ValueError:
+        value = float("nan")
+    if not (value > 0 and value != float("inf")):
+        raise argparse.ArgumentTypeError(f"{text!r} is not a positive number of GPU-hours")
+    return int(value) if value.is_integer() else value
+
+
+def _budgets(path: str, args: argparse.Namespace) -> dict | None:
+    """The ``budgets:`` block to write: the previous file's, with any limit given on the command line replaced.
+
+    Re-running setup to change the folders must not silently drop a budget.
+    """
+    given = {
+        key: getattr(args, key, None)
+        for key in ("max_gpu_hours_per_plan", "max_gpu_hours_per_day")
+        if getattr(args, key, None) is not None
+    }
+    old = None
+    try:
+        with open(path) as f:
+            old = (yaml.safe_load(f) or {}).get("budgets")
+    except (OSError, yaml.YAMLError, AttributeError):
+        pass
+    if not given:
+        return old  # kept as-is, even if invalid (credit.remote then refuses to submit)
+    return {**(old if isinstance(old, dict) else {}), **given}
 
 
 def _remote_setup(args: argparse.Namespace) -> None:
@@ -106,7 +145,11 @@ def _remote_setup(args: argparse.Namespace) -> None:
     if os.path.exists(path) and not args.yes and not _prompt_bool(f"Replace {path}?", True):
         print("Nothing written.")
         return
-    write_policy(path, roots, redact=not args.no_redact, audit=not args.no_audit)
+    budgets = _budgets(path, args)
+    write_policy(path, roots, redact=not args.no_redact, audit=not args.no_audit, budgets=budgets)
     print(f"[SUCCESS] Wrote {path}")
     for r in roots:
         print(f"  allowed: {r}")
+    if isinstance(budgets, dict):
+        for key, value in budgets.items():
+            print(f"  {key}: {value}")

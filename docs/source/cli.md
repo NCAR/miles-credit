@@ -225,6 +225,28 @@ The policy also turns on two features, unless you pass `--no-redact` or
 - masking of secrets (tokens, keys, passwords) in any text sent back
 - an audit log at `~/.credit/audit.jsonl`, with one line per call
 
+GPU-hour budgets are optional and limit what credit-mcp may submit to PBS or
+SLURM (runs on the `local` scheduler are not counted):
+
+```bash
+credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes \
+    --max-gpu-hours-per-plan 200 --max-gpu-hours-per-day 1000
+```
+
+- `--max-gpu-hours-per-plan H`: a plan estimated above `H` GPU-hours is refused
+  unless a person types its GPU-hours to confirm it.
+- `--max-gpu-hours-per-day H`: the GPU-hours submitted in any rolling 24 hours,
+  plus those a new submit would add, may not exceed `H`. This limit has no
+  override. Resubmitting a run that is already fully queued adds nothing.
+
+They are written as a `budgets:` block in `remote.yaml`. A plan whose GPU-hours
+can't be estimated (no walltime) is refused while any budget is set. When several
+policy files set a budget, the smallest value applies. A budget that isn't a
+positive number counts as 0, so nothing can be submitted until it is fixed.
+Running `credit remote-setup` again without these flags keeps the existing
+budgets. The GPU-hours actually submitted are recorded in `~/.credit/budget.jsonl`
+in your real home directory.
+
 Choosing folders is deliberately a command you run yourself. No MCP tool can
 change it. See [remote.md](remote.md).
 

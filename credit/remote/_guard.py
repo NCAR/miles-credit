@@ -8,17 +8,26 @@ remote serves::
       - /glade/work/$USER/configs
     redact: true      # mask secrets in text sent back (default true)
     audit: true       # append one line per call to $CREDIT_HOME/audit.jsonl (default true)
+    budgets:          # GPU-hour limits on ``submit`` (pbs/slurm only; default none)
+      max_gpu_hours_per_plan: 200   # above this a person must type the GPU-hours to confirm
+      max_gpu_hours_per_day: 1000   # rolling 24 h, no override
 
 Two files are read, ``~/.credit/remote.yaml`` in the account's real home
 (from the password database, so an environment change can't skip it) and
 ``$CREDIT_HOME/remote.yaml``.  Each one that sets ``roots`` narrows the result
 further; ``redact: false`` or ``audit: false`` takes effect only when no file
-says otherwise.
+says otherwise.  Each budget is the smallest any file sets, and a budget that
+is not a positive number (or an unreadable file) counts as 0, so nothing can be
+submitted until it is fixed.  The GPU-hours actually submitted are appended to
+``~/.credit/budget.jsonl`` in the real home (see :func:`record_gpu_hours`).
 """
 
+import contextlib
+import math
 import os
 import pwd
 import re
+import time
 
 import yaml
 
@@ -65,18 +74,56 @@ def _policy_files() -> list:
     return out
 
 
+BUDGET_KEYS = ("max_gpu_hours_per_plan", "max_gpu_hours_per_day")
+
+
+def _file_budgets(block) -> tuple:
+    """Return ``(limits, problems)`` for one file's ``budgets:`` block; a bad block or value becomes 0."""
+    if block is None:
+        return {}, []
+    if not isinstance(block, dict):
+        return dict.fromkeys(BUDGET_KEYS, 0.0), [f"budgets must be a mapping with {' / '.join(BUDGET_KEYS)}"]
+    unknown = [str(k) for k in block if k not in BUDGET_KEYS]
+    if unknown:  # a misspelt key must not silently mean "no limit"
+        return dict.fromkeys(BUDGET_KEYS, 0.0), [f"unknown budgets key {unknown[0]!r}"]
+    limits, problems = {}, []
+    for key in BUDGET_KEYS:
+        value = block.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            limits[key] = 0.0
+            problems.append(f"budgets.{key} must be a positive number of GPU-hours, not {value!r}")
+        else:
+            limits[key] = float(value)
+    return limits, problems
+
+
 def policy() -> dict:
-    """Merge the policy files: ``roots`` narrow in turn; ``redact``/``audit`` are true unless every file says false."""
+    """Merge the policy files: ``roots`` narrow in turn; ``redact``/``audit`` are true unless every file says false.
+
+    ``budgets`` holds the smallest limit any file sets (None where none does);
+    ``budget_errors`` says why a limit was forced to 0.
+    """
     roots = None
     flags = {"redact": [], "audit": []}
+    budgets = dict.fromkeys(BUDGET_KEYS)
+    budget_errors = []
     for path in _policy_files():
         try:
             with open(path) as f:
                 data = yaml.safe_load(f) or {}
         except (OSError, yaml.YAMLError):
-            data = {"roots": []}  # an unreadable policy fails closed
-        if not isinstance(data, dict):
+            data = None
+        if not isinstance(data, dict):  # an unreadable policy fails closed
             data = {"roots": []}
+            budgets = dict.fromkeys(BUDGET_KEYS, 0.0)
+            budget_errors.append(f"{path}: cannot be read as a YAML mapping")
+        if "budgets" in data:
+            limits, problems = _file_budgets(data["budgets"])
+            for key, value in limits.items():
+                budgets[key] = value if budgets[key] is None else min(budgets[key], value)
+            budget_errors += [f"{path}: {p}" for p in problems]
         for key in flags:
             if key in data:
                 flags[key].append(bool(data[key]))
@@ -92,8 +139,79 @@ def policy() -> dict:
         "roots": roots,
         "redact": not flags["redact"] or any(flags["redact"]),
         "audit": not flags["audit"] or any(flags["audit"]),
+        "budgets": budgets,
+        "budget_errors": budget_errors,
         "files": _policy_files(),
     }
+
+
+# ---------------------------------------------------------------------------
+# GPU-hour accounting (in the real home, so a caller's environment can't move or hide it)
+# ---------------------------------------------------------------------------
+
+BUDGET_WINDOW_S = 24 * 3600
+BUDGET_LOCK_TIMEOUT_S = 120.0
+
+
+def _budget_dir() -> str:
+    directory = os.path.join(owner_home(), ".credit")
+    if not os.path.isdir(directory):
+        os.makedirs(directory, mode=0o700, exist_ok=True)
+        os.chmod(directory, 0o700)
+    return directory
+
+
+def budget_path() -> str:
+    return os.path.join(owner_home(), ".credit", "budget.jsonl")
+
+
+@contextlib.contextmanager
+def budget_lock():
+    """Hold the exclusive budget lock, so a check and the submit it allows are not interleaved with another's.
+
+    Raises :class:`TimeoutError` after :data:`BUDGET_LOCK_TIMEOUT_S` seconds.
+    """
+    import fcntl
+
+    fd = os.open(os.path.join(_budget_dir(), "budget.lock"), os.O_WRONLY | os.O_CREAT, 0o600)
+    try:
+        deadline = time.monotonic() + BUDGET_LOCK_TIMEOUT_S
+        while True:
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("the GPU-hour budget is locked by another submit") from None
+                time.sleep(0.1)
+        yield
+    finally:
+        os.close(fd)  # releases the lock
+
+
+def used_gpu_hours(now: float | None = None) -> float:
+    """GPU-hours recorded in :func:`budget_path` over the last 24 h (a line with an unreadable time counts)."""
+    now = time.time() if now is None else now
+    total = 0.0
+    for _, _, line in runs.read_lines(budget_path())[0]:
+        hours = line.get("gpu_hours") if isinstance(line, dict) else None
+        if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not math.isfinite(hours):
+            continue
+        ts = runs.parse_ts(line.get("ts"))
+        if ts is None or ts > now - BUDGET_WINDOW_S:
+            total += hours
+    return round(total, 4)
+
+
+def record_gpu_hours(run_id: str, gpu_hours: float) -> None:
+    """Append ``{ts, run_id, gpu_hours}`` to :func:`budget_path` (created 0600, its directory 0700)."""
+    _budget_dir()
+    line = runs.encode_line({"ts": runs.now_ts(), "run_id": run_id, "gpu_hours": round(float(gpu_hours), 4)})
+    fd = os.open(budget_path(), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, line)
+    finally:
+        os.close(fd)
 
 
 def redact(text):
@@ -143,6 +261,7 @@ _AUDIT_KEYS = (
     "cluster",
     "page",
     "name",
+    "confirm_gpu_hours",
 )
 
 

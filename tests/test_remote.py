@@ -662,6 +662,124 @@ def test_plan_config_errors(env):
     assert call("plan", rt, check_ok=False)["error"]["code"] == "config_error"
 
 
+INJECTIONS = ["x\nqsub /glade/work/u/big.pbs", "x; rm -rf ~", "x $(id)", "x`id`", "x y", "-lselect=9", ""]
+
+
+@pytest.mark.parametrize(
+    "key, values",
+    [
+        ("account", INJECTIONS),
+        ("queue", INJECTIONS + ["main -l select=9", "main@desched1@x"]),
+        ("gpu_type", INJECTIONS + ["a100:ngpus=64"]),
+        ("qos", INJECTIONS),
+        ("constraint", INJECTIONS + ["gpu\n#SBATCH --nodes=64"]),
+        ("mem", INJECTIONS + ["64GB:ngpus=64", "64GB\n#PBS -l select=9"]),
+        ("conda_env", INJECTIONS + ["/opt/env\nqsub big.pbs", "/opt/env && qsub x"]),
+        ("init_time", INJECTIONS + ["2024-01-15T00\nqsub x", "2024-01-15 00"]),
+        ("launcher", INJECTIONS + ["srun"]),
+        ("resume_from", INJECTIONS + ["train-20260101T000000-abcd\nqsub x"]),
+        ("walltime", INJECTIONS + ["12:00:00\n#PBS -l select=99", "12h", "1-12:00:00", True]),
+        ("gpus", ["4", True, 0, -1, 2.5]),
+        ("nodes", ["2", 0]),
+        ("cpus", ["8"]),
+        ("chain", ["3", 0]),
+        ("jobs", [0, "2"]),
+        ("steps", ["40"]),
+        ("reload", ["yes", 1]),
+    ],
+)
+def test_plan_refuses_unsafe_option_values(env, key, values):
+    from credit import remote
+
+    cfg = make_config(env)
+    for value in values:
+        req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {key: value}}
+        with pytest.raises(remote.RemoteError) as exc:
+            remote.plan(req)
+        assert exc.value.code == "config_error" and f"options.{key}" in exc.value.message, (key, value)
+
+
+@pytest.mark.parametrize("key", ["env_setup", "modules", "torchrun", "select", "config"])
+def test_plan_refuses_unknown_option_keys(env, key):
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": {key: "x"}}
+    err = call("plan", req, check_ok=False)["error"]
+    assert err["code"] == "config_error" and f"unknown option {key!r}" in err["message"]
+    assert "config file" in err["message"]
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho\nqsub x", "options": {}}
+    assert call("plan", req, check_ok=False)["error"]["code"] == "config_error"
+
+
+def test_plan_accepts_ordinary_option_values(env):
+    from credit import remote
+
+    cfg = make_config(env)
+    opts = {
+        "account": "NAML0001",
+        "queue": "main@desched1",
+        "gpu_type": "a100_80gb",
+        "mem": "480GB",
+        "conda_env": "/glade/work/u/conda-envs/credit-2.1",
+        "walltime": "06:30:00",
+        "gpus": 4,
+        "nodes": 2,
+        "cpus": 64,
+        "chain": 2,
+        "reload": False,
+        "launcher": "pbsdsh",
+        "qos": None,
+    }
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": opts}
+    plan = remote.plan(req)["plan"]
+    assert plan["gpu_hours_estimate"] == 6.5 * 2 * 4 * 2
+    slurm = {"constraint": "gpu&hbm80g", "qos": "regular", "account": "m1234", "walltime": "1-00:00", "gpus": 4}
+    req = {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": slurm}
+    plan = remote.plan(req)["plan"]
+    assert "#SBATCH --constraint=gpu&hbm80g" in plan["jobs"][0]["script"]
+    assert plan["gpu_hours_estimate"] == 24 * 4 * len(plan["jobs"])
+
+
+@pytest.mark.parametrize(
+    "walltime, scheduler, hours",
+    [
+        ("600", "pbs", 600 / 3600),
+        ("10:00", "pbs", 10 / 60),
+        ("12:00:00", "pbs", 12),
+        (43200, "pbs", 12),  # YAML reads an unquoted 12:00:00 as base-60 seconds
+        ("600", "slurm", 10),  # minutes
+        (600, "slurm", 10),
+        ("90:30", "slurm", 90 / 60 + 30 / 3600),  # MM:SS
+        ("12:00:00", "slurm", 12),
+        ("2-00", "slurm", 48),  # D-HH
+        ("1-06:30", "slurm", 30.5),  # D-HH:MM
+        ("1-00:00:36", "slurm", 24.01),  # D-HH:MM:SS
+        ("UNLIMITED", "slurm", None),
+        ("12h", "pbs", None),
+        ("1-12:00:00", "pbs", None),
+        ("", "pbs", None),
+        (None, "slurm", None),
+        (True, "pbs", None),
+        ("1:2:3:4", "slurm", None),
+    ],
+)
+def test_walltime_hours_per_scheduler(walltime, scheduler, hours):
+    import importlib
+
+    got = importlib.import_module("credit.cli._submit")._walltime_hours(walltime, scheduler)
+    assert got == (None if hours is None else pytest.approx(hours))
+
+
+def test_slurm_estimate_reads_bare_walltime_as_minutes(env):
+    cfg = make_config(env)
+    opts = {"walltime": "600", "gpus": 4, "chain": 1}
+    slurm = call(
+        "plan", {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": opts}
+    )
+    assert slurm["plan"]["gpu_hours_estimate"] == 10 * 4
+    pbs = call("plan", {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": opts})
+    assert pbs["plan"]["gpu_hours_estimate"] == round(600 / 3600 * 4, 2)
+
+
 def test_plan_every_kind_builds_valid_scripts(env):
     cfg = make_config(env)
     for scheduler, cluster in (("pbs", "casper"), ("pbs", "derecho"), ("slurm", "perlmutter")):

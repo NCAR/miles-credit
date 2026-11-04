@@ -62,11 +62,11 @@ BANNERS = (
 
 
 class RemoteError(Exception):
-    """An application error returned in the response envelope."""
+    """An application error returned in the response envelope; *data* is optional machine-readable detail."""
 
-    def __init__(self, code: str, message: str, fix: str | None = None):
+    def __init__(self, code: str, message: str, fix: str | None = None, data: dict | None = None):
         super().__init__(message)
-        self.code, self.message, self.fix = code, message, fix
+        self.code, self.message, self.fix, self.data = code, message, fix, data
 
 
 # ---------------------------------------------------------------------------
@@ -106,8 +106,8 @@ class _TeeStderr(io.TextIOBase):
         self.stream.flush()
 
 
-def _error(code: str, message: str, fix: str | None = None) -> dict:
-    return {"ok": False, "protocol": PROTOCOL, "error": {"code": code, "message": message, "fix": fix}}
+def _error(code: str, message: str, fix: str | None = None, data: dict | None = None) -> dict:
+    return {"ok": False, "protocol": PROTOCOL, "error": {"code": code, "message": message, "fix": fix, "data": data}}
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +209,7 @@ def hello(req: dict) -> dict:
     import shutil
 
     pbs = shutil.which(runs.scheduler_bin("qstat", "pbs"))
+    pol = _guard.policy()
     return {
         "protocol": PROTOCOL,
         "credit_version": _credit_version(),
@@ -223,12 +224,22 @@ def hello(req: dict) -> dict:
         "repo_root": _repo_root(),
         "policy": {
             "configured": runs.policy_configured(),
-            "files": _guard.policy()["files"],
-            "redact": _guard.policy()["redact"],
-            "audit": _guard.policy()["audit"],
+            "files": pol["files"],
+            "redact": pol["redact"],
+            "audit": pol["audit"],
+            "budgets": pol["budgets"],
+            "budget_errors": pol["budget_errors"],
+            "used_gpu_hours_24h": _used_gpu_hours(),
             "setup_command": SETUP_COMMAND,
         },
     }
+
+
+def _used_gpu_hours() -> float | None:
+    try:
+        return _guard.used_gpu_hours()
+    except OSError:
+        return None
 
 
 def sync(req: dict) -> dict:
@@ -595,14 +606,92 @@ def submit(req: dict) -> dict:
     request = req.get("request")
     if not isinstance(request, dict):
         raise RemoteError("bad_request", "'request' (the plan's echoed request) is required")
+    confirm = req.get("confirm_gpu_hours")
+    if confirm is not None and (isinstance(confirm, bool) or not isinstance(confirm, (int, float))):
+        raise RemoteError("bad_request", "confirm_gpu_hours must be a number (the GPU-hours a person typed)")
+    args = (request, req.get("scripts_sha256") or [], req.get("config_sha256"), req.get("created_by") or "mcp")
+    pol = _guard.policy()
+    budgeted = pol["budget_errors"] or any(v is not None for v in pol["budgets"].values())
     try:
-        return _submit._submit_plan(
-            request, req.get("scripts_sha256") or [], req.get("config_sha256"), req.get("created_by") or "mcp"
-        )
+        if not budgeted or (request.get("scheduler") or "pbs") == "local":
+            return _submit._submit_plan(*args)
+        return _submit_within_budget(_submit, args, pol, confirm)
     except _submit.SubmitConflict as exc:
         raise RemoteError("conflict", str(exc), fix="plan again and approve the new plan") from exc
     except _submit.SubmitError as exc:
         raise RemoteError("config_error", str(exc)) from exc
+
+
+def _submit_within_budget(_submit, args: tuple, pol: dict, confirm) -> dict:
+    """:func:`submit` for pbs/slurm when a GPU-hour budget is configured (see ``budgets`` in ``_guard``)."""
+    request = args[0]
+    if pol["budget_errors"]:
+        raise RemoteError(
+            "over_budget",
+            "the GPU-hour budget in remote.yaml is invalid, so nothing may be submitted: "
+            + "; ".join(pol["budget_errors"]),
+            fix="fix the budgets block in the policy file, e.g. with `credit remote-setup --max-gpu-hours-per-day N`",
+            data={"kind": "invalid", "estimate": None, "limit": 0},
+        )
+    if not request.get("run_id"):
+        raise _submit.SubmitError("submit needs request.run_id (from the plan)")
+    plan = _submit._plan(request)
+    estimate, n_jobs = plan["gpu_hours_estimate"], len(plan["jobs"])
+    if estimate is None or not n_jobs:
+        raise RemoteError(
+            "over_budget",
+            "GPU-hours can't be estimated for this plan (no walltime), so it can't be checked against the budget",
+            fix="set a walltime (options.walltime, or walltime in the config's pbs/slurm block) and plan again",
+            data={"kind": "no_estimate", "estimate": None, "limit": None},
+        )
+    per_plan, per_day = pol["budgets"]["max_gpu_hours_per_plan"], pol["budgets"]["max_gpu_hours_per_day"]
+    if per_plan is not None and estimate > per_plan and not (confirm is not None and confirm >= estimate):
+        raise RemoteError(
+            "over_budget",
+            f"this plan is estimated at {estimate:g} GPU-hours, over the per-plan limit of {per_plan:g} GPU-hours",
+            fix=f"a person has to confirm the GPU-hours: they type {estimate:g} to approve the plan "
+            "(sent as confirm_gpu_hours); or plan a smaller run",
+            data={"kind": "per_plan", "estimate": estimate, "limit": per_plan},
+        )
+    per_job = estimate / n_jobs
+    with contextlib.ExitStack() as held:
+        try:
+            held.enter_context(_guard.budget_lock())
+        except TimeoutError as exc:  # before OSError: TimeoutError is one
+            raise RemoteError("conflict", str(exc), fix="retry in a minute") from None
+        except OSError as exc:
+            raise RemoteError("over_budget", f"cannot open the GPU-hour ledger: {exc}") from None
+        # Jobs already submitted (or with an outcome-less intent) are not submitted again, so they cost nothing.
+        intents, before = _submit._submit_progress(plan["run_dir"])
+        new_jobs = [j for j in plan["jobs"] if j["index"] not in before and j["index"] not in intents]
+        new_hours = per_job * len(new_jobs)
+        if per_day is not None and new_jobs:
+            try:
+                used = _guard.used_gpu_hours()
+            except OSError as exc:
+                raise RemoteError("over_budget", f"cannot read the GPU-hour ledger: {exc}") from None
+            if used + new_hours > per_day + 1e-9:
+                raise RemoteError(
+                    "over_budget",
+                    f"this submit adds {new_hours:g} GPU-hours to the {used:g} submitted in the last 24 hours, "
+                    f"over the daily limit of {per_day:g} GPU-hours",
+                    fix="wait for earlier submissions to leave the 24-hour window, or plan a smaller run; "
+                    "the daily limit has no override",
+                    data={
+                        "kind": "per_day",
+                        "estimate": estimate,
+                        "limit": per_day,
+                        "new_gpu_hours": round(new_hours, 4),
+                        "used_gpu_hours_24h": used,
+                    },
+                )
+        try:
+            return _submit._submit_plan(*args)
+        finally:
+            _, after = _submit._submit_progress(plan["run_dir"])
+            newly = len(set(after) - set(before))
+            if newly:
+                _guard.record_gpu_hours(plan["run_id"], per_job * newly)
 
 
 def _in_static_scope(path: str) -> str:
@@ -972,7 +1061,7 @@ def main(argv: list | None = None) -> int:
             result = VERBS[verb](req)
         response = {"ok": True, "protocol": PROTOCOL, "result": result}
     except RemoteError as exc:
-        response = _error(exc.code, exc.message, exc.fix)
+        response = _error(exc.code, exc.message, exc.fix, exc.data)
     except runs.PathScopeError as exc:
         fix = None
         if not runs.policy_configured():

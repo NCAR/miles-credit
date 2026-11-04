@@ -1610,15 +1610,98 @@ _PLAN_OPTION_DEFAULTS = {
 _NOT_OPTIONS = ("resume_from", "config", "cluster", "scheduler", "torchrun", "dry_run", "created_by")
 
 
-def _walltime_hours(walltime) -> float | None:
-    try:
-        parts = [float(p) for p in str(walltime).split(":")]
-    except ValueError:
+_PBS_WALLTIME = re.compile(r"(\d+)(?::(\d+))?(?::(\d+))?")  # [[HH:]MM:]SS
+_SLURM_DAYS = re.compile(r"(\d+)-(\d+)(?::(\d+))?(?::(\d+))?")  # D-HH, D-HH:MM, D-HH:MM:SS
+_SLURM_TIME = re.compile(r"(\d+)(?::(\d+))?(?::(\d+))?")  # MM, MM:SS, HH:MM:SS
+
+
+def _walltime_hours(walltime, scheduler: str = "pbs") -> float | None:
+    """Hours in a walltime as *scheduler* reads it, or None if it doesn't parse.
+
+    PBS reads ``[[HH:]MM:]SS``, so a bare ``600`` is seconds.  SLURM reads
+    ``MM``, ``MM:SS``, ``HH:MM:SS``, ``D-HH``, ``D-HH:MM`` and ``D-HH:MM:SS``,
+    so a bare ``600`` is minutes.
+    """
+    if walltime is None or isinstance(walltime, bool):
         return None
+    text = str(walltime).strip()
+    if scheduler == "slurm":
+        m = _SLURM_DAYS.fullmatch(text)
+        if m:
+            d, h, mi, sec = (int(g or 0) for g in m.groups())
+            return d * 24 + h + mi / 60 + sec / 3600
+        m = _SLURM_TIME.fullmatch(text)
+        if not m:
+            return None
+        parts = [int(g) for g in m.groups() if g is not None]
+        if len(parts) == 1:
+            return parts[0] / 60
+        if len(parts) == 2:
+            return parts[0] / 60 + parts[1] / 3600
+        return parts[0] + parts[1] / 60 + parts[2] / 3600
+    m = _PBS_WALLTIME.fullmatch(text)
+    if not m:
+        return None
+    parts = [int(g) for g in m.groups() if g is not None]
     while len(parts) < 3:
-        parts.insert(0, 0.0)
-    h, m, sec = parts[-3:]
-    return h + m / 60 + sec / 3600
+        parts.insert(0, 0)
+    h, mi, sec = parts
+    return h + mi / 60 + sec / 3600
+
+
+# What a plan request's ``options`` may hold.  Every value ends up in a batch
+# script (a ``#PBS``/``#SBATCH`` directive or a shell line), and the GPU-hour
+# estimate only sees the resolved target, so values are checked strictly:
+# nothing may add a directive, a chunk or a command.  ``env_setup``/``modules``
+# and other script lines come only from the config file.
+_INT_OPTIONS = ("gpus", "nodes", "cpus", "chain", "jobs", "steps")
+_NAME = r"[A-Za-z0-9_][A-Za-z0-9_.-]*"
+_STRING_OPTIONS = {
+    "account": re.compile(_NAME),
+    "queue": re.compile(rf"{_NAME}(?:@{_NAME})?"),
+    "gpu_type": re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]*"),
+    "qos": re.compile(_NAME),
+    "constraint": re.compile(r"[A-Za-z0-9_][A-Za-z0-9_&|-]*"),  # SLURM features, e.g. gpu&hbm80g
+    "mem": re.compile(r"\d+(?:\.\d+)?(?:[KMGTP]i?)?B?", re.IGNORECASE),
+    "conda_env": re.compile(r"[A-Za-z0-9_./+][A-Za-z0-9_./+-]*"),
+    "init_time": re.compile(r"\d{4}-\d{2}-\d{2}(?:T\d{2}(?::\d{2}(?::\d{2})?)?)?"),
+    "launcher": re.compile(r"mpiexec|pbsdsh"),
+    "resume_from": re.compile(r"[a-z]+-\d{8}T\d{6}-[0-9a-f]{4}"),
+}
+
+
+def _check_plan_options(options, scheduler: str) -> None:
+    """Refuse a plan request's ``options`` unless every key is known and every value is safe to template.
+
+    Raises :class:`SubmitError`.  ``None`` means "the default" for any key.
+    """
+    if not isinstance(options, dict):
+        raise SubmitError("options must be a mapping")
+    unknown = sorted(str(k) for k in options if k not in _PLAN_OPTION_DEFAULTS)
+    if unknown:
+        raise SubmitError(
+            f"unknown option {unknown[0]!r}; expected one of {', '.join(sorted(_PLAN_OPTION_DEFAULTS))} "
+            "(anything else, such as env_setup or modules, goes in the config file)"
+        )
+    for key, value in options.items():
+        if value is None:
+            continue
+        if key in _INT_OPTIONS:
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise SubmitError(f"options.{key} must be a whole number of at least 1, not {value!r}")
+        elif key == "reload":
+            if not isinstance(value, bool):
+                raise SubmitError(f"options.reload must be true or false, not {value!r}")
+        elif key == "walltime":
+            hours = None if isinstance(value, bool) else _walltime_hours(value, scheduler)
+            if not isinstance(value, (str, int)) or hours is None:
+                form = "MM, MM:SS, HH:MM:SS or D-HH[:MM[:SS]]" if scheduler == "slurm" else "[[HH:]MM:]SS"
+                raise SubmitError(f"options.walltime must be a {scheduler} walltime ({form}), not {value!r}")
+        elif not isinstance(value, str) or not _STRING_OPTIONS[key].fullmatch(value):
+            raise SubmitError(
+                f"options.{key} {str(value)[:80]!r} is not allowed: it must be a plain {key.replace('_', ' ')} "
+                "(no spaces, newlines, shell characters or extra directives)"
+            )
 
 
 def _last_csv_epoch(save_loc: str) -> int | None:
@@ -1737,6 +1820,9 @@ def _plan(request: dict) -> dict:
     scheduler = request.get("scheduler") or "pbs"
     if scheduler not in ("pbs", "slurm", "local"):
         raise SubmitError(f"unknown scheduler {scheduler!r}; expected pbs, slurm or local")
+    _check_plan_options(request.get("options") or {}, scheduler)
+    if request.get("cluster") is not None and not re.fullmatch(r"[a-z][a-z0-9_-]*", str(request["cluster"])):
+        raise SubmitError(f"unknown cluster {str(request['cluster'])[:40]!r}")
     options = {**_PLAN_OPTION_DEFAULTS, **(request.get("options") or {})}
     source_config, data, conf, parent = _load_plan_config(request)
     if parent is not None and kind != "train":
@@ -1835,7 +1921,7 @@ def _plan(request: dict) -> dict:
         for job in jobs:
             job["script"] = _with_run_record(job["script"], run, scheduler)
 
-    hours = _walltime_hours(target.get("walltime"))
+    hours = _walltime_hours(target.get("walltime"), scheduler)
     gpu_hours = None
     if scheduler != "local" and hours is not None and target.get("gpus"):
         gpu_hours = round(hours * int(target.get("nodes") or 1) * int(target["gpus"]) * len(jobs), 2)
