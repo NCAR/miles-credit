@@ -377,6 +377,43 @@ def test_csv_delta_settle_rows_and_reset(tmp_path):
     assert d["reset"]
 
 
+def test_a_new_run_starts_after_the_csv_rows_already_in_save_loc(env):
+    """Trial S4: a run in a save_loc with an earlier run's training_log.csv showed that run's epochs as its own."""
+    save = env["home"] / "exp" / "save"
+    save.mkdir(parents=True)
+    csv_path = save / "training_log.csv"
+    csv_path.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n")  # the previous run's two epochs
+    old = time.time() - 60
+    os.utime(csv_path, (old, old))
+    run_id, run_dir, _ = make_run(env, save=save)
+    assert runs.read_run(run_dir)["csv_baseline"]["rows"] == 2
+    d = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d["csv"] is None  # nothing of its own yet
+    with open(csv_path, "a") as f:  # resumed training appends
+        f.write("2,2,1.1\n")
+    os.utime(csv_path, (old + 1, old + 1))
+    d = call("sync", {"runs": {run_id: d["cursor"]}, "scheduler": False})["runs"][run_id]
+    assert d["csv"]["rows"] == [[2.0, 2.0, 1.1]] and not d["csv"]["reset"]
+    # A fresh (non-reload) run rewrites the file: every row is its own.
+    run2, _, _ = make_run(env, save=save)
+    csv_path.write_text("index,epoch,train_loss\n0,0,9.9\n1,1,9.1\n2,2,8.8\n")
+    os.utime(csv_path, (old + 2, old + 2))
+    d = call("sync", {"runs": {run2: None}, "scheduler": False})["runs"][run2]
+    assert d["csv"]["reset"] and [r[2] for r in d["csv"]["rows"]] == [9.9, 9.1, 8.8]
+
+
+def test_adopt_keeps_the_csv_history(env):
+    save = env["home"] / "old_run"
+    save.mkdir()
+    (save / "model.yml").write_text("save_loc: x\ntrainer: {epochs: 10, num_epoch: 5}\n")
+    (save / "training_log.csv").write_text("index,epoch,train_loss\n0,0,1.5\n")
+    os.utime(save / "training_log.csv", (time.time() - 60, time.time() - 60))
+    out = call("adopt", {"save_loc": str(save), "scheduler": "pbs"})
+    assert "csv_baseline" not in runs.read_run(out["run_dir"])
+    d = call("sync", {"runs": {out["run_id"]: None}, "scheduler": False})["runs"][out["run_id"]]
+    assert d["csv"]["rows"] == [[0.0, 0.0, 1.5]]
+
+
 def test_sync_cursor_resume_no_duplicates_no_gaps(env):
     run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
     proc = os.path.join(run_dir, "events", "11.proc.jsonl")

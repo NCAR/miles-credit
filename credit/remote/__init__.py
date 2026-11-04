@@ -758,6 +758,7 @@ def adopt(req: dict) -> dict:
         name=req.get("name"),
         epochs_total=trainer.get("epochs") if kind == "train" else None,
         epochs_per_job=trainer.get("num_epoch") if kind == "train" else None,
+        csv_baseline=False,  # an adopted run's training_log.csv rows are its own history
     )
     run_dir = runs.run_dir_for(save_loc, run_id)
     for i, jid in enumerate(job_ids, 1):

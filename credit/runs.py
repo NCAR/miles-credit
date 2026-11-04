@@ -345,6 +345,7 @@ def create_run(
     parent_run_id: str | None = None,
     config_bytes: bytes | None = None,
     exist_ok: bool = False,
+    csv_baseline: bool = True,
 ) -> dict:
     """Create the run directory, snapshot the config, write ``run.json``, and append to the ledger.
 
@@ -399,10 +400,35 @@ def create_run(
     }
     if parent_run_id:
         record["parent_run_id"] = parent_run_id
+    if csv_baseline:
+        # Rows already in <save_loc>/training_log.csv belong to earlier runs there; the delta starts after them.
+        record["csv_baseline"] = csv_marker(os.path.join(save_loc, "training_log.csv"))
     write_run(run_dir, record)
     append_ledger(_ledger_entry(record, run_dir))
     append_event(run_dir, SUBMIT_EVENTS, make_event("run.created", {"kind": kind, "created_by": created_by}, "submit"))
     return record
+
+
+def csv_marker(path: str) -> dict | None:
+    """``{"rows", "header_sha", "first_row_sha"}`` of a ``training_log.csv`` as it is now, or None if absent.
+
+    A later reader treats these rows as seen: if the file then grows they are skipped, and if it was rewritten
+    (another header or first row, or fewer rows) every row is new."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    lines = data.split(b"\n")
+    if data.endswith(b"\n"):
+        lines = lines[:-1]
+    if not lines:
+        return None
+    return {
+        "rows": max(0, len(lines) - 1),
+        "header_sha": hashlib.sha256(lines[0]).hexdigest(),
+        "first_row_sha": hashlib.sha256(lines[1]).hexdigest() if len(lines) > 1 else None,
+    }
 
 
 def write_script(run_dir: str, index: int, text: str) -> str:

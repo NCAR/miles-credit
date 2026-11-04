@@ -363,8 +363,9 @@ def run_delta(
 
     save_loc = (record or {}).get("save_loc") or entry.get("save_loc")
     if save_loc:
+        # A new run starts after the rows its save_loc already had (runs.csv_baseline); later cursors take over.
         delta["csv"], csv_cur, delta["csv_pending"] = read_csv_delta(
-            os.path.join(save_loc, "training_log.csv"), cursor.get("csv")
+            os.path.join(save_loc, "training_log.csv"), cursor.get("csv") or (record or {}).get("csv_baseline")
         )
         if csv_cur:
             cursor["csv"] = csv_cur
