@@ -339,9 +339,13 @@ Examples:
         for scaler_key in scaler_block_keys:
             processed_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=scaler_key)
             preblocks[scaler_key].fit_scaler_batch(processed_batch)
+        # Expanded by the scaler fits above; grid-wise variables keep that layout here.
+        spatial_variables = [v for k in scaler_block_keys for v in preblocks[k].spatial_variables]
         for log_key in log_block_keys:
             pre_log_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=log_key)
-            fitted = fit_physical_target_stats(preblocks[log_key], pre_log_batch, physical_stats.get(log_key))
+            fitted = fit_physical_target_stats(
+                preblocks[log_key], pre_log_batch, physical_stats.get(log_key), spatial_variables
+            )
             if fitted is not None:
                 physical_stats[log_key] = fitted
     del dl  # iterator lives only here; refcount → 0, workers shut down immediately

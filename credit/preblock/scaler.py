@@ -26,17 +26,24 @@ def physical_stats_path(scaler_path: str) -> str:
     return f"{root}_physical{ext or '.json'}"
 
 
-def fit_physical_target_stats(log_block, batch: dict, accumulated: dict | None = None) -> dict | None:
+def fit_physical_target_stats(
+    log_block, batch: dict, accumulated: dict | None = None, spatial_variables: list | None = None
+) -> dict | None:
     """Fit standard scalers on the target variables a ``LogTransform`` block log-transforms.
 
     ``batch`` is the batch as it reaches ``log_block`` (still in physical units).
+    ``spatial_variables`` are the full keys a scaler preblock scales per grid point;
+    those are fit per grid point here too, so their level-mean variance is the mean
+    of each point's variance over time, as for their log-space scaler, rather than
+    a variance pooled over the whole map.
     Returns ``{"target": {source: {var_key: scaler}}}`` merged into ``accumulated``,
     or ``accumulated`` unchanged when the block transforms no target variables.
     """
     if "target" not in log_block.data_types or "target" not in batch:
         return accumulated
     variables = _parse_variable_selection(log_block.variables, batch, ["target"])
-    fitted = scale_var_dict({"target": batch["target"]}, DStandardScalerTensor(channels_last=False), "fit", variables)
+    fit_batch, _ = _flatten_spatial_tensors({"target": batch["target"]}, spatial_variables or [])
+    fitted = scale_var_dict(fit_batch, DStandardScalerTensor(channels_last=False), "fit", variables)
     fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
     if not fitted["target"]:
         return accumulated

@@ -199,7 +199,10 @@ a standard scaler on each log-transformed target variable *before* the log
 transform and saves it next to the scaler file as `<scaler>_physical.json`
 (e.g. `scaler.json` → `scaler_physical.json`). `load_loss` reads the
 `exp_transform` postblocks from the config and weights those variables by the
-exact physical-unit variance from that file. The choice is logged at startup, and
+exact physical-unit variance from that file. A variable the scaler scales per grid
+point (`spatial_variables`) is fit per grid point there too, so its weight uses the
+mean of each point's variance, like the other grid-wise variables, rather than a
+variance pooled over the whole map. The choice is logged at startup, and
 the same applies to metrics. Remove any `variable_weights` you added to
 hand-correct these variables' units, or they apply twice.
 
