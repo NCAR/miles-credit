@@ -457,8 +457,6 @@ class TrainerERA5Gen2(BaseTrainer):
 
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
                 _collect_fixer_diagnostics(fixer_logs, full_data_dict)
-                if t < self.forecast_len:
-                    self._gather_for_next_step(full_data_dict)
 
                 if t in self.backprop_on_timestep:
                     if isinstance(criterion, BaseLoss):
@@ -484,6 +482,11 @@ class TrainerERA5Gen2(BaseTrainer):
                             target = torch.repeat_interleave(target, self.ensemble_size, 0)
                         accum_log(logs, {"std": (full_data_dict["y_pred"] - target).detach().std().item()})
                     scaler.scale(loss / grad_accum_every).backward(retain_graph=self.retain_graph)
+                # Seed the next step only after this step's loss: the boundary detach
+                # replaces y_processed's tensors in place, so a BaseLoss scoring
+                # y_processed at an intermediate step would otherwise see no gradient.
+                if t < self.forecast_len:
+                    self._gather_for_next_step(full_data_dict)
                 # No barrier here: NCCL collectives (grad sync, halo exchange)
                 # already order ranks; a per-timestep barrier only adds latency.
 

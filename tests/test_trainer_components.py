@@ -852,6 +852,96 @@ class TestERA5Gen2MultiStepTraining:
 
 
 # ---------------------------------------------------------------------------
+# Multi-step training with BaseLoss, scoring before or after the budget fixers
+# ---------------------------------------------------------------------------
+
+_SHIFT = 10.0
+
+
+class _ShiftFixer(nn.Module):
+    """Stand-in for a global budget fixer: replaces every y_processed tensor with a shifted one."""
+
+    def forward(self, batch):
+        batch["y_processed"] = {
+            src: {k: v + _SHIFT for k, v in variables.items()} for src, variables in batch["y_processed"].items()
+        }
+        return batch
+
+
+def _baseloss_multistep(tmp_path, monkeypatch, pred_key, backprop_on_timestep=None):
+    """2-step trainer with reconstruct -> snapshot -> shift fixer, and a BaseLoss that records what it scores."""
+    from credit.losses.base import BaseLoss
+    from credit.postblock import _POSTBLOCK_REGISTRY
+    from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+
+    monkeypatch.setitem(_POSTBLOCK_REGISTRY, "_test_shift_fixer", _ShiftFixer)
+    conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+    conf["postblocks"] = {
+        "per_step": {
+            "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+            "snapshot_raw": {"type": "snapshot", "args": {"key": "y_processed", "out_key": "y_processed_raw"}},
+            "fixer": {"type": "_test_shift_fixer"},
+            "reconstruct_target": {"type": "reconstruct", "args": {"in_key": "y", "out_key": "y_target_processed"}},
+        }
+    }
+    if backprop_on_timestep is not None:
+        conf["trainer"]["backprop_on_timestep"] = backprop_on_timestep
+
+    captured = {"x": [], "out": [], "scored": []}
+
+    class _CapturingModel(_ScaleModel):
+        def forward(self, x):
+            out = super().forward(x)
+            captured["x"].append(x.detach().clone())
+            captured["out"].append(out.detach().clone())
+            return out
+
+    class _RecordingLoss(BaseLoss):
+        def forward(self, full_data_dict, pred_key=None):
+            pred = full_data_dict[pred_key or self.pred_key]["era5"]
+            captured["scored"].append(torch.cat([pred[f"era5/prognostic/2d/v{i}"] for i in range(4)], 1).detach())
+            return super().forward(full_data_dict, pred_key)
+
+    trainer = Trainer(_CapturingModel(), rank=0, conf=conf)
+    w0 = trainer.model.w.detach().clone()
+    trainer.train_one_epoch(
+        epoch=0,
+        trainloader=_FakeLoader(1, 4, 4, 4, n_batches=2),
+        optimizer=torch.optim.SGD(trainer.model.parameters(), lr=1e-2),
+        criterion=_RecordingLoss(training_loss="mse", var_weighting="none", pred_key=pred_key),
+        scaler=torch.amp.GradScaler("cpu", enabled=False),
+        scheduler=None,
+        metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
+    )
+    return captured, (trainer.model.w.detach() - w0).abs().item()
+
+
+class TestBaseLossMultiStep:
+    """forecast_len > 1 with BaseLoss: every step backpropagates, and the fixed state rolls forward."""
+
+    @pytest.mark.parametrize("pred_key", ["y_processed", "y_processed_raw"])
+    def test_intermediate_step_backpropagates(self, tmp_path, monkeypatch, pred_key):
+        # Only step 1 is scored, so a step-1 loss on detached tensors (the boundary
+        # detach running before the loss) would raise or leave the weights unmoved.
+        _, moved = _baseloss_multistep(tmp_path, monkeypatch, pred_key, backprop_on_timestep=[1])
+        assert moved > 0
+
+    def test_raw_loss_scores_before_the_fixer_and_rolls_the_fixed_state(self, tmp_path, monkeypatch):
+        captured, moved = _baseloss_multistep(tmp_path, monkeypatch, "y_processed_raw")
+        assert moved > 0
+        assert len(captured["scored"]) == 2
+        for step in range(2):  # each step's loss saw the raw model output, not the shifted one
+            torch.testing.assert_close(captured["scored"][step], captured["out"][step])
+        # step 2's input is step 1's prediction after the fixer
+        torch.testing.assert_close(captured["x"][1], captured["out"][0] + _SHIFT)
+
+    def test_fixed_loss_scores_after_the_fixer(self, tmp_path, monkeypatch):
+        captured, _ = _baseloss_multistep(tmp_path, monkeypatch, "y_processed")
+        for step in range(2):
+            torch.testing.assert_close(captured["scored"][step], captured["out"][step] + _SHIFT)
+
+
+# ---------------------------------------------------------------------------
 # assemble_rollout_batch — direct unit tests
 # ---------------------------------------------------------------------------
 
