@@ -306,6 +306,33 @@ close the budget. They read the t0 state from `batch_dict[input_source_key]`
 grid, or `[lon2d, lat2d, p_level]` for pressure levels), `grid_type`
 (`"sigma"` default or `"pressure"`), and `midpoint`.
 
+Each budget fixer (mass, water, energy) records the size of the correction it applied
+in `batch_dict["fixer_diagnostics"]`, keyed by its config name. The gen2 trainer logs
+these to `training_log.csv` (see [Losses](Losses.md#per-variable-logging)).
+
+**Train on the prediction before the fixers.** A fixer that rescales or shifts a
+field hides that field's raw global mean from a loss computed on its output. Put a
+`snapshot` block before the budget fixers and point `loss.args.pred_key` at it (see
+[Scoring the prediction before the fixers](Losses.md#scoring-the-prediction-before-the-fixers)).
+Run the mass fixer before the energy fixer, which integrates over the corrected
+surface pressure.
+
+### `snapshot` (Snapshot)
+
+**AutoAPI:** {py:obj}`credit.postblock.snapshot.Snapshot`
+
+Copies the prediction as it stands at that point in the chain to a second key, so
+later blocks can keep modifying `key` while `out_key` keeps the earlier version.
+Only the dict structure is copied: the tensors are shared and stay on the autograd
+graph, so it costs no memory.
+
+```yaml
+type: "snapshot"
+args:
+  key: "y_processed"          # default
+  out_key: "y_processed_raw"  # default
+```
+
 ### `tracer_fixer` (TracerFixer)
 
 **AutoAPI:** {py:obj}`credit.postblock.conservation.TracerFixer`
@@ -350,7 +377,12 @@ args:
 
 Closes the global water budget by rescaling precipitation so the column-water
 tendency plus evaporation balances precipitation over the forecast step.
-`lead_time_periods` is the step length in hours.
+`lead_time_periods` is the step length in hours. Evaporation is positive
+**downward** (negative where water leaves the surface).
+
+`precip_units` and `evapor_units` say what the two variables hold: `"m"` (default)
+is liquid-water depth accumulated over the step, `"m s-1"` a depth rate (CAM/EAM
+`PRECT`), and `"kg m-2 s-1"` a mass flux (CAM/EAM `QFLX`).
 
 ```yaml
 type: "global_water_fixer"
@@ -360,6 +392,8 @@ args:
   precip_var: "ERA5/prognostic/2d/total_precipitation"
   evapor_var: "ERA5/prognostic/2d/evaporation"
   lead_time_periods: 6
+  precip_units: "m"            # m | m s-1 | kg m-2 s-1
+  evapor_units: "m"
   save_loc_physics: "$SCRATCH/physics/ERA5_physics_grid.nc"
   lon_lat_level_name: ["lon2d", "lat2d", "a_half", "b_half"]
   grid_type: "sigma"

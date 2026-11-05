@@ -114,6 +114,8 @@ That is the minimum. The full option set:
 | `include_computed_diagnostics` | `true` | Score postblock-computed diagnostics (see below). |
 | `use_latitude_weights` | `false` | Apply cos(lat) spatial weighting per variable. |
 | `latitude_weights` | — | Path to a dataset with a `latitude` coordinate. Required when the above is true. |
+| `pred_key` | `"y_processed"` | Which prediction to score. `y_processed_raw` with a `snapshot` postblock scores it before the budget fixers; see below. |
+| `valid_pred_key` | *(pred_key)* | Which prediction validation scores (and checkpoints are selected on). |
 
 ### Choosing the univariate loss
 
@@ -336,6 +338,47 @@ this is a small distortion; if you are overriding most variables, prefer `manual
 weights you control directly.
 ```
 
+## Scoring the prediction before the fixers
+
+The global budget fixers (`global_mass_fixer`, `global_water_fixer`, the energy
+fixers) each rescale or shift one field so that a global budget closes. A loss computed
+on their output cannot see that field's raw global mean (or scale): with
+`scale_by_mass: true` the energy fixer returns `T_raw - <T_raw> + const`, so adding
+any constant to the raw temperature leaves the fixed one, and the loss, unchanged.
+Nothing then pulls the raw prediction back toward the truth in that direction. The
+fixer silently absorbs the difference, and the loss on the delivered temperature
+pushes on the fields the fixer trusts (the predicted fluxes, moisture and winds)
+instead. Chapman, Schreck & Sha (2026,
+[arXiv:2607.18416](https://arxiv.org/abs/2607.18416)) show this with a water fixer:
+the raw precipitation drifted while every delivered field closed its budget exactly.
+
+The fix is to score the prediction *before* the fixers and keep the fixers for the
+delivered field. A `snapshot` postblock copies the prediction at that point:
+
+```yaml
+postblocks:
+  per_step:
+    # ... reconstruct, scaler, square, target twin ...
+    tracer_fixer:  {type: tracer_fixer, args: {...}}
+    snapshot_raw:  {type: snapshot, args: {key: y_processed, out_key: y_processed_raw}}
+    mass_fixer:    {type: global_mass_fixer, args: {...}}
+    water_fixer:   {type: global_water_fixer, args: {...}}
+    energy_fixer:  {type: global_energy_fixer_net, args: {...}}
+
+loss:
+  type: base
+  args:
+    pred_key: y_processed_raw      # train on the raw prediction
+    valid_pred_key: y_processed    # validate (and select checkpoints) on the delivered one
+```
+
+The fixed `y_processed` still rolls forward to the next step in multi-step training
+and rollout, so the model sees corrected states as input; only the loss moves. When
+`valid_pred_key` differs from `pred_key`, validation also scores the raw prediction
+and logs it as `valid_loss_raw`. `credit check` warns when a water or energy fixer
+runs before the prediction the training loss scores, and when the mass fixer runs
+after an energy fixer.
+
 ## Per-variable logging
 
 `BaseLoss` exposes detached per-variable scores through `last_var_losses` after each
@@ -346,6 +389,24 @@ which variable is driving a plateau. The per-variable columns are controlled by
 `trainer.save_metric_vars`: `True` (the default) writes every per-variable
 column, a list of variable names writes only matching columns, and `False` (or
 `[]`) writes the combined aggregates only.
+
+Two kinds of column are written regardless of `save_metric_vars`: `valid_loss_raw`
+(above) and the conservation fixers' correction sizes,
+`train_fixer/<block>/<quantity>` and `valid_fixer/<block>/<quantity>`, where
+`<block>` is the postblock's config name. A fixer's output always closes its
+budget, so the size of the correction it had to apply is the only record of how far
+the raw prediction is from closing it:
+
+| Fixer | Quantity | Meaning |
+|---|---|---|
+| energy | `dT_K` | Mass-weighted mean temperature correction (K per step). |
+| energy | `imbalance_Wm2` | Energy the fixer added, as a global-mean flux (W m⁻²; positive = heating). |
+| mass | `ps_ratio_minus_1` | Surface-pressure scaling factor minus 1. |
+| mass | `dPS_Pa` | Change in global-mean surface pressure (Pa). |
+| water | `precip_ratio_minus_1` | Precipitation scaling factor minus 1. |
+
+They are averaged over the forecast steps of each batch and across ranks, and are
+not shown in the progress bar.
 
 ## Using a plain registry loss
 

@@ -15,6 +15,7 @@ _POSTBLOCK_REGISTRY = {
     "bridgescaler_transform": ("credit.postblock.scaler", "BridgeScalerTransform"),
     "exp_transform": ("credit.postblock.exp", "ExpTransform"),
     "square_transform": ("credit.postblock.square", "SquareTransform"),
+    "snapshot": ("credit.postblock.snapshot", "Snapshot"),
     "wet_mask_samudra": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "mslp_diagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "tracer_fixer": ("credit.postblock.conservation", "TracerFixer"),
@@ -37,6 +38,7 @@ _CLASS_SOURCES = {
     "Reconstruct": ("credit.postblock.reconstruct", "Reconstruct"),
     "FlattenToTensor": ("credit.postblock.reconstruct", "FlattenToTensor"),
     "BridgeScalerTransform": ("credit.postblock.scaler", "BridgeScalerTransform"),
+    "Snapshot": ("credit.postblock.snapshot", "Snapshot"),
     "WetMaskBlock": ("credit.postblock.wet_mask_samudra", "WetMaskBlock"),
     "MSLPDiagnostic": ("credit.postblock.mslp", "MSLPDiagnostic"),
     "TracerFixer": ("credit.postblock.gen1", "TracerFixer"),
@@ -145,6 +147,8 @@ def _build_postblock_section(section_cfg: dict) -> nn.ModuleDict:
     for name, block_cfg in section_cfg.items():
         block_type = block_cfg["type"]
         modules[name] = _load_postblock_entry(block_type)(**(block_cfg.get("args") or {}))
+        # the config name, so blocks can label what they record (e.g. fixer diagnostics)
+        modules[name].block_name = name
     return nn.ModuleDict(modules)
 
 

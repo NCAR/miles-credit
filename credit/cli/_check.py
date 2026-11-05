@@ -953,6 +953,84 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
             )
 
 
+# Global budget fixers. Each rescales or shifts one field so a global budget
+# closes, which hides that field's raw global mean (or scale) from a loss
+# computed on its output. Water and energy close *open* budgets whose target
+# depends on other predicted fields (fluxes, evaporation), so a loss on their
+# output also pushes those fields to steer the fixed one.
+_MASS_FIXERS = {"global_mass_fixer"}
+_OPEN_BUDGET_FIXERS = {
+    "global_water_fixer",
+    "global_energy_fixer",
+    "global_energy_fixer_updown",
+    "global_energy_fixer_net",
+}
+_ENERGY_FIXERS = _OPEN_BUDGET_FIXERS - {"global_water_fixer"}
+
+
+def _check_fixer_scoring(conf: dict, rep: _Report) -> None:
+    """Check which prediction BaseLoss scores relative to the budget fixers.
+
+    ``loss.args.pred_key`` / ``valid_pred_key`` must name a key some per_step
+    postblock writes (``y_processed`` or a ``snapshot`` block's ``out_key``).
+    A fixer that runs before the scored snapshot is inside the loss, and an
+    energy or water fixer inside the loss leaves the raw prediction's global
+    mean unconstrained (arXiv:2607.18416). The mass fixer should also run before
+    the energy fixer, which integrates over the corrected surface pressure.
+    """
+    per_step = _get(conf, "postblocks", "per_step", default={}) or {}
+    blocks = [(name, b) for name, b in per_step.items() if isinstance(b, dict) and "type" in b]
+    if not blocks:
+        return
+
+    # position at which each prediction key is last written
+    written = {}
+    for i, (_name, block) in enumerate(blocks):
+        if block["type"] == "snapshot":
+            written[(block.get("args") or {}).get("out_key", "y_processed_raw")] = i
+    if any(_block_output_key(b) == "y_processed" for _n, b in blocks):
+        written["y_processed"] = len(blocks)
+
+    if _get(conf, "loss", "type") == "base":
+        pred_key = _get(conf, "loss", "args", "pred_key", default="y_processed") or "y_processed"
+        valid_pred_key = _get(conf, "loss", "args", "valid_pred_key") or pred_key
+        for arg, key in (("pred_key", pred_key), ("valid_pred_key", valid_pred_key)):
+            if key not in written:
+                rep.error(
+                    f"loss.args.{arg}",
+                    f"BaseLoss scores '{key}', but no postblocks.per_step block writes it.",
+                    fix=f"Add a snapshot postblock: {{type: snapshot, args: {{out_key: {key}}}}}, "
+                    "or set the key to y_processed.",
+                )
+
+        scored_at = written.get(pred_key)
+        if scored_at is not None:
+            for name, block in blocks[:scored_at]:
+                if block["type"] in _OPEN_BUDGET_FIXERS:
+                    rep.warn(
+                        f"postblocks.per_step.{name}",
+                        f"'{block['type']}' runs before the prediction the training loss scores "
+                        f"('{pred_key}'), so the loss sees its correction: nothing then constrains the raw "
+                        "prediction's global mean of the field it fixes, and its errors push the fluxes it "
+                        "trusts instead (arXiv:2607.18416).",
+                        fix="Add a snapshot block before the fixer, e.g. "
+                        "snapshot_raw: {type: snapshot, args: {out_key: y_processed_raw}}, "
+                        "and set loss.args.pred_key: y_processed_raw.",
+                    )
+
+    names = [name for name, _b in blocks]
+    types = [b["type"] for _n, b in blocks]
+    energy_at = [i for i, t in enumerate(types) if t in _ENERGY_FIXERS]
+    for i, t in enumerate(types):
+        if t in _MASS_FIXERS and energy_at and i > min(energy_at):
+            rep.warn(
+                f"postblocks.per_step.{names[i]}",
+                "The mass fixer runs after the energy fixer, which then integrates energy over the "
+                "uncorrected surface pressure; the mass correction changes the column mass afterwards.",
+                fix="Move the mass fixer before the energy fixer.",
+            )
+
+
 def _check_trainer(conf: dict, rep: _Report) -> None:
     from credit.parallel.mesh import parse_parallelism_conf
 
@@ -1422,6 +1500,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_fixer_scoring,
             _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,

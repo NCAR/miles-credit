@@ -957,3 +957,72 @@ def test_dynamic_grad_clip_ignored_without_dynamic_warns(conf):
     conf["trainer"]["grad_max_norm"] = 1.0
     conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0}
     assert "trainer.dynamic_grad_clip" in _wheres(_run(conf), "warning")
+
+
+# ===========================================================================
+# Which prediction the loss scores relative to the budget fixers
+# ===========================================================================
+
+_ENERGY_FIXER = {
+    "type": "global_energy_fixer_net",
+    "args": {
+        "T_var": "ERA5/prognostic/3d/T",
+        "q_var": "ERA5/prognostic/3d/Q",
+        "U_var": "ERA5/prognostic/3d/T",
+        "V_var": "ERA5/prognostic/3d/T",
+        "toa_net_solar_var": "ERA5/diagnostic/2d/TP",
+        "toa_net_thermal_var": "ERA5/diagnostic/2d/TP",
+        "surf_net_solar_var": "ERA5/diagnostic/2d/TP",
+        "surf_net_thermal_var": "ERA5/diagnostic/2d/TP",
+        "surf_sh_var": "ERA5/diagnostic/2d/TP",
+        "surf_lh_var": "ERA5/diagnostic/2d/TP",
+        "lead_time_periods": 6,
+        "sp_var": "ERA5/prognostic/2d/SP",
+        "grid_type": "sigma",
+    },
+}
+_MASS_FIXER = {
+    "type": "global_mass_fixer",
+    "args": {"q_var": "ERA5/prognostic/3d/Q", "sp_var": "ERA5/prognostic/2d/SP", "grid_type": "sigma"},
+}
+_SNAPSHOT = {"type": "snapshot", "args": {"key": "y_processed", "out_key": "y_processed_raw"}}
+
+
+def _fixer_warnings(rep):
+    return {w for w in _wheres(rep, "warning") if w.startswith("postblocks.per_step.") and "fixer" in w}
+
+
+def test_pred_key_must_be_written(conf):
+    conf["loss"]["args"]["pred_key"] = "y_processed_raw"
+    rep = _run(conf)
+    assert "loss.args.pred_key" in _wheres(rep)
+    assert "snapshot" in _text(rep)
+
+
+def test_energy_fixer_scored_by_the_loss_warns(conf):
+    conf["postblocks"]["per_step"]["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    rep = _run(conf)
+    assert "postblocks.per_step.energy_fixer" in _fixer_warnings(rep)
+    assert "2607.18416" in _text(rep, "warning")
+
+
+def test_scoring_a_snapshot_before_the_fixers_is_clean(conf):
+    per_step = conf["postblocks"]["per_step"]
+    per_step["snapshot_raw"] = copy.deepcopy(_SNAPSHOT)
+    per_step["mass_fixer"] = copy.deepcopy(_MASS_FIXER)
+    per_step["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    conf["loss"]["args"].update(pred_key="y_processed_raw", valid_pred_key="y_processed")
+    rep = _run(conf)
+    assert not {"loss.args.pred_key", "loss.args.valid_pred_key"} & _wheres(rep), _text(rep)
+    assert _fixer_warnings(rep) == set(), _text(rep, "warning")
+
+
+def test_mass_fixer_after_energy_fixer_warns(conf):
+    per_step = conf["postblocks"]["per_step"]
+    per_step["snapshot_raw"] = copy.deepcopy(_SNAPSHOT)
+    per_step["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    per_step["mass_fixer"] = copy.deepcopy(_MASS_FIXER)
+    conf["loss"]["args"]["pred_key"] = "y_processed_raw"
+    rep = _run(conf)
+    assert _fixer_warnings(rep) == {"postblocks.per_step.mass_fixer"}
+    assert "before the energy fixer" in _text(rep, "warning")

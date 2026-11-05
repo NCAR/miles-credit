@@ -41,6 +41,18 @@ Loss config (``conf["loss"]``, mirroring the preblocks/postblocks structure)::
         include_computed_diagnostics: true
         use_latitude_weights: false      # cos(lat) spatial weighting per variable
         latitude_weights: "/path/static.zarr"
+        pred_key: "y_processed"          # prediction to score; y_processed_raw with a snapshot postblock
+        valid_pred_key: null             # validation's prediction key (default: pred_key)
+
+Scoring before the budget fixers: a global fixer (mass, water, energy) that
+rescales or shifts a field makes a loss on its output blind to that field's
+raw global mean or scale, so nothing pulls the raw prediction back toward the
+truth in that direction (Chapman, Schreck & Sha 2026, arXiv:2607.18416). A
+``snapshot`` postblock placed before the fixers copies the prediction to
+``y_processed_raw``; ``pred_key: y_processed_raw`` trains on that copy while
+the fixed ``y_processed`` still rolls forward. ``valid_pred_key: y_processed``
+validates on the delivered prediction; the trainer then also logs the raw
+validation loss as ``valid_loss_raw``.
 
 Scored variables: every variable in the data target layout (prognostic AND
 diagnostic variables from ``conf["data"]["source"]``) is always scored.
@@ -329,7 +341,15 @@ class BaseLoss(nn.Module):
             variable layout; when None the scored variables are discovered from
             the state dict on the first forward pass.
         validation: construct the validation variant (uses ``validation_loss``
-            when given).
+            and ``valid_pred_key`` when given).
+        pred_key: batch-dict key of the prediction to score (default
+            ``y_processed``). Point it at a ``snapshot`` postblock's ``out_key``
+            (e.g. ``y_processed_raw``) to score the prediction before the
+            global budget fixers that follow the snapshot.
+        valid_pred_key: prediction key for the validation variant; defaults to
+            ``pred_key``. Setting it to ``y_processed`` validates (and selects
+            checkpoints) on the fully corrected prediction while training on
+            the raw one.
         exp_transforms: ``exp_transform`` postblock specs (``exp_transform_specs``;
             ``load_loss`` fills this from the config). Variables they cover are
             scored in physical units but scaled in log space, so their
@@ -361,10 +381,14 @@ class BaseLoss(nn.Module):
         channel_schema=None,
         validation: bool = False,
         exp_transforms: list | None = None,
+        pred_key: str = "y_processed",
+        valid_pred_key: str | None = None,
         **kwargs,
     ):
         super().__init__()
         self.validation = validation
+        self.train_pred_key = pred_key
+        self.pred_key = (valid_pred_key or pred_key) if validation else pred_key
 
         base_name = training_loss
         base_params = dict(base_loss_parameters or {})
@@ -521,11 +545,22 @@ class BaseLoss(nn.Module):
             raise ValueError(f"BaseLoss: '{name}' is empty — check the per_step postblocks config.")
         return flat
 
-    def forward(self, full_data_dict: dict) -> torch.Tensor:
-        if "y_processed" not in full_data_dict:
+    def forward(self, full_data_dict: dict, pred_key: str | None = None) -> torch.Tensor:
+        """Combined loss of ``full_data_dict[pred_key]`` against ``y_target_processed``.
+
+        ``pred_key`` defaults to the key this instance was built with
+        (``pred_key``, or ``valid_pred_key`` for the validation variant).
+        """
+        pred_key = pred_key or self.pred_key
+        if pred_key not in full_data_dict:
+            if pred_key == "y_processed":
+                raise KeyError(
+                    "BaseLoss requires full_data_dict['y_processed'] — add a 'reconstruct' postblock "
+                    "(with args.detach: false for training) to postblocks.per_step."
+                )
             raise KeyError(
-                "BaseLoss requires full_data_dict['y_processed'] — add a 'reconstruct' postblock "
-                "(with args.detach: false for training) to postblocks.per_step."
+                f"BaseLoss: full_data_dict['{pred_key}'] is missing — add a snapshot postblock "
+                f"(type: snapshot, args: {{out_key: {pred_key}}}) to postblocks.per_step."
             )
         if "y_target_processed" not in full_data_dict:
             raise KeyError(
@@ -534,12 +569,12 @@ class BaseLoss(nn.Module):
                 "followed by a bridgescaler_transformer postblock with key: 'y_target_processed'."
             )
 
-        pred = self._flatten_state(full_data_dict["y_processed"], "y_processed")
+        pred = self._flatten_state(full_data_dict[pred_key], pred_key)
         target = self._flatten_state(full_data_dict["y_target_processed"], "y_target_processed")
 
         if torch.is_grad_enabled() and not any(t.requires_grad for t in pred.values()):
             raise RuntimeError(
-                "BaseLoss: y_processed carries no gradient (all tensors detached). Set "
+                f"BaseLoss: {pred_key} carries no gradient (all tensors detached). Set "
                 "'detach: false' on the reconstruct postblock in postblocks.per_step so the "
                 "loss backpropagates through the postblocks into the model."
             )
@@ -559,7 +594,7 @@ class BaseLoss(nn.Module):
         for var_key in var_keys:
             if var_key not in pred:
                 raise KeyError(
-                    f"BaseLoss: variable '{var_key}' missing from y_processed — "
+                    f"BaseLoss: variable '{var_key}' missing from {pred_key} — "
                     "channel schema and postblocks output disagree."
                 )
             if var_key not in target:

@@ -81,6 +81,26 @@ def _set_pred(batch_dict: dict, var_key: str, tensor: torch.Tensor) -> None:
     batch_dict["y_processed"][_src(var_key)][var_key] = tensor
 
 
+def _record_diagnostic(fixer, batch_dict: dict, name: str, value: torch.Tensor) -> None:
+    """Store a detached per-sample diagnostic as ``batch_dict["fixer_diagnostics"]["<block>/<name>"]``.
+
+    ``<block>`` is the postblock's config name (set by ``build_postblocks``), so
+    the trainer can log how large each fixer's correction is: a fixer's output
+    always closes its budget, so the correction itself is the only sign of how
+    far the raw prediction is from closing it.
+    """
+    block = getattr(fixer, "block_name", None) or type(fixer).__name__
+    batch_dict.setdefault("fixer_diagnostics", {})[f"{block}/{name}"] = value.detach()
+
+
+def _record_energy_diagnostics(fixer, batch_dict: dict, dE: torch.Tensor, C_global: torch.Tensor) -> None:
+    """Energy-fixer diagnostics: the correction as a mass-weighted mean ``dT`` (K)
+    and the budget imbalance it absorbed (W m-2, positive = the fixer added energy)."""
+    area = fixer.core.area.to(dE.device).sum()
+    _record_diagnostic(fixer, batch_dict, "dT_K", dE / C_global)
+    _record_diagnostic(fixer, batch_dict, "imbalance_Wm2", dE / (fixer.N_seconds * area))
+
+
 def _apply_energy_correction(
     core,
     *,
@@ -116,19 +136,22 @@ def _apply_energy_correction(
         sp_pred: predicted surface pressure; required when ``flag_sigma``.
 
     Returns:
-        The corrected temperature field, same shape as ``T_pred``.
+        ``(T_corrected, dE, C_global)``: the corrected temperature field (same
+        shape as ``T_pred``), the energy added per sample [J], and the
+        predicted state's total heat capacity ``sum(cp * dm)`` [J K-1], so
+        ``dE / C_global`` is the mass-weighted mean temperature correction.
     """
+    # Spread the deficit by cp-weighted air mass: a single uniform dT.  Both
+    # integrals use the *predicted* state, so the energy actually added is
+    # dT * sum(cp * dm) == dE exactly.
+    if flag_sigma:
+        C_column = core.integral(CP_t1, sp_pred) / GRAVITY  # J K-1 m-2
+    else:
+        C_column = core.integral(CP_t1) / GRAVITY
+    C_global = core.weighted_sum(C_column, axis=(-2, -1))  # J K-1
+    dE = net_forcing + global_TE_t0 - global_TE_t1
     if scale_by_mass:
-        # Spread the deficit by cp-weighted air mass: a single uniform dT.  Both
-        # integrals use the *predicted* state, so the energy actually added is
-        # dT * sum(cp * dm) == dE exactly.
-        if flag_sigma:
-            C_column = core.integral(CP_t1, sp_pred) / GRAVITY  # J K-1 m-2
-        else:
-            C_column = core.integral(CP_t1) / GRAVITY
-        C_global = core.weighted_sum(C_column, axis=(-2, -1))  # J K-1
-        dE = net_forcing + global_TE_t0 - global_TE_t1
-        return T_pred + (dE / C_global).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        return T_pred + (dE / C_global).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1), dE, C_global
 
     # total energy correction ratio; broadcast to (B, 1, 1, 1)
     E_correct_ratio = (net_forcing + global_TE_t0) / global_TE_t1
@@ -136,7 +159,7 @@ def _apply_energy_correction(
 
     # let thermal energy carry the corrected total energy amount
     E_t1_correct = E_level_t1 * E_correct_ratio
-    return (E_t1_correct - E_qgk_t1) / CP_t1
+    return (E_t1_correct - E_qgk_t1) / CP_t1, dE, C_global
 
 
 class TracerFixer(nn.Module):
@@ -227,6 +250,9 @@ class GlobalMassFixer(nn.Module):
         mass_dry_b = (p_dry_b * sp_pred * grid_area).sum((-2, -1)) / GRAVITY
 
         sp_correct_ratio = (mass_dry_sum_t0 - mass_dry_a) / mass_dry_b
+        global_mean_sp = (sp_pred * grid_area).sum((-2, -1)) / grid_area.sum()
+        _record_diagnostic(self, batch_dict, "ps_ratio_minus_1", sp_correct_ratio - 1)
+        _record_diagnostic(self, batch_dict, "dPS_Pa", global_mean_sp * (sp_correct_ratio - 1))
         sp_pred = sp_pred * sp_correct_ratio.unsqueeze(1).unsqueeze(2)
 
         # back to (B, 1, 1, H, W)
@@ -239,15 +265,34 @@ class GlobalWaterFixer(nn.Module):
 
     Mirrors ``gen1.GlobalWaterFixer``: the column-water tendency plus
     evaporation must balance precipitation; precip is rescaled to enforce it.
+    Evaporation is positive **downward** (negative where water leaves the
+    surface), so the budget is ``P = -E - dTCW/dt`` with both fluxes in
+    kg m-2 s-1.
+
+    Units: ``"m"`` (default, gen1 behavior) is liquid-water depth accumulated
+    over the step, ``"m s-1"`` a liquid-water depth rate (e.g. CAM/EAM
+    ``PRECT``), and ``"kg m-2 s-1"`` a mass flux (e.g. CAM/EAM ``QFLX``).
 
     Args:
         q_var, sp_var, precip_var, evapor_var: variable keys.
         lead_time_periods: forecast step length in hours (sets ``N_seconds``).
+        precip_units, evapor_units: ``"m"``, ``"m s-1"`` or ``"kg m-2 s-1"`` (see above).
         **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
+    _WATER_UNITS = ("m", "m s-1", "kg m-2 s-1")
+
     def __init__(
-        self, q_var, sp_var, precip_var, evapor_var, lead_time_periods, input_source_key="x_physical", **physics
+        self,
+        q_var,
+        sp_var,
+        precip_var,
+        evapor_var,
+        lead_time_periods,
+        input_source_key="x_physical",
+        precip_units="m",
+        evapor_units="m",
+        **physics,
     ):
         super().__init__()
         self.q_var = q_var
@@ -256,9 +301,18 @@ class GlobalWaterFixer(nn.Module):
         self.evapor_var = evapor_var
         self.N_seconds = int(lead_time_periods) * 3600
         self.input_source_key = input_source_key
+        for name, units in (("precip_units", precip_units), ("evapor_units", evapor_units)):
+            if units not in self._WATER_UNITS:
+                raise ValueError(f"GlobalWaterFixer: {name} must be one of {self._WATER_UNITS}, got {units!r}.")
+        # factors that turn each variable into a mass flux in kg m-2 s-1
+        self.precip_to_flux = self._flux_factor(precip_units)
+        self.evapor_to_flux = self._flux_factor(evapor_units)
         self.core, self.flag_sigma, self.midpoint, self.N_levels, self.coef_a, self.coef_b = _setup_physics_core(
             physics
         )
+
+    def _flux_factor(self, units):
+        return {"m": RHO_WATER / self.N_seconds, "m s-1": RHO_WATER, "kg m-2 s-1": 1.0}[units]
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -275,8 +329,8 @@ class GlobalWaterFixer(nn.Module):
         if not self.flag_sigma:
             raise NotImplementedError("GlobalWaterFixer (gen2) currently supports the hybrid-sigma grid only.")
 
-        precip_flux = precip * RHO_WATER / self.N_seconds
-        evapor_flux = evapor * RHO_WATER / self.N_seconds
+        precip_flux = precip * self.precip_to_flux
+        evapor_flux = evapor * self.evapor_to_flux
 
         TWC_input = self.core.total_column_water(q_input.to(device), sp_input.to(device))
         TWC_pred = self.core.total_column_water(q_pred, sp_pred)
@@ -288,6 +342,7 @@ class GlobalWaterFixer(nn.Module):
 
         residual = -TWC_sum - E_sum - P_sum
         P_correct_ratio = (P_sum + residual) / P_sum
+        _record_diagnostic(self, batch_dict, "precip_ratio_minus_1", P_correct_ratio - 1)
         precip = precip * P_correct_ratio.unsqueeze(-1).unsqueeze(-1)
 
         _set_pred(batch_dict, self.precip_var, precip.unsqueeze(1).unsqueeze(2))
@@ -487,7 +542,7 @@ class GlobalNetEnergyFixer(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        T_pred = _apply_energy_correction(
+        T_pred, dE, C_global = _apply_energy_correction(
             self.core,
             scale_by_mass=self.scale_by_mass,
             flag_sigma=self.flag_sigma,
@@ -501,6 +556,7 @@ class GlobalNetEnergyFixer(nn.Module):
             sp_pred=sp_pred if self.flag_sigma else None,
         )
 
+        _record_energy_diagnostics(self, batch_dict, dE, C_global)
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
         return batch_dict
@@ -655,7 +711,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        T_pred = _apply_energy_correction(
+        T_pred, dE, C_global = _apply_energy_correction(
             self.core,
             scale_by_mass=self.scale_by_mass,
             flag_sigma=self.flag_sigma,
@@ -669,6 +725,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
             sp_pred=sp_pred,
         )
 
+        _record_energy_diagnostics(self, batch_dict, dE, C_global)
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
         return batch_dict

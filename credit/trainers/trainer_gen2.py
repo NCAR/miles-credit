@@ -45,6 +45,17 @@ def _copy_named_input(input_dict: dict) -> dict:
     return {src: dict(vars_) for src, vars_ in input_dict.items()}
 
 
+def _collect_fixer_diagnostics(fixer_logs: dict, full_data_dict: dict) -> None:
+    """Move this step's fixer diagnostics into ``fixer_logs`` as batch means.
+
+    The conservation postblocks record how large a correction they applied
+    (``batch_dict["fixer_diagnostics"]``); popping them keeps a later step from
+    re-logging stale values.
+    """
+    for name, value in (full_data_dict.pop("fixer_diagnostics", None) or {}).items():
+        fixer_logs[name].append(float(value.float().mean()))
+
+
 class TrainerERA5Gen2(BaseTrainer):
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
@@ -238,6 +249,18 @@ class TrainerERA5Gen2(BaseTrainer):
                 _y = _y.flatten(1, 2)
             full_data_dict["y"] = shard_spatial(_y, self.domain_manager)
 
+    def _append_fixer_logs(self, results_dict, fixer_logs: dict, phase: str) -> None:
+        """Average one batch's fixer diagnostics over its steps (and ranks) into ``results_dict``.
+
+        Every rank runs the same postblocks, so every rank holds the same keys
+        and the all-reduce below is matched.
+        """
+        for name in sorted(fixer_logs):
+            value = torch.Tensor([np.mean(fixer_logs[name])]).to(self.device)
+            if self.distributed:
+                all_reduce_avg(value)
+            results_dict[f"{phase}_fixer/{name}"].append(value[0].item())
+
     def _gather_for_next_step(self, full_data_dict):
         """Prepare y_processed to seed the next rollout step.
 
@@ -335,6 +358,7 @@ class TrainerERA5Gen2(BaseTrainer):
 
         for steps in range(batches_per_epoch):
             logs = {}
+            fixer_logs = defaultdict(list)
             loss = 0
             full_data_dict = {}
 
@@ -432,6 +456,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     )
 
                 full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                _collect_fixer_diagnostics(fixer_logs, full_data_dict)
                 if t < self.forecast_len:
                     self._gather_for_next_step(full_data_dict)
 
@@ -501,6 +526,7 @@ class TrainerERA5Gen2(BaseTrainer):
             if self.distributed:
                 all_reduce_avg(batch_loss)
             results_dict["train_loss"].append(batch_loss[0].item())
+            self._append_fixer_logs(results_dict, fixer_logs, "train")
             if isinstance(criterion, BaseLoss):
                 for name in criterion.last_var_losses:
                     var_loss = torch.Tensor([logs.get(f"loss_var/{name}", 0.0)]).to(self.device)
@@ -583,6 +609,8 @@ class TrainerERA5Gen2(BaseTrainer):
                 y_pred_flat = None
                 y = None
                 loss = 0
+                loss_raw = None
+                fixer_logs = defaultdict(list)
 
                 full_data_dict = {}
 
@@ -637,6 +665,7 @@ class TrainerERA5Gen2(BaseTrainer):
                         )
 
                     full_data_dict = apply_postblocks(self.step_postblocks, full_data_dict)
+                    _collect_fixer_diagnostics(fixer_logs, full_data_dict)
                     if t < self.valid_forecast_len:
                         self._gather_for_next_step(full_data_dict)
 
@@ -648,6 +677,11 @@ class TrainerERA5Gen2(BaseTrainer):
                                 if self.distributed:
                                     all_reduce_avg(value)
                                 results_dict[f"valid_loss_var/{name}"].append(value[0].item())
+                            # Validating on the fixed prediction while training on the raw one:
+                            # also score the raw prediction so the two can be compared.
+                            raw_key = criterion.train_pred_key
+                            if raw_key != criterion.pred_key and raw_key in full_data_dict:
+                                loss_raw = criterion(full_data_dict, pred_key=raw_key)
                         else:
                             if self.flag_clamp:
                                 full_data_dict["y"] = torch.clamp(
@@ -680,6 +714,12 @@ class TrainerERA5Gen2(BaseTrainer):
                     all_reduce_avg(batch_loss)
 
                 results_dict["valid_loss"].append(batch_loss[0].item())
+                if loss_raw is not None:
+                    batch_loss_raw = torch.Tensor([loss_raw.item()]).to(self.device)
+                    if self.distributed:
+                        all_reduce_avg(batch_loss_raw)
+                    results_dict["valid_loss_raw"].append(batch_loss_raw[0].item())
+                self._append_fixer_logs(results_dict, fixer_logs, "valid")
                 results_dict["valid_forecast_len"].append(self.valid_forecast_len)
                 results_dict["valid_history_len"].append(self.valid_history_len)
 

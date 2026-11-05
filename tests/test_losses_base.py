@@ -622,3 +622,75 @@ def test_postblock_chain_with_base_loss(tmp_path):
     assert y_pred.grad is not None
     assert torch.isfinite(y_pred.grad).all()
     assert set(loss_fn.last_var_losses) == {VAR_T, VAR_SP, VAR_PRECIP}
+
+
+# ---------------------------------------------------------------------------
+# Scoring a snapshot of the prediction (pred_key / valid_pred_key)
+# ---------------------------------------------------------------------------
+
+
+def _with_raw_snapshot(state, shift=0.5):
+    """Snapshot y_processed to y_processed_raw, then shift T in y_processed (a stand-in fixer)."""
+    from credit.postblock.snapshot import Snapshot
+
+    state = Snapshot()(state)
+    fixed = state["y_processed"]["ERA5"]
+    fixed[VAR_T] = fixed[VAR_T] + shift
+    return state
+
+
+def test_snapshot_is_unaffected_by_later_blocks():
+    state = _with_raw_snapshot(_make_state_dict())
+    raw, fixed = state["y_processed_raw"]["ERA5"], state["y_processed"]["ERA5"]
+    assert raw[VAR_SP] is fixed[VAR_SP]  # tensors are shared, not copied
+    assert torch.allclose(fixed[VAR_T] - raw[VAR_T], torch.tensor(0.5))
+    assert raw[VAR_T].requires_grad  # still on the autograd graph
+
+
+def test_snapshot_rejects_bad_keys():
+    from credit.postblock.snapshot import Snapshot
+
+    with pytest.raises(ValueError, match="must differ"):
+        Snapshot(key="y_processed", out_key="y_processed")
+    with pytest.raises(KeyError, match="reconstruct"):
+        Snapshot()({"y": torch.zeros(1)})
+
+
+def test_pred_key_scores_the_snapshot(tmp_path):
+    scaler = _make_scaler_file(tmp_path)
+    state = _with_raw_snapshot(_make_state_dict())
+    on_fixed = _make_loss(scaler, var_weighting="none")(state)
+    on_raw = _make_loss(scaler, var_weighting="none", pred_key="y_processed_raw")(state)
+    raw_state = {"y_processed": state["y_processed_raw"], "y_target_processed": state["y_target_processed"]}
+    assert on_raw.item() == pytest.approx(_make_loss(scaler, var_weighting="none")(raw_state).item(), rel=1e-6)
+    assert on_raw.item() != pytest.approx(on_fixed.item(), rel=1e-3)
+
+    # gradient flows into the raw prediction
+    on_raw.backward()
+    assert state["y_processed_raw"]["ERA5"][VAR_SP].grad is not None
+
+
+def test_valid_pred_key_and_per_call_override(tmp_path):
+    scaler = _make_scaler_file(tmp_path)
+    state = _with_raw_snapshot(_make_state_dict(pred_requires_grad=False))
+    kw = dict(var_weighting="none", pred_key="y_processed_raw", valid_pred_key="y_processed")
+    train_fn = _make_loss(scaler, **kw)
+    valid_fn = _make_loss(scaler, validation=True, **kw)
+    assert (train_fn.pred_key, valid_fn.pred_key, valid_fn.train_pred_key) == (
+        "y_processed_raw",
+        "y_processed",
+        "y_processed_raw",
+    )
+    with torch.no_grad():
+        assert valid_fn(state).item() == pytest.approx(train_fn(state, pred_key="y_processed").item())
+        assert valid_fn(state, pred_key="y_processed_raw").item() == pytest.approx(train_fn(state).item())
+    # without valid_pred_key the validation variant scores pred_key
+    assert _make_loss(scaler, validation=True, var_weighting="none", pred_key="y_processed_raw").pred_key == (
+        "y_processed_raw"
+    )
+
+
+def test_missing_pred_key_points_at_snapshot(tmp_path):
+    loss_fn = _make_loss(_make_scaler_file(tmp_path), var_weighting="none", pred_key="y_processed_raw")
+    with pytest.raises(KeyError, match="snapshot"):
+        loss_fn(_make_state_dict())

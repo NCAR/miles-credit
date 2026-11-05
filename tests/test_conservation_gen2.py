@@ -790,3 +790,179 @@ def test_energy_fixer_updown_scale_by_mass_grad(statics_file_terrain):
     out.sum().backward()
     assert t_in.grad is not None
     assert torch.isfinite(t_in.grad).all()
+
+
+# --------------------------------------------------------------------------- #
+# Fixer diagnostics: how large a correction each budget fixer applied
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("scale_by_mass", [False, True])
+def test_energy_fixer_diagnostics_match_correction(statics_file, scale_by_mass):
+    fixer, dT, batch = _run_with_open_budget(statics_file, scale_by_mass=scale_by_mass)
+    diags = batch["fixer_diagnostics"]
+    dT_K = diags["GlobalNetEnergyFixer/dT_K"]
+    imbalance = diags["GlobalNetEnergyFixer/imbalance_Wm2"]
+    assert dT_K.shape == imbalance.shape == (B,)
+    assert not dT_K.requires_grad
+    # T was raised 2% above an otherwise closed budget, so the fixer cools
+    assert (dT_K < 0).all() and (imbalance < 0).all()
+
+    # the mass-weighted mean of the applied correction is dT_K
+    core = fixer.core
+    q = batch["y_processed"][SRC][key("prognostic", "3d", "Qtot")][:, :, 0].detach()
+    sp = batch["y_processed"][SRC][key("prognostic", "2d", "PS")][:, 0, 0].detach()
+    cp = (1 - q) * CP_DRY + q * CP_VAPOR
+    added = core.weighted_sum(core.integral(cp * dT[:, :, 0], sp) / GRAVITY, axis=(-2, -1))
+    C_global = core.weighted_sum(core.integral(cp, sp) / GRAVITY, axis=(-2, -1))
+    assert torch.allclose(dT_K, added / C_global, rtol=1e-4)
+    assert torch.allclose(imbalance, added / (fixer.N_seconds * core.area.sum()), rtol=1e-4)
+    if scale_by_mass:
+        assert torch.allclose(dT[:, 0, 0, 0, 0], dT_K, rtol=1e-5)
+
+
+def test_energy_fixer_updown_records_diagnostics(statics_file_terrain):
+    statics, _ = statics_file_terrain
+    fixer, _, batch = _run_updown_with_open_budget(statics, scale_by_mass=True)
+    assert {"GlobalEnergyFixerUpDown/dT_K", "GlobalEnergyFixerUpDown/imbalance_Wm2"} <= set(batch["fixer_diagnostics"])
+
+
+def test_mass_fixer_records_diagnostics(statics_file):
+    batch, _, _ = build_super_dict()
+    spk = key("prognostic", "2d", "PS")
+    batch["y_processed"][SRC][spk] = batch["y_processed"][SRC][spk] * 1.05
+    before = batch["y_processed"][SRC][spk][:, 0, 0].clone()
+    fixer = GlobalMassFixer(q_var=key("prognostic", "3d", "Qtot"), sp_var=spk, **_physics_args(statics_file))
+    fixer.block_name = "mass_fixer"
+    batch = fixer(batch)
+    after = batch["y_processed"][SRC][spk][:, 0, 0]
+    area = fixer.core.area
+    d = batch["fixer_diagnostics"]
+    assert torch.allclose(d["mass_fixer/ps_ratio_minus_1"], after[:, 0, 0] / before[:, 0, 0] - 1, rtol=1e-4)
+    mean_change = ((after - before) * area).sum((-2, -1)) / area.sum()
+    assert torch.allclose(d["mass_fixer/dPS_Pa"], mean_change, rtol=1e-3)
+    assert (d["mass_fixer/dPS_Pa"] < -4000).all()  # undoes most of the +5% (5000 Pa) perturbation
+
+
+def test_build_postblocks_names_fixer_diagnostics(statics_file):
+    from credit.postblock import build_postblocks
+
+    conf = {
+        "postblocks": {
+            "per_step": {
+                "my_mass_fixer": {
+                    "type": "global_mass_fixer",
+                    "args": {
+                        "q_var": key("prognostic", "3d", "Qtot"),
+                        "sp_var": key("prognostic", "2d", "PS"),
+                        **_physics_args(statics_file),
+                    },
+                }
+            }
+        }
+    }
+    blocks = build_postblocks(conf)
+    assert blocks["my_mass_fixer"].block_name == "my_mass_fixer"
+    batch = blocks["my_mass_fixer"](build_super_dict()[0])
+    assert "my_mass_fixer/ps_ratio_minus_1" in batch["fixer_diagnostics"]
+
+
+# --------------------------------------------------------------------------- #
+# Water fixer units and budget closure
+# --------------------------------------------------------------------------- #
+def _water_kwargs(statics_file, **overrides):
+    kw = dict(
+        q_var=key("prognostic", "3d", "Qtot"),
+        sp_var=key("prognostic", "2d", "PS"),
+        precip_var=key("diagnostic", "2d", "PRECT"),
+        evapor_var=key("diagnostic", "2d", "QFLX"),
+        lead_time_periods=6,
+        **_physics_args(statics_file),
+    )
+    kw.update(overrides)
+    return kw
+
+
+def _moistened_batch(precip, evapor):
+    """A batch whose column water rose over the step, with the given PRECT / QFLX values."""
+    batch, _, _ = build_super_dict()
+    qk = key("prognostic", "3d", "Qtot")
+    batch["y_processed"][SRC][qk] = batch["y_processed"][SRC][qk] * 1.01
+    batch["y_processed"][SRC][key("diagnostic", "2d", "PRECT")] = torch.full((B, 1, 1, H, W), precip)
+    batch["y_processed"][SRC][key("diagnostic", "2d", "QFLX")] = torch.full((B, 1, 1, H, W), evapor)
+    return batch
+
+
+def test_water_fixer_units_are_equivalent(statics_file):
+    """The same physical state in each unit convention gets the same precipitation correction."""
+    from credit.physics_constants import RHO_WATER
+
+    N = 6 * 3600
+    rate, evap_flux = 3.0e-8, -2.0e-5  # m s-1 precipitation, kg m-2 s-1 evaporation (positive-down)
+    cases = {
+        ("m", "m"): (rate * N, evap_flux / RHO_WATER * N),
+        ("m s-1", "kg m-2 s-1"): (rate, evap_flux),
+        ("kg m-2 s-1", "m s-1"): (rate * RHO_WATER, evap_flux / RHO_WATER),
+    }
+    ratios = []
+    for (p_units, e_units), (precip, evapor) in cases.items():
+        fixer = GlobalWaterFixer(**_water_kwargs(statics_file, precip_units=p_units, evapor_units=e_units))
+        batch = fixer(_moistened_batch(precip, evapor))
+        out = batch["y_processed"][SRC][key("diagnostic", "2d", "PRECT")]
+        ratios.append(out[:, 0, 0, 0, 0] / precip)
+        assert torch.allclose(batch["fixer_diagnostics"]["GlobalWaterFixer/precip_ratio_minus_1"], ratios[-1] - 1)
+    for r in ratios[1:]:
+        assert torch.allclose(r, ratios[0], rtol=1e-5)
+
+
+def test_water_fixer_closes_budget(statics_file):
+    """After the fix, global precipitation = -evaporation (positive-down) - column-water tendency."""
+    fixer = GlobalWaterFixer(**_water_kwargs(statics_file, precip_units="m s-1", evapor_units="kg m-2 s-1"))
+    batch = _moistened_batch(3.0e-8, -2.0e-5)
+    core = fixer.core
+    src, inp = batch["y_processed"][SRC], batch["x_physical"][SRC]
+    qk, spk = key("prognostic", "3d", "Qtot"), key("prognostic", "2d", "PS")
+    dTWC = (
+        core.total_column_water(src[qk][:, :, 0], src[spk][:, 0, 0])
+        - core.total_column_water(inp[qk][:, :, -1], inp[spk][:, 0, -1])
+    ) / fixer.N_seconds
+    E = core.weighted_sum(src[key("diagnostic", "2d", "QFLX")][:, 0, 0], axis=(-2, -1))
+    batch = fixer(batch)
+    from credit.physics_constants import RHO_WATER
+
+    P = core.weighted_sum(batch["y_processed"][SRC][key("diagnostic", "2d", "PRECT")][:, 0, 0] * RHO_WATER, (-2, -1))
+    assert torch.allclose(P, -E - core.weighted_sum(dTWC, axis=(-2, -1)), rtol=1e-4)
+
+
+def test_water_fixer_rejects_unknown_units(statics_file):
+    with pytest.raises(ValueError, match="precip_units"):
+        GlobalWaterFixer(**_water_kwargs(statics_file, precip_units="mm/day"))
+
+
+# --------------------------------------------------------------------------- #
+# Scoring before the fixers (arXiv:2607.18416)
+# --------------------------------------------------------------------------- #
+def test_loss_on_fixed_output_is_blind_to_raw_global_mean_T(statics_file):
+    """With scale_by_mass, the fixed T ignores a constant offset in the raw T;
+    only a loss on the snapshot taken before the fixer sees it."""
+    from credit.losses import BaseLoss
+    from credit.postblock.snapshot import Snapshot
+
+    tk = key("prognostic", "3d", "T")
+    snapshot = Snapshot(key="y_processed", out_key="y_processed_raw")
+    fixer = GlobalNetEnergyFixer(**_net_energy_kwargs(statics_file, scale_by_mass=True))
+    target, _, _ = build_super_dict()
+    loss_fn = BaseLoss(var_weighting="none", include_computed_diagnostics=False)
+
+    losses = {}
+    for offset in (0.0, 3.0):
+        batch, _, _ = build_super_dict()
+        batch["y_processed"][SRC][tk] = batch["y_processed"][SRC][tk] + offset
+        batch = fixer(snapshot(batch))
+        batch["y_target_processed"] = target["y_processed"]
+        with torch.no_grad():
+            losses[offset] = (loss_fn(batch), loss_fn(batch, pred_key="y_processed_raw"))
+    fixed_0, raw_0 = losses[0.0]
+    fixed_3, raw_3 = losses[3.0]
+    assert torch.allclose(fixed_0, fixed_3, rtol=1e-5), "the fixed output should not see the raw offset"
+    # T's squared error of 3**2 averaged with the other, error-free variables
+    n_vars = len(VARS_3D) + len(VARS_2D_PROG) + len(VARS_2D_DIAG)
+    assert torch.allclose(raw_3 - raw_0, torch.tensor(9.0 / n_vars), rtol=1e-4), "the raw snapshot should"
