@@ -112,6 +112,7 @@ That is the minimum. The full option set:
 | `variable_weights` | `{}` | Manual multipliers per `var_key`, applied on top of **every** mode. |
 | `normalize_weights` | `true` | Rescale the combination weights to mean 1. |
 | `per_level_variance` | `true` | With `inverse_variance`, weight each level of a 3D variable by its own variance. `false` uses one level-mean variance per variable. |
+| `sigma_exponent` | `"auto"` | With `inverse_variance`, the weight is `1 / σ^k`. `auto` picks `k` per variable from its loss: 2 for `mse`, 1 for `mae` and `ring-crps`. A number sets `k` for all variables. |
 | `include_computed_diagnostics` | `true` | Score postblock-computed diagnostics (see below). |
 | `use_latitude_weights` | `false` | Apply cos(lat) spatial weighting per variable. |
 | `latitude_weights` | — | Path to a dataset with a `latitude` coordinate. Required when the above is true. |
@@ -145,6 +146,19 @@ loss:
     var_weighting: "inverse_variance"
     scaler_path: "/path/scaler.json"
 ```
+
+`ring-crps` is the fair CRPS by default. Set `alpha` below 1 for the almost-fair
+CRPS of AIFS-CRPS (Lang et al. 2024), `afCRPS = α·fCRPS + (1 − α)·CRPS`, which the
+SDL fine-tuning paper also uses with `α = 0.95`:
+
+```yaml
+    training_loss: "ring-crps"
+    base_loss_parameters: {alpha: 0.95}
+```
+
+Pure fair CRPS is degenerate: when every other member equals the observation, the
+score is zero whatever the last member predicts. A small `1 − α` removes that, at
+the cost of a slight bias toward too little spread that shrinks as the ensemble grows.
 
 Requirements and caveats (`credit check` verifies the config-side ones):
 
@@ -187,6 +201,18 @@ bridgescaler at `scaler_path`. The scaler normalizes every level separately, so 
 MSE this reproduces training in normalized space, which is usually what you want as
 a starting point. Each variable's score is the mean over its levels, so a 3D variable
 counts as much as a 2D one in the combination, not 3D-levels times as much.
+
+More precisely, the weight is `1 / σ^k`, where `k` is how the univariate loss scales
+with its input: `L(a·t, a·p) = a^k · L(t, p)`. That makes every variable's weighted
+score dimensionless. `k = 2` for `mse`; `k = 1` for absolute-error losses (`mae`,
+`ring-crps`), so for those the weight is `1 / σ` and a physical-space MAE or CRPS
+reproduces the normalized-space one. With `1 / σ²` an absolute-error loss would keep
+units of `1 / σ`, and variables with tiny physical variance (specific humidity in
+kg/kg, precipitation in m) would outweigh the rest by orders of magnitude.
+`sigma_exponent: auto` (the default) picks `k` per variable from the loss that scores
+it, including `base_loss_overrides` and the validation loss. Losses without a known
+`k` (`huber`, `logcosh`, ...) are treated as squared; set `sigma_exponent` to a
+number to override.
 
 Set `per_level_variance: false` to use one variance per variable, the mean over its
 levels. That was the behavior before 2026-10. It lets the high-variance levels set the
@@ -345,10 +371,8 @@ loss:
 
 ```{note}
 An override changes the units of that variable's score. Under `inverse_variance`
-the combination weight is still `1/σ²`, which is matched to a quadratic loss, so
-an MAE override is weighted as though it were quadratic. With one or two overrides
-this is a small distortion; if you are overriding most variables, prefer `manual`
-weights you control directly.
+with the default `sigma_exponent: auto`, the variable's weight follows its own loss:
+an `mae` override is weighted by `1 / σ`, not `1 / σ²`.
 ```
 
 ## Scoring the prediction before the fixers

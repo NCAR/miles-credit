@@ -39,6 +39,7 @@ Loss config (``conf["loss"]``, mirroring the preblocks/postblocks structure)::
         variable_weights: {}             # manual multipliers per var_key (all modes)
         normalize_weights: true          # rescale combination weights to mean 1
         per_level_variance: true         # inverse_variance: one variance per level (channel)
+        sigma_exponent: auto             # inverse_variance weight 1/sigma^k: auto | 1 | 2
         include_computed_diagnostics: true
         use_latitude_weights: false      # cos(lat) spatial weighting per variable
         latitude_weights: "/path/static.zarr"
@@ -79,6 +80,17 @@ the largest-scale variables. ``var_weighting`` handles this:
     over its observed grid points. ``per_level_variance: false`` restores the old
     single level-mean variance per variable, which leaves low-variance levels
     (e.g. upper-air specific humidity) almost unweighted.
+
+    The weight is really ``1 / sigma^k``, with ``k`` the power by which the
+    univariate loss scales with its input (``L(a t, a p) = a^k L(t, p)``), so
+    every variable's weighted loss is dimensionless. ``sigma_exponent: auto``
+    (default) takes ``k`` from the loss each variable uses: 2 for squared
+    losses (``mse``), 1 for absolute-error losses (``mae``, ``ring-crps``). With
+    ``1 / sigma^2`` an absolute-error loss would be left with units of
+    ``1 / sigma``, so small-variance variables (specific humidity in kg/kg,
+    precipitation in m) would outweigh the rest by orders of magnitude. An
+    unlisted loss is treated as squared; set ``sigma_exponent`` explicitly to
+    override.
   - ``manual``: weights come from ``variable_weights`` alone.
   - ``learnable``: Kendall-Gal uncertainty weighting — per-variable
     ``log sigma_v^2`` is a learnable parameter (initialized from the scaler
@@ -109,6 +121,11 @@ from credit.losses import _load_loss_entry, is_crps_loss
 logger = logging.getLogger(__name__)
 
 VAR_WEIGHTING_MODES = ("inverse_variance", "manual", "learnable", "none")
+
+# Power k with which each univariate loss scales with its input, L(a t, a p) = a^k L(t, p);
+# inverse_variance weights a variable by 1 / sigma^k (``sigma_exponent: auto``).
+# Losses not listed are treated as squared (k = 2).
+SIGMA_EXPONENT_BY_LOSS = {"mse": 2, "mae": 1, "ring-crps": 1, "almost-fair-crps": 1}
 
 
 def _scaler_channel_variance(scaler) -> "torch.Tensor | None":
@@ -382,6 +399,10 @@ class BaseLoss(nn.Module):
         per_level_variance: with ``inverse_variance``, weight each level of a
             variable by its own scaler variance (default). False uses one
             level-mean variance per variable (the pre-2026-10 behavior).
+        sigma_exponent: with ``inverse_variance``, the weight is ``1 / sigma^k``.
+            ``"auto"`` (default) takes ``k`` per variable from the loss scoring it
+            (``SIGMA_EXPONENT_BY_LOSS``: 2 for mse, 1 for mae / ring-crps); a
+            number sets ``k`` for every variable.
         include_computed_diagnostics: score postblock-computed diagnostics
             (variables present in ``y_processed`` but not in the data target
             layout, e.g. from ``mslp_diagnostic``). Data diagnostics are always
@@ -428,6 +449,7 @@ class BaseLoss(nn.Module):
         variable_weights: dict | None = None,
         normalize_weights: bool = True,
         per_level_variance: bool = True,
+        sigma_exponent: str | float = "auto",
         include_computed_diagnostics: bool = True,
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
@@ -471,6 +493,19 @@ class BaseLoss(nn.Module):
             var_key: _instantiate_univariate_loss(spec["loss"], spec.get("parameters", {}))
             for var_key, spec in (base_loss_overrides or {}).items()
         }
+        self._base_name = base_name
+        self._override_names = {var_key: spec["loss"] for var_key, spec in (base_loss_overrides or {}).items()}
+
+        if sigma_exponent != "auto" and not (isinstance(sigma_exponent, (int, float)) and sigma_exponent > 0):
+            raise ValueError(f"sigma_exponent must be 'auto' or a positive number; got {sigma_exponent!r}")
+        self.sigma_exponent = sigma_exponent
+        if sigma_exponent == "auto":
+            for name in {base_name, *self._override_names.values()} - set(SIGMA_EXPONENT_BY_LOSS):
+                logger.info(
+                    "BaseLoss: '%s' has no entry in SIGMA_EXPONENT_BY_LOSS; weighting it as a squared "
+                    "loss (1 / sigma^2). Set loss.args.sigma_exponent to override.",
+                    name,
+                )
 
         if var_weighting not in VAR_WEIGHTING_MODES:
             raise ValueError(f"var_weighting must be one of {VAR_WEIGHTING_MODES}; got {var_weighting!r}")
@@ -514,6 +549,12 @@ class BaseLoss(nn.Module):
                     "var_weighting='learnable' requires a channel schema (channel_schema.yaml or a config "
                     "from which ChannelSchema can be derived) so the learnable parameters exist at init."
                 )
+            if SIGMA_EXPONENT_BY_LOSS.get(base_name, 2) != 2:
+                logger.warning(
+                    "BaseLoss: var_weighting='learnable' uses the Gaussian (squared-loss) form "
+                    "exp(-s) * L + s / 2, which does not match '%s'; prefer inverse_variance.",
+                    base_name,
+                )
             init = torch.zeros(len(self.data_var_keys))
             for i, var_key in enumerate(self.data_var_keys):
                 if var_key in self._variances:
@@ -544,8 +585,15 @@ class BaseLoss(nn.Module):
             logger.info("BaseLoss: skipping computed diagnostics %s (include_computed_diagnostics=False).", extras)
         return var_keys
 
+    def _sigma_exponent(self, var_key: str) -> float:
+        """``k`` in the ``1 / sigma^k`` weight of ``var_key`` (see ``sigma_exponent``)."""
+        if self.sigma_exponent != "auto":
+            return float(self.sigma_exponent)
+        name = self._override_names.get(var_key, self._base_name)
+        return float(SIGMA_EXPONENT_BY_LOSS.get(name, 2))
+
     def _inverse_variance(self, var_key: str, n_levels: int) -> "torch.Tensor | None":
-        """``1 / variance`` for ``var_key``: ``(n_levels,)`` per level, or ``(1,)`` level-mean."""
+        """``1 / sigma^k`` for ``var_key``: ``(n_levels,)`` per level, or ``(1,)`` level-mean."""
         variance = self._variances.get(var_key)
         if variance is None:
             logger.warning(
@@ -569,7 +617,7 @@ class BaseLoss(nn.Module):
         if not (variance > 0).all():
             logger.warning("BaseLoss: non-positive scaler variance for '%s'; falling back to weight 1.0.", var_key)
             return None
-        return 1.0 / variance
+        return variance ** (-self._sigma_exponent(var_key) / 2)
 
     def _build_static_weights(self, var_keys, n_levels: dict) -> dict:
         """Build combination weights for the static modes (none/manual/inverse_variance).

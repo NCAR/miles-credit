@@ -337,6 +337,69 @@ def test_baseloss_ring_matches_reference(tmp_path, K):
         )
 
 
+def _reference_afcrps(members, y, alpha):
+    """Almost-fair CRPS (Lang et al. 2024): alpha * fCRPS + (1 - alpha) * CRPS."""
+    K = len(members)
+    skill = torch.stack([(m - y).abs().mean() for m in members]).mean()
+    spread = sum((members[i] - members[j]).abs().mean() for i in range(K) for j in range(K) if i != j)
+    return skill - spread * (alpha / (2 * K * (K - 1)) + (1 - alpha) / (2 * K**2))
+
+
+def test_alpha_validation_and_single_member():
+    with pytest.raises(ValueError, match="alpha"):
+        RingCRPSLoss(alpha=1.5)
+    members, y = _members(1)
+    # One member: no spread term, so alpha changes nothing.
+    assert torch.allclose(RingCRPSLoss(alpha=0.95)(y, members[0]), (members[0] - y).abs().mean())
+
+
+def _baseloss_afcrps_worker(rank, K, alpha, init_file, value_out, grad_out):
+    """BaseLoss(ring-crps, base_loss_parameters={alpha}) over gloo, as a config would build it."""
+    dist.init_process_group("gloo", init_method=f"file://{init_file}", rank=rank, world_size=K)
+    try:
+        from credit.losses import BaseLoss
+        from credit.parallel.mesh import register_dp_group
+
+        register_dp_group(dist.group.WORLD)
+        members, y = _members(K)
+        pred = members[rank].clone().requires_grad_(True)
+        criterion = BaseLoss(training_loss="ring-crps", base_loss_parameters={"alpha": alpha}, var_weighting="none")
+        var = "ERA5/prognostic/2d/t2m"
+        loss = criterion({"y_processed": {"ERA5": {var: pred}}, "y_target_processed": {"ERA5": {var: y}}})
+        loss.backward()
+        value_out[rank] = loss.item()
+        grad_out[rank] = pred.grad.numpy()  # numpy, not a tensor: see _ring_worker
+    finally:
+        dist.destroy_process_group()
+
+
+@pytest.mark.parametrize("K", [2, 3])
+def test_baseloss_ring_afcrps_matches_reference(tmp_path, K):
+    """alpha < 1: the local value uses the blended spread coefficient and the gradient matches afCRPS."""
+    alpha = 0.95
+    init_file = str(tmp_path / "ring_afcrps_init")
+    manager = mp.Manager()
+    value_out = manager.dict()
+    grad_out = manager.dict()
+
+    mp.spawn(_baseloss_afcrps_worker, args=(K, alpha, init_file, value_out, grad_out), nprocs=K, join=True)
+
+    members, y = _members(K)
+    coef = alpha / (K - 1) + (1 - alpha) / K
+    for r in range(K):
+        skill = (members[r] - y).abs()
+        spread = sum((members[r] - members[j]).abs() for j in range(K) if j != r)
+        expected = (skill - coef * spread).mean() / K
+        assert abs(value_out[r] - expected.item()) < 1e-6, f"rank {r} loss value"
+
+    ref_members = [m.clone().requires_grad_(True) for m in members]
+    _reference_afcrps(ref_members, y, alpha).backward()
+    for r in range(K):
+        assert torch.allclose(torch.from_numpy(grad_out[r]), ref_members[r].grad, atol=1e-6), (
+            f"rank {r} gradient does not match the afCRPS gradient"
+        )
+
+
 if __name__ == "__main__":
     os.environ.setdefault("MASTER_ADDR", "localhost")
     pytest.main([__file__, "-v"])

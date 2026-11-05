@@ -496,6 +496,87 @@ def test_inverse_variance_matches_normalized_mse_3d(tmp_path):
     assert loss.item() == pytest.approx(torch.mean((pred_n - tgt_n) ** 2).item(), rel=1e-4)
 
 
+def _per_level_mae(state, var_key):
+    p = state["y_processed"]["ERA5"][var_key].float()
+    t = state["y_target_processed"]["ERA5"][var_key].float()
+    return (p - t).abs().mean(dim=(0, 2, 3, 4)).detach().double().numpy()
+
+
+@pytest.mark.parametrize("training_loss", ["mae", "ring-crps"])
+def test_absolute_error_losses_weighted_by_inverse_sigma(tmp_path, training_loss):
+    """sigma_exponent: auto weights absolute-error losses by 1/sigma, not 1/sigma^2."""
+    loss_fn = _make_loss(_make_scaler_file(tmp_path), training_loss=training_loss, normalize_weights=False)
+    state = _make_state_dict()
+    loss = loss_fn(state)
+    # ring-crps without torch.distributed reduces to MAE (one member)
+    expected = np.mean([np.mean(_per_level_mae(state, k) / np.sqrt(v)) for k, v in VARIANCES.items()])
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_absolute_error_loss_matches_normalized_mae_3d(tmp_path):
+    """With 1/sigma weights a physical-space MAE reproduces the normalized-space MAE,
+    even across levels whose variances span orders of magnitude."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    level_var = torch.tensor([1e-14, 1e-9, 1e-5], dtype=torch.float64)
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = torch.zeros(3, dtype=torch.float64)
+    s.var_x_ = level_var
+    s.x_columns_ = [0, 1, 2]
+    s.n_ = 10
+    s._fit = True
+    scaler_path = str(tmp_path / "scaler.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_T: s}}}, scaler_path)
+    loss_fn = BaseLoss(training_loss="mae", scaler_path=scaler_path, normalize_weights=False)
+
+    g = torch.Generator().manual_seed(3)
+    shape = (2, 3, 1, 4, 5)
+    pred_n = torch.randn(shape, generator=g)
+    tgt_n = torch.randn(shape, generator=g)
+    sigma = level_var.sqrt().float().view(1, -1, 1, 1, 1)
+    state = {
+        "y_processed": {"ERA5": {VAR_T: pred_n * sigma}},
+        "y_target_processed": {"ERA5": {VAR_T: tgt_n * sigma}},
+    }
+    with torch.no_grad():
+        loss = loss_fn(state)
+    assert loss.item() == pytest.approx(torch.mean((pred_n - tgt_n).abs()).item(), rel=1e-4)
+
+
+def test_sigma_exponent_follows_each_variables_loss(tmp_path):
+    """auto picks k per variable (override vs base loss) and for the validation variant's loss."""
+    path = _make_scaler_file(tmp_path)
+    mixed = _make_loss(path, normalize_weights=False, base_loss_overrides={VAR_PRECIP: {"loss": "mae"}})
+    state = _make_state_dict()
+    loss = mixed(state)
+    expected = np.mean(
+        [np.mean(_per_level_mse(state, k) / np.array(VARIANCES[k])) for k in (VAR_T, VAR_SP)]
+        + [np.mean(_per_level_mae(state, VAR_PRECIP) / np.sqrt(VARIANCES[VAR_PRECIP]))]
+    )
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+    valid = _make_loss(path, normalize_weights=False, validation_loss="mae", validation=True)
+    with torch.no_grad():
+        loss = valid(_make_state_dict(pred_requires_grad=False))
+    state = _make_state_dict(pred_requires_grad=False)
+    expected = np.mean([np.mean(_per_level_mae(state, k) / np.sqrt(v)) for k, v in VARIANCES.items()])
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_sigma_exponent_explicit_and_invalid(tmp_path):
+    path = _make_scaler_file(tmp_path)
+    loss_fn = _make_loss(path, training_loss="mae", normalize_weights=False, sigma_exponent=2)
+    state = _make_state_dict()
+    loss = loss_fn(state)
+    expected = np.mean([np.mean(_per_level_mae(state, k) / np.array(v)) for k, v in VARIANCES.items()])
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+    with pytest.raises(ValueError, match="sigma_exponent"):
+        _make_loss(path, sigma_exponent=0)
+    with pytest.raises(ValueError, match="sigma_exponent"):
+        _make_loss(path, sigma_exponent="sqrt")
+
+
 def test_manual_weights(tmp_path):
     manual = {VAR_T: 2.0, VAR_SP: 1.0, VAR_PRECIP: 0.5}
     loss_fn = _make_loss(

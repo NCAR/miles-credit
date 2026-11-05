@@ -24,8 +24,8 @@ import torch.distributed as dist
 logger = logging.getLogger(__name__)
 
 
-def ring_crps_elementwise(y_pred, y, group=None):
-    """Elementwise fair-CRPS contribution via ring communication.
+def ring_crps_elementwise(y_pred, y, group=None, alpha=1.0):
+    """Elementwise fair (or almost-fair) CRPS contribution via ring communication.
 
     Each dp rank holds 1 ensemble member of the same sample. K-1 ring shifts
     pass one member buffer at a time so rank r accumulates ``|x_r - x_j|`` for
@@ -47,6 +47,14 @@ def ring_crps_elementwise(y_pred, y, group=None):
     ``.mean()`` (``ring_crps_loss``) or a weighted mean such as BaseLoss's
     per-variable latitude/variance weighting.
 
+    ``alpha < 1`` gives the almost-fair CRPS of Lang et al. (2024, AIFS-CRPS),
+    ``afCRPS = alpha * fCRPS + (1 - alpha) * CRPS``. The standard CRPS normalizes
+    the spread sum by ``K^2`` rather than ``K (K-1)``, so the blend only changes
+    the spread coefficient: ``1 / (K-1)`` above becomes
+    ``alpha / (K-1) + (1 - alpha) / K``. Pure fair CRPS (``alpha = 1``) is
+    degenerate: when every other member equals the observation the score is zero
+    whatever the last member predicts. A small ``1 - alpha`` removes that.
+
     Args:
         y_pred: Local member prediction, requires_grad. Same shape on every
             rank in the group.
@@ -55,6 +63,7 @@ def ring_crps_elementwise(y_pred, y, group=None):
             None falls back to WORLD. With K == 1 (or torch.distributed not
             initialized) the spread term vanishes and the loss reduces to
             elementwise MAE.
+        alpha:  Fair-CRPS weight in ``[0, 1]`` (1 = fair CRPS, the default).
 
     Returns:
         Elementwise tensor, same shape as ``y_pred``; backward populates
@@ -89,10 +98,11 @@ def ring_crps_elementwise(y_pred, y, group=None):
         buf = next_buf
         spread = spread + (y_pred - buf).abs()
 
-    return (skill - spread / (K - 1)) / K
+    spread_coef = alpha / (K - 1) + (1.0 - alpha) / K
+    return (skill - spread_coef * spread) / K
 
 
-def ring_crps_loss(y_pred, y, group=None):
+def ring_crps_loss(y_pred, y, group=None, alpha=1.0):
     """Fair CRPS via ring communication, reduced to a scalar.
 
     ``ring_crps_elementwise(...).mean()`` — see that function for the member
@@ -101,7 +111,7 @@ def ring_crps_loss(y_pred, y, group=None):
     Returns:
         Scalar loss; backward populates ``y_pred.grad`` correctly.
     """
-    return ring_crps_elementwise(y_pred, y, group=group).mean()
+    return ring_crps_elementwise(y_pred, y, group=group, alpha=alpha).mean()
 
 
 class RingCRPSLoss(torch.nn.Module):
@@ -126,7 +136,8 @@ class RingCRPSLoss(torch.nn.Module):
     Note this exchanges K-1 buffers per scored variable per step. For
     validation, prefer a deterministic ``validation_loss`` (e.g. ``mae``):
     validation keeps dp dataset sharding, so ranks hold different samples and
-    a cross-rank spread term would be meaningless.
+    a cross-rank spread term would be meaningless. Pass ``alpha`` (the almost-fair
+    blend) through ``base_loss_parameters: {alpha: 0.95}``.
 
     The process group is resolved lazily at first forward (the dp group is
     registered by distributed_model_wrapper_gen2, which runs before load_loss).
@@ -136,11 +147,14 @@ class RingCRPSLoss(torch.nn.Module):
     # checks this attribute to exempt ring-crps from the univariate CRPS ban.
     supports_elementwise = True
 
-    def __init__(self, reduction="mean", group=None):
+    def __init__(self, reduction="mean", group=None, alpha=1.0):
         super().__init__()
         if reduction not in ("mean", "none"):
             raise ValueError(f"RingCRPSLoss reduction must be 'mean' or 'none'; got {reduction!r}")
+        if not 0.0 <= float(alpha) <= 1.0:
+            raise ValueError(f"RingCRPSLoss alpha must be in [0, 1]; got {alpha!r}")
         self.reduction = reduction
+        self.alpha = float(alpha)
         self._group = group
         self._group_resolved = group is not None
 
@@ -150,5 +164,5 @@ class RingCRPSLoss(torch.nn.Module):
 
             self._group = get_dp_group()
             self._group_resolved = True
-        elementwise = ring_crps_elementwise(pred, target, group=self._group)
+        elementwise = ring_crps_elementwise(pred, target, group=self._group, alpha=self.alpha)
         return elementwise if self.reduction == "none" else elementwise.mean()

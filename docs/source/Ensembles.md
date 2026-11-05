@@ -74,9 +74,12 @@ derived from the gen2 starter config `config/gen_2/examples/example-v2026.2.yml`
      type: base
      args:
        training_loss: "ring-crps"
+       base_loss_parameters: {alpha: 0.95}   # almost-fair CRPS, as in the SDL paper (1.0 = fair CRPS)
        validation_loss: "mae"      # validation shards data across ranks, so keep it deterministic
        # ... var_weighting, scaler_path, latitude weights as in the base config ...
    ```
+
+   With `var_weighting: inverse_variance`, CRPS and MAE are weighted by `1 / σ` per level rather than `1 / σ²`, which makes the physical-space CRPS equal the normalized-space one (see [Losses](Losses.md#inverse_variance-default)).
 
 6. **Validate before submitting:**
 
