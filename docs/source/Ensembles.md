@@ -58,6 +58,11 @@ derived from the gen2 starter config `config/gen_2/examples/example-v2026.2.yml`
      correlated: False             # False: a fresh z at every injection point; True: one z per forward pass
    ```
 
+   **Fine-tuning a CAMulator checkpoint** (`model.type: camulator`): keep CAMulator's architecture keys and
+   also set `spectral_norm_sharp: false`. CAMulator trains its decoder `sharp` convs without spectral norm,
+   while `crossformer-ensemble` normalizes them by default. Without the flag, loading the checkpoint raises an
+   error naming the flag, instead of silently leaving those convs at their random init.
+
 4. **Set `trainer.load_weights: True`**, and `load_optimizer`/`load_scaler`/`load_scheduler: False` — the trainable parameter set is new and much smaller, so start its optimizer state fresh rather than resuming the base model's.
 
 5. **Switch the loss to ring-CRPS** and set `trainer.ensemble_size` to the number of data-parallel GPUs you will train on. A deterministic loss such as `mse` scores one noisy sample against the target and so trains the noise toward zero, collapsing the ensemble spread. CRPS rewards a spread that matches the error instead (details in [Gen 2: ring-CRPS ensemble training](#gen-2-ring-crps-ensemble-training) below):

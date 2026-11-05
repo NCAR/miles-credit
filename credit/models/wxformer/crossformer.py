@@ -22,8 +22,11 @@ def cast_tuple(val, length=1):
     return val if isinstance(val, tuple) else ((val,) * length)
 
 
-def apply_spectral_norm(model):
-    for module in model.modules():
+def apply_spectral_norm(model, skip_sharp=False):
+    """Spectral-normalize every conv/linear layer; ``skip_sharp`` leaves the decoder ``sharp`` convs plain."""
+    for name, module in model.named_modules():
+        if skip_sharp and name.split(".")[-1] == "sharp":
+            continue
         if isinstance(module, (nn.Conv2d, nn.Linear, nn.ConvTranspose2d)):
             if module.weight.numel() > 0:
                 nn.utils.spectral_norm(module)
@@ -314,6 +317,48 @@ def _crossformer_decoder_guard_pre_hook(module, state_dict, prefix, *args):
         raise RuntimeError(_DECODER_ERROR)
 
 
+def _sharp_norm_mismatch(model: nn.Module, state_dict: dict, prefix: str = "") -> str | None:
+    """Name of a decoder ``sharp`` conv whose spectral-norm layout differs from the checkpoint's, else None.
+
+    A spectral-normalized conv stores ``weight_orig``/``weight_u``/``weight_v``; a plain
+    one stores ``weight``. CAMulator trains its decoder ``sharp`` convs without spectral
+    norm, so its checkpoint holds ``up_block<k>.sharp.weight`` where a default
+    CrossFormer expects ``weight_orig``. Under ``strict=False`` that conv would silently
+    keep its random init.
+    """
+    for name, module in model.named_modules():
+        if name.split(".")[-1] != "sharp" or not isinstance(module, nn.Conv2d):
+            continue
+        model_sn = hasattr(module, "weight_orig")
+        ckpt_plain = f"{prefix}{name}.weight" in state_dict
+        ckpt_sn = f"{prefix}{name}.weight_orig" in state_dict
+        if (model_sn and ckpt_plain and not ckpt_sn) or (not model_sn and ckpt_sn and not ckpt_plain):
+            return name
+    return None
+
+
+def _sharp_norm_error(name: str, model: nn.Module) -> str:
+    model_sn = hasattr(model.get_submodule(name), "weight_orig")
+    return (
+        f"Checkpoint stores '{name}' {'without' if model_sn else 'with'} spectral norm, but this model "
+        f"{'applies' if model_sn else 'does not apply'} it, so the decoder's sharp convs would not load and "
+        "would keep their random init. "
+        + (
+            "CAMulator checkpoints are trained without spectral norm on these convs: set "
+            "model.spectral_norm_sharp: false."
+            if model_sn
+            else "Remove model.spectral_norm_sharp: false (or set it to true)."
+        )
+    )
+
+
+def _sharp_norm_guard_pre_hook(module, state_dict, prefix, *args):
+    """load_state_dict pre-hook: fail loudly when the sharp convs' spectral-norm layout differs."""
+    name = _sharp_norm_mismatch(module, state_dict, prefix)
+    if name is not None:
+        raise RuntimeError(_sharp_norm_error(name, module))
+
+
 def migrate_legacy_state_dict(model: nn.Module, state_dict: dict) -> dict:
     """Migrate a legacy checkpoint in place for ``model``, or raise if it can't be.
 
@@ -336,10 +381,14 @@ def migrate_legacy_state_dict(model: nn.Module, state_dict: dict) -> dict:
         dict: the same ``state_dict``, for convenience.
 
     Raises:
-        RuntimeError: if the checkpoint holds the removed ConvTranspose2d decoder.
+        RuntimeError: if the checkpoint holds the removed ConvTranspose2d decoder, or its
+            decoder ``sharp`` convs differ from the model's in spectral norm.
     """
     if _decoder_is_incompatible(model, state_dict):
         raise RuntimeError(_DECODER_ERROR)
+    sharp_mismatch = _sharp_norm_mismatch(model, state_dict)
+    if sharp_mismatch is not None:
+        raise RuntimeError(_sharp_norm_error(sharp_mismatch, model))
 
     renamed = 0
     for name, module in model.named_modules():
@@ -693,6 +742,7 @@ class CrossFormer(BaseModel):
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,
+        spectral_norm_sharp: bool = True,
         attention_type: str = None,
         interp: bool = True,
         upsample_with_ps: bool = True,
@@ -726,6 +776,9 @@ class CrossFormer(BaseModel):
             attn_dropout (float): dropout rate for attention layout
             ff_dropout (float): dropout rate for feedforward layers.
             use_spectral_norm (bool): whether to use spectral normalization
+            spectral_norm_sharp (bool): with ``use_spectral_norm``, also spectral-normalize the decoder
+                ``sharp`` convs (default). Set False to load a CAMulator checkpoint, whose ``sharp`` convs
+                were trained without it.
             interp (bool): whether to use interpolation
             upsample_with_ps (bool): unused -- kept only so existing configs that set it
                 don't break. The decoder is always the PixelShuffle (ICNR-initialized,
@@ -886,10 +939,11 @@ class CrossFormer(BaseModel):
         # A pre-removal upsample_with_ps=False checkpoint cannot be migrated; say so
         # at load time instead of silently random-initializing the whole decoder.
         self.register_load_state_dict_pre_hook(_crossformer_decoder_guard_pre_hook)
+        self.register_load_state_dict_pre_hook(_sharp_norm_guard_pre_hook)
 
         if self.use_spectral_norm:
             logger.info("Adding spectral norm to all conv and linear layers")
-            apply_spectral_norm(self)
+            apply_spectral_norm(self, skip_sharp=not spectral_norm_sharp)
 
         if self.use_post_block:
             # freeze base model weights before postblock init
