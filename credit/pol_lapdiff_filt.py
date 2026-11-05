@@ -1,8 +1,10 @@
-import numpy as np
-import torch
-import torch_harmonics as harmonics
 import copy
 import gc
+
+import numpy as np
+import torch
+
+from credit._optional import require
 
 
 def polfiltT(D, inddo):
@@ -147,6 +149,7 @@ class Diffusion_and_Pole_Filter:
         Initialize spherical harmonics and inverse spherical harmonics transformations
         for both scalar and vector fields.
         """
+        harmonics = require("torch_harmonics", "Diffusion_and_Pole_Filter")
         # Initialize spherical harmonics transformation objects
         self.sht = harmonics.RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False).to(
             self.device
@@ -169,6 +172,7 @@ class Diffusion_and_Pole_Filter:
         including latitude and longitude arrays, Laplacian operators, and Coriolis effect.
         """
         # Compute quadrature weights and cosine of latitudes for the grid
+        harmonics = require("torch_harmonics", "Diffusion_and_Pole_Filter")
         cost, quad_weights = harmonics.quadrature.legendre_gauss_weights(self.nlat, -1, 1)
         self.lats = -torch.as_tensor(np.arcsin(cost))
         self.lons = torch.linspace(0, 2 * np.pi, self.nlon + 1, dtype=torch.float64)[: self.nlon]

@@ -324,44 +324,27 @@ global grids.
 
 ---
 
-## U-Net
+## U-Net (moved to credit-zoo)
 
-**AutoAPI:** {py:obj}`credit.models.unet.SegmentationModel` &nbsp;·&nbsp; **Config type:** `unet`
-
-A convolutional **U-Net** built on the `segmentation-models-pytorch` library. It
-is a pure convolutional encoder–decoder with skip connections — no attention —
-which makes it fast, memory-light, and a strong, simple baseline. The encoder can
-be any backbone that library supports (e.g. a ResNet), optionally with pretrained
-weights.
-
-The config is minimal: point `architecture` at a supported decoder/encoder pair.
-An optional `rk4_integration: True` wraps the network in a 4th-order Runge–Kutta
-time step for smoother integration.
+The `unet` (`SegmentationModel`) and `unet_downscaling` (`DownscalingSegmentationModel`) models are built on
+`segmentation-models-pytorch`. They now live in [credit-zoo](https://github.com/NCAR/credit-zoo) so core
+CREDIT does not depend on that library. The classes and their arguments are unchanged, so existing
+checkpoints load as before. Install credit-zoo and register the model through `custom_objects`:
 
 ```yaml
+custom_objects:
+  unet:
+    object_type: model
+    module_path: credit_zoo.models.unet.unet
+    module_name: SegmentationModel
+
 model:
   type: "unet"
-  image_height: 640
-  image_width: 1280
-  frames: 2
-  levels: 15
-  channels: 4
-  surface_channels: 7
-  input_only_channels: 3
-  output_only_channels: 0
-
-  rk4_integration: False
-  architecture:
-    name: "unet"              # unet, unet++, manet, fpn, deeplabv3+, …
-    encoder_name: "resnet34"  # any segmentation-models-pytorch encoder
-    encoder_weights: "imagenet"
+  # ... same arguments as before; see config/unet.yml in credit-zoo
 ```
 
-**Pointers:** `architecture.name` picks the decoder family and
-`architecture.encoder_name` the backbone; these are the main capacity/quality
-levers. Use `encoder_weights: "imagenet"` to warm-start from pretrained weights,
-or `null` to train from scratch. Turn on `rk4_integration` if you want a more
-stable time-stepping scheme at extra cost.
+A config that still says `model.type: unet` without this block fails with the snippet above in the error
+message, and `credit check` reports it.
 
 ---
 
@@ -376,7 +359,7 @@ stable time-stepping scheme at extra cost.
 - **CAMulator** — climate emulation with conservation constraints.
 - **Swin** — a lighter transformer backbone for comparison or constrained
   hardware.
-- **U-Net** — the fastest, simplest baseline; no attention.
+- **U-Net** (via credit-zoo) — the fastest, simplest baseline; no attention.
 
 Other registered backbones (FuXi, a graph transformer, and downscaling and WRF
 variants) are available as `model.type` keys; see the API reference for their

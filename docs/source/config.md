@@ -904,6 +904,8 @@ SKEBS introduces **stochastic perturbations** to correct **underdispersed foreca
 
 Based on [Berner, J., Shutts, G. J., Leutbecher, M., & Palmer, T. N. (2009). A spectral stochastic kinetic energy backscatter scheme and its impact on flow-dependent predictability in the ECMWF ensemble prediction system. Journal of the Atmospheric Sciences, 66(3), 603-626. ](https://journals.ametsoc.org/view/journals/atsc/66/3/2008jas2677.1.xml)
 
+SKEBS needs the optional `spectral` extra: `pip install "miles-credit[spectral]"`.
+
 - **`True`** → Enables **kinetic energy backscatter corrections** (experimental).  
 - **`False`** → Disables SKEBS.  
 

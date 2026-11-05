@@ -1,5 +1,6 @@
 import torch
-from torch_harmonics import RealSHT, RealVectorSHT
+
+from credit._optional import require
 
 import logging
 
@@ -32,7 +33,7 @@ def zonal_spectrum(da, grid, norm="ortho"):
     nlat, nlon = len(da.latitude), len(da.longitude)
     lmax = nlat + 1  # Maximum degree for the transform
     with torch.no_grad():
-        sht = RealSHT(nlat, nlon, lmax=lmax, grid=grid, norm=norm)
+        sht = require("torch_harmonics", "zonal_spectrum").RealSHT(nlat, nlon, lmax=lmax, grid=grid, norm=norm)
 
         data = torch.tensor(da.values, dtype=torch.float64)
         coeffs = sht(data)
@@ -91,7 +92,9 @@ def div_rot_spectrum(ds, grid, norm="ortho"):
     nlat, nlon = len(ds.latitude), len(ds.longitude)
     lmax = nlat + 1  # Maximum degree for the transform
     with torch.no_grad():  # for speed: don't want to keep track of gradients
-        vsht = RealVectorSHT(nlat, nlon, lmax=lmax, grid=grid, norm=norm, csphase=False)
+        vsht = require("torch_harmonics", "div_rot_spectrum").RealVectorSHT(
+            nlat, nlon, lmax=lmax, grid=grid, norm=norm, csphase=False
+        )
 
         U = torch.tensor(ds.U.values, dtype=torch.float64).unsqueeze(-3)
         V = torch.tensor(ds.V.values, dtype=torch.float64).unsqueeze(-3)
