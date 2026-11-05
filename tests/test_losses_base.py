@@ -324,22 +324,90 @@ def test_forward_combination_none_mode(tmp_path):
     assert loss_fn.last_var_losses == pytest.approx(expected_per_var, rel=1e-5)
 
 
+def _per_level_mse(state, var_key):
+    p = state["y_processed"]["ERA5"][var_key].float()
+    t = state["y_target_processed"]["ERA5"][var_key].float()
+    return ((p - t) ** 2).mean(dim=(0, 2, 3, 4)).detach().double().numpy()
+
+
 def test_forward_inverse_variance_weights(tmp_path):
+    loss_fn = _make_loss(_make_scaler_file(tmp_path), normalize_weights=False)
+    state = _make_state_dict()
+    loss = loss_fn(state)
+
+    # Each level of T is weighted by its own variance, not the level mean.
+    expected = np.mean([np.mean(_per_level_mse(state, k) / np.array(v)) for k, v in VARIANCES.items()])
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_forward_inverse_variance_weights_normalized(tmp_path):
     loss_fn = _make_loss(_make_scaler_file(tmp_path))
     state = _make_state_dict()
     loss = loss_fn(state)
 
-    raw = {
-        VAR_T: 1.0 / np.mean(VARIANCES[VAR_T]),
-        VAR_SP: 1.0 / 1.0e6,
-        VAR_PRECIP: 1.0 / 1.0e-8,
-    }
-    mean_w = np.mean(list(raw.values()))
-    expected = np.mean([raw[k] / mean_w * loss_fn.last_var_losses[k] for k in raw])
+    raw = {k: 1.0 / np.array(v) for k, v in VARIANCES.items()}
+    mean_w = np.mean([w.mean() for w in raw.values()])
+    expected = np.mean([np.mean(raw[k] / mean_w * _per_level_mse(state, k)) for k in raw])
     assert loss.item() == pytest.approx(expected, rel=1e-5)
 
 
-def test_inverse_variance_matches_normalized_mse(tmp_path):
+def test_inverse_variance_level_mean_option(tmp_path):
+    """per_level_variance=False keeps the old single level-mean variance per variable."""
+    loss_fn = _make_loss(_make_scaler_file(tmp_path), normalize_weights=False, per_level_variance=False)
+    state = _make_state_dict()
+    loss = loss_fn(state)
+    expected = np.mean([loss_fn.last_var_losses[k] / np.mean(v) for k, v in VARIANCES.items()])
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_inverse_variance_level_count_mismatch_uses_level_mean(tmp_path, caplog):
+    """A scaler whose channel count differs from the scored levels falls back to the level mean."""
+    loss_fn = _make_loss(_make_scaler_file(tmp_path), normalize_weights=False)
+    state = _make_state_dict()
+    for name in ("y_processed", "y_target_processed"):
+        state[name]["ERA5"][VAR_T] = state[name]["ERA5"][VAR_T][:, :2].detach().requires_grad_(name == "y_processed")
+    with caplog.at_level("WARNING"):
+        loss = loss_fn(state)
+    assert "3 channels" in caplog.text
+    expected = np.mean(
+        [loss_fn.last_var_losses[VAR_T] / np.mean(VARIANCES[VAR_T])]
+        + [loss_fn.last_var_losses[k] / VARIANCES[k][0] for k in (VAR_SP, VAR_PRECIP)]
+    )
+    assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_load_target_variances_per_level(tmp_path):
+    variances = _load_target_variances(_make_scaler_file(tmp_path), per_level=True)
+    assert torch.allclose(variances[VAR_T], torch.tensor(VARIANCES[VAR_T]))
+    assert variances[VAR_SP].shape == (1,)
+
+
+def test_load_target_variances_spatial_scaler_per_level(tmp_path):
+    """Per-cell scalers give one variance per level: the mean over that level's observed cells."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DSpatialStandardScalerTensor
+
+    var = torch.tensor([[[1.0, 3.0], [5.0, 7.0]], [[10.0, 20.0], [30.0, 40.0]]])
+    n = torch.full_like(var, 50.0)
+    n[0, 1, 1] = 0  # a never-observed cell (e.g. land in an ocean field)
+    var[0, 1, 1] = float("nan")
+    s = DSpatialStandardScalerTensor(channels_last=False)
+    s.mean_x_ = torch.zeros_like(var)
+    s.var_x_ = var
+    s.n_ = n
+    s.spatial_shape_ = [2, 2]
+    s.x_columns_ = [0, 1]
+    s._fit = True
+    path = str(tmp_path / "spatial.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_T: s}}}, path)
+
+    per_level = _load_target_variances(path, per_level=True)[VAR_T]
+    assert torch.allclose(per_level, torch.tensor([3.0, 25.0]))
+    # The level-mean form averages every observed cell, as before.
+    assert _load_target_variances(path)[VAR_T] == pytest.approx((1 + 3 + 5 + 10 + 20 + 30 + 40) / 7)
+
+
+def test_inverse_variance_matches_normalized_mse_2d(tmp_path):
     """With 2D variables only, inverse_variance (no weight normalization) must
     exactly reproduce the MSE computed in normalized space."""
     variances = {VAR_SP: [4.0], VAR_PRECIP: [9.0]}
@@ -395,6 +463,37 @@ def test_inverse_variance_matches_normalized_mse(tmp_path):
     flat_tgt = torch.cat([tgt_n[VAR_SP], tgt_n[VAR_PRECIP]], dim=1)
     expected = torch.mean((flat_pred - flat_tgt) ** 2).item()
     assert loss.item() == pytest.approx(expected, rel=1e-5)
+
+
+def test_inverse_variance_matches_normalized_mse_3d(tmp_path):
+    """A 3D variable whose levels span 12 orders of magnitude in variance (like
+    specific humidity) reproduces its normalized-space MSE exactly."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    level_var = torch.tensor([1e-14, 1e-9, 1e-5], dtype=torch.float64)
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = torch.zeros(3, dtype=torch.float64)
+    s.var_x_ = level_var
+    s.x_columns_ = [0, 1, 2]
+    s.n_ = 10
+    s._fit = True
+    scaler_path = str(tmp_path / "scaler.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_T: s}}}, scaler_path)
+    loss_fn = BaseLoss(training_loss="mse", scaler_path=scaler_path, normalize_weights=False)
+
+    g = torch.Generator().manual_seed(2)
+    shape = (2, 3, 1, 4, 5)
+    pred_n = torch.randn(shape, generator=g)
+    tgt_n = torch.randn(shape, generator=g)
+    sigma = level_var.sqrt().float().view(1, -1, 1, 1, 1)
+    state = {
+        "y_processed": {"ERA5": {VAR_T: pred_n * sigma}},
+        "y_target_processed": {"ERA5": {VAR_T: tgt_n * sigma}},
+    }
+    with torch.no_grad():
+        loss = loss_fn(state)
+    assert loss.item() == pytest.approx(torch.mean((pred_n - tgt_n) ** 2).item(), rel=1e-4)
 
 
 def test_manual_weights(tmp_path):

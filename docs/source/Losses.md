@@ -111,6 +111,7 @@ That is the minimum. The full option set:
 | `scaler_path` | — | Fitted bridgescaler JSON. Required for `inverse_variance` and `learnable`. |
 | `variable_weights` | `{}` | Manual multipliers per `var_key`, applied on top of **every** mode. |
 | `normalize_weights` | `true` | Rescale the combination weights to mean 1. |
+| `per_level_variance` | `true` | With `inverse_variance`, weight each level of a 3D variable by its own variance. `false` uses one level-mean variance per variable. |
 | `include_computed_diagnostics` | `true` | Score postblock-computed diagnostics (see below). |
 | `use_latitude_weights` | `false` | Apply cos(lat) spatial weighting per variable. |
 | `latitude_weights` | — | Path to a dataset with a `latitude` coordinate. Required when the above is true. |
@@ -181,9 +182,18 @@ many orders of magnitude.
 
 ### `inverse_variance` (default)
 
-Weight each variable by `1 / σ²`, with `σ²` read from the fitted bridgescaler at
-`scaler_path`. For MSE this approximates training in normalized space, which is
-usually what you want as a starting point.
+Weight each level of each variable by `1 / σ²`, with `σ²` read from the fitted
+bridgescaler at `scaler_path`. The scaler normalizes every level separately, so for
+MSE this reproduces training in normalized space, which is usually what you want as
+a starting point. Each variable's score is the mean over its levels, so a 3D variable
+counts as much as a 2D one in the combination, not 3D-levels times as much.
+
+Set `per_level_variance: false` to use one variance per variable, the mean over its
+levels. That was the behavior before 2026-10. It lets the high-variance levels set the
+weight, so a variable whose variance spans orders of magnitude across levels loses
+most of its levels from the objective. Specific humidity is the usual case: upper-air
+levels have variances around 1e-14 against 1e-5 near the surface. Use it only to
+reproduce an older run.
 
 Variances are read from `DStandardScalerTensor.var_x_` directly, estimated from
 t-digest centroid moments for `DQuantileScalerTensor`, or taken from `sd_²` for the
@@ -192,6 +202,9 @@ weight 1.0 with a logged warning — worth watching for, since a silent 1.0 amon
 1/σ² weights effectively drops that variable from the objective. Postblock-computed
 diagnostics (e.g. `geopotential_diagnostic`) are never in the scaler, so give them
 a `variable_weights` entry of about `1 / σ²` in their physical units.
+For a grid-wise (`spatial_variables`) scaler each level's variance is the mean of
+the per-grid-point variances over the cells it observed (cells that were NaN in
+every sample are skipped), i.e. the variable's typical *local* variability.
 
 Log-transformed variables are handled automatically. When a `log_transform`
 preblock feeds the scaler and an `exp_transform` postblock converts the variable

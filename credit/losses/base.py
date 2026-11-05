@@ -38,6 +38,7 @@ Loss config (``conf["loss"]``, mirroring the preblocks/postblocks structure)::
         scaler_path: "/path/scaler.json"   # bridgescaler dict; required for inverse_variance/learnable
         variable_weights: {}             # manual multipliers per var_key (all modes)
         normalize_weights: true          # rescale combination weights to mean 1
+        per_level_variance: true         # inverse_variance: one variance per level (channel)
         include_computed_diagnostics: true
         use_latitude_weights: false      # cos(lat) spatial weighting per variable
         latitude_weights: "/path/static.zarr"
@@ -67,11 +68,17 @@ Physical-unit variables have wildly different variances (SP ~1e5 Pa vs
 specific humidity ~1e-3), so an unweighted physical-space MSE is dominated by
 the largest-scale variables. ``var_weighting`` handles this:
 
-  - ``inverse_variance`` (default): per-variable weight ``1 / sigma_v^2`` with
-    ``sigma_v^2`` read from the fitted bridgescaler at ``scaler_path``
-    (DStandardScalerTensor ``var_x_`` directly; DQuantileScalerTensor via a
-    t-digest centroid moment estimate; numpy DeepStandardScaler via ``sd_``).
-    For MSE this approximates training in normalized space.
+  - ``inverse_variance`` (default): weight ``1 / sigma_{v,l}^2`` for each level
+    ``l`` of variable ``v``, with the variances read from the fitted bridgescaler
+    at ``scaler_path`` (DStandardScalerTensor ``var_x_`` directly;
+    DQuantileScalerTensor via a t-digest centroid moment estimate; numpy
+    DeepStandardScaler via ``sd_``). The scaler normalizes each level
+    separately, so per-level weights make an MSE equal to the normalized-space
+    MSE (up to how the variable's levels are averaged). Spatial scalers
+    (``DSpatialStandardScalerTensor``) contribute each level's variance averaged
+    over its observed grid points. ``per_level_variance: false`` restores the old
+    single level-mean variance per variable, which leaves low-variance levels
+    (e.g. upper-air specific humidity) almost unweighted.
   - ``manual``: weights come from ``variable_weights`` alone.
   - ``learnable``: Kendall-Gal uncertainty weighting — per-variable
     ``log sigma_v^2`` is a learnable parameter (initialized from the scaler
@@ -209,7 +216,37 @@ def _load_physical_scalers(scaler_path: str) -> dict:
     }
 
 
-def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = None) -> dict:
+def _channel_grid_stat(scaler, name: str) -> "torch.Tensor | None":
+    """Scaler statistic ``name`` (``var_x_`` / ``mean_x_``) as ``(C, K)``: channels by grid points.
+
+    ``K`` is 1 for a per-channel scaler and the flattened grid for
+    ``DSpatialStandardScalerTensor``. Never-observed entries (``n_ == 0``) are NaN.
+    """
+    stat = getattr(scaler, name, None)
+    if stat is None:
+        return None
+    stat = torch.as_tensor(stat, dtype=torch.float64)
+    stat = stat.reshape(stat.shape[0], -1) if stat.ndim else stat.reshape(1, 1)
+    n = getattr(scaler, "n_", None)
+    if n is not None and not isinstance(n, (int, float)):
+        n = torch.as_tensor(n)
+        if n.numel() == stat.numel():
+            stat = torch.where(n.reshape(stat.shape) > 0, stat, torch.nan)
+    return stat
+
+
+def _physical_channel_variance(scaler) -> "torch.Tensor | None":
+    """``(C, K)`` variance from a physical-units sidecar scaler, or None if it is unusable."""
+    var = _channel_grid_stat(scaler, "var_x_")
+    if var is None:
+        flat = _scaler_channel_variance(scaler)
+        var = None if flat is None else flat.double().reshape(-1, 1)
+    if var is None or torch.isinf(var).any() or torch.isnan(var).all():
+        return None
+    return var
+
+
+def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = None, per_level: bool = False) -> dict:
     """Flatten a bridgescaler dict's ``"target"`` slice to ``{var_key: variance}``.
 
     ``exp_transforms`` (from ``exp_transform_specs``) marks variables whose scaler
@@ -219,6 +256,11 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
     ``credit preprocess`` writes (``credit.preblock.scaler.physical_stats_path``)
     is used when present; otherwise it is estimated from the log-space statistics
     (``_physical_variance_from_log``).
+
+    With ``per_level=False`` each variance is one float, averaged over all levels
+    (and grid points, for a spatial scaler). With ``per_level=True`` it is a
+    ``(C,)`` tensor with one variance per channel (level), averaged over that
+    channel's observed grid points only.
     """
     from bridgescaler import load_scaler_dict
 
@@ -230,22 +272,27 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
     variances = {}
     for source_scalers in target_scalers.values():
         for var_key, scaler in source_scalers.items():
-            channel_var = _scaler_channel_variance(scaler)
-            if channel_var is None or not torch.isfinite(channel_var).all():
+            grid_var = _channel_grid_stat(scaler, "var_x_")
+            if grid_var is None:
+                # Quantile / numpy scalers: one statistic per channel already.
+                flat = _scaler_channel_variance(scaler)
+                grid_var = None if flat is None else flat.double().reshape(-1, 1)
+            if grid_var is None or torch.isinf(grid_var).any() or torch.isnan(grid_var).all():
                 continue
+            channel_var = grid_var
             spec = _matching_exp_spec(var_key, exp_transforms)
-            exact = _scaler_channel_variance(physical_scalers[var_key]) if var_key in physical_scalers else None
-            if spec is not None and exact is not None and torch.isfinite(exact).all():
+            exact = _physical_channel_variance(physical_scalers[var_key]) if var_key in physical_scalers else None
+            if spec is not None and exact is not None and exact.shape == channel_var.shape:
                 logger.info(
                     "'%s' is scored in physical units but scaled in log space: using the exact "
                     "physical variance %.4g from %s.",
                     var_key,
-                    float(exact.mean()),
+                    float(exact.nanmean()),
                     physical_stats_path(scaler_path),
                 )
                 channel_var = exact
             elif spec is not None:
-                mean = getattr(scaler, "mean_x_", None)
+                mean = _channel_grid_stat(scaler, "mean_x_")
                 if mean is None:
                     logger.warning(
                         "'%s' is exp-transformed back to physical units, but its scaler has no "
@@ -254,9 +301,8 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
                         var_key,
                     )
                 else:
-                    mean = torch.as_tensor(mean, dtype=torch.float32).flatten()
                     phys = _physical_variance_from_log(mean, channel_var, spec["base"], spec["eps"])
-                    if not torch.isfinite(phys).all():
+                    if torch.isinf(phys).any():
                         logger.warning(
                             "'%s': log-to-physical variance conversion overflowed; using the "
                             "log-space variance. Set a variable_weights entry for it.",
@@ -267,11 +313,14 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
                             "'%s' is scored in physical units but scaled in log space: level-mean "
                             "variance %.4g (log) -> %.4g (physical).",
                             var_key,
-                            float(channel_var.mean()),
-                            float(phys.mean()),
+                            float(channel_var.nanmean()),
+                            float(phys.nanmean()),
                         )
                         channel_var = phys
-            variances[var_key] = float(channel_var.mean())
+            per_channel = channel_var.nanmean(dim=1)
+            if not torch.isfinite(per_channel).all():
+                continue
+            variances[var_key] = per_channel.float() if per_level else float(channel_var.nanmean())
     return variances
 
 
@@ -330,6 +379,9 @@ class BaseLoss(nn.Module):
             required for ``inverse_variance`` and ``learnable``.
         variable_weights: manual multipliers per var_key (all modes, default 1.0).
         normalize_weights: rescale static combination weights to mean 1.
+        per_level_variance: with ``inverse_variance``, weight each level of a
+            variable by its own scaler variance (default). False uses one
+            level-mean variance per variable (the pre-2026-10 behavior).
         include_computed_diagnostics: score postblock-computed diagnostics
             (variables present in ``y_processed`` but not in the data target
             layout, e.g. from ``mslp_diagnostic``). Data diagnostics are always
@@ -375,6 +427,7 @@ class BaseLoss(nn.Module):
         scaler_path: str | None = None,
         variable_weights: dict | None = None,
         normalize_weights: bool = True,
+        per_level_variance: bool = True,
         include_computed_diagnostics: bool = True,
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
@@ -424,6 +477,7 @@ class BaseLoss(nn.Module):
         self.var_weighting = var_weighting
         self.manual_weights = {k: float(v) for k, v in (variable_weights or {}).items()}
         self.normalize_weights = bool(normalize_weights)
+        self.per_level_variance = bool(per_level_variance)
         self.include_computed_diagnostics = bool(include_computed_diagnostics)
 
         self.lat_weights = None
@@ -441,13 +495,14 @@ class BaseLoss(nn.Module):
         if channel_schema is not None:
             self.data_var_keys = [entry["var_key"] for entry in channel_schema.target_layout]
 
-        self._variances = None
+        self._variances = None  # {var_key: (C,) per-level variance}
         if self.var_weighting in ("inverse_variance", "learnable"):
             if not scaler_path:
                 raise ValueError(f"scaler_path is required for var_weighting='{self.var_weighting}'.")
-            self._variances = _load_target_variances(scaler_path, exp_transforms)
+            self._variances = _load_target_variances(scaler_path, exp_transforms, per_level=True)
 
-        self._combination_weights = None  # {var_key: float} for static modes; built at first forward
+        # {var_key: (C,) or (1,) tensor} for static modes; built at first forward
+        self._combination_weights = None
         self.log_variance = None  # nn.Parameter for learnable mode
         self.var_keys = None  # full scoring list, resolved at first forward
         # Populated by forward(); initialized here so the documented attribute
@@ -462,7 +517,7 @@ class BaseLoss(nn.Module):
             init = torch.zeros(len(self.data_var_keys))
             for i, var_key in enumerate(self.data_var_keys):
                 if var_key in self._variances:
-                    init[i] = float(np.log(max(self._variances[var_key], 1e-12)))
+                    init[i] = float(np.log(max(float(self._variances[var_key].mean()), 1e-12)))
             self.log_variance = nn.Parameter(init)
 
     # ------------------------------------------------------------------
@@ -489,22 +544,44 @@ class BaseLoss(nn.Module):
             logger.info("BaseLoss: skipping computed diagnostics %s (include_computed_diagnostics=False).", extras)
         return var_keys
 
-    def _build_static_weights(self, var_keys) -> dict:
-        """Build combination weights for the static modes (none/manual/inverse_variance)."""
+    def _inverse_variance(self, var_key: str, n_levels: int) -> "torch.Tensor | None":
+        """``1 / variance`` for ``var_key``: ``(n_levels,)`` per level, or ``(1,)`` level-mean."""
+        variance = self._variances.get(var_key)
+        if variance is None:
+            logger.warning(
+                "BaseLoss: no scaler variance found for '%s'; falling back to weight 1.0. "
+                "Add it to the scaler at scaler_path or set a manual entry in variable_weights.",
+                var_key,
+            )
+            return None
+        variance = variance.double()
+        if self.per_level_variance and variance.numel() not in (1, n_levels):
+            logger.warning(
+                "BaseLoss: the scaler has %d channels for '%s' but the loss sees %d levels; "
+                "using the level-mean variance.",
+                variance.numel(),
+                var_key,
+                n_levels,
+            )
+            variance = variance.mean().reshape(1)
+        elif not self.per_level_variance:
+            variance = variance.mean().reshape(1)
+        if not (variance > 0).all():
+            logger.warning("BaseLoss: non-positive scaler variance for '%s'; falling back to weight 1.0.", var_key)
+            return None
+        return 1.0 / variance
+
+    def _build_static_weights(self, var_keys, n_levels: dict) -> dict:
+        """Build combination weights for the static modes (none/manual/inverse_variance).
+
+        Each weight is a ``(C,)`` per-level or ``(1,)`` per-variable float64 tensor.
+        """
         weights = {}
         for var_key in var_keys:
-            manual = self.manual_weights.get(var_key, 1.0)
+            manual = torch.tensor([self.manual_weights.get(var_key, 1.0)], dtype=torch.float64)
             if self.var_weighting == "inverse_variance":
-                variance = self._variances.get(var_key)
-                if variance is None:
-                    logger.warning(
-                        "BaseLoss: no scaler variance found for '%s'; falling back to weight 1.0. "
-                        "Add it to the scaler at scaler_path or set a manual entry in variable_weights.",
-                        var_key,
-                    )
-                    weights[var_key] = manual
-                else:
-                    weights[var_key] = manual / max(variance, 1e-12)
+                inv_var = self._inverse_variance(var_key, n_levels[var_key])
+                weights[var_key] = manual if inv_var is None else manual * inv_var
             elif self.var_weighting == "manual":
                 if var_key not in self.manual_weights:
                     logger.warning("BaseLoss: no variable_weights entry for '%s'; using 1.0.", var_key)
@@ -513,7 +590,9 @@ class BaseLoss(nn.Module):
                 weights[var_key] = manual
 
         if self.normalize_weights:
-            mean_w = sum(weights.values()) / len(weights)
+            # A variable's loss is the level mean of its weighted per-level losses,
+            # so its effective weight is the level mean of its weights.
+            mean_w = sum(float(w.mean()) for w in weights.values()) / len(weights)
             if mean_w > 0:
                 weights = {k: v / mean_w for k, v in weights.items()}
         return weights
@@ -582,10 +661,13 @@ class BaseLoss(nn.Module):
         if self.var_keys is None:
             self.var_keys = self._resolve_var_keys(pred, target)
             if self.var_weighting != "learnable":
-                self._combination_weights = self._build_static_weights(self.var_keys)
+                n_levels = {k: pred[k].shape[1] for k in self.var_keys if k in pred}
+                self._combination_weights = self._build_static_weights(self.var_keys, n_levels)
         var_keys = self.var_keys
+        weights = self._combination_weights
 
         var_losses = {}
+        weighted_losses = {}
         self.last_var_losses = {}
         # Device of the scored tensors, captured in the loop below so the
         # learnable branch does not depend on a leaked loop variable. Falls
@@ -617,9 +699,15 @@ class BaseLoss(nn.Module):
             lat_w = self._lat_w(p)
             if lat_w is not None:
                 elementwise = elementwise * lat_w
-            var_loss = elementwise.mean()
+            # Mean over every dim but the level (channel) dim 1; levels are
+            # equal-sized, so the level mean equals the full elementwise mean.
+            level_loss = elementwise.mean(dim=[d for d in range(elementwise.ndim) if d != 1])
+            var_loss = level_loss.mean()
             var_losses[var_key] = var_loss
             self.last_var_losses[var_key] = var_loss.detach().item()
+            if weights is not None:
+                w = weights[var_key].to(device=device, dtype=level_loss.dtype)
+                weighted_losses[var_key] = (w * level_loss).mean()
 
         if self.var_weighting == "learnable":
             log_var = self.log_variance.to(device)
@@ -629,5 +717,4 @@ class BaseLoss(nn.Module):
                 terms.append(manual * torch.exp(-log_var[i]) * var_losses[var_key] + 0.5 * log_var[i])
             return torch.stack(terms).mean()
 
-        weights = self._combination_weights
-        return torch.stack([weights[var_key] * var_losses[var_key] for var_key in var_keys]).mean()
+        return torch.stack([weighted_losses[var_key] for var_key in var_keys]).mean()
