@@ -146,8 +146,9 @@ trainer:
   weight_decay: 0
 
   # Samples per GPU per update. Every rank holds the same samples, so this is also the samples per update.
-  train_batch_size: 2
-  valid_batch_size: 2
+  # Batch 2 used 8.5 of 40 GB per A100 in the smoke run (frozen base, decoder-only noise).
+  train_batch_size: 4
+  valid_batch_size: 4
 
   # 20 epochs x 1000 updates, as in the SDL paper.
   batches_per_epoch: 1000
@@ -469,7 +470,10 @@ loss:
     scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
     per_level_variance: true
     sigma_exponent: auto
-    normalize_weights: true
+    # false: normalize_weights would divide every weight by the mean raw weight, which tiny upper-level Qtot
+    # variances make ~1e6. That shrank the smoke run's loss to ~1e-8, below Adam's eps, and the noise layers
+    # did not move. Unnormalized, the loss stays at the normalized-space CRPS scale.
+    normalize_weights: false
     # BaseLoss counts each variable once, whatever its levels. The base model's flat loss counted every channel
     # once (3D state ~87% of the objective), so weight each 3D variable by its 32 levels to keep that emphasis.
     variable_weights:
