@@ -1282,3 +1282,29 @@ def test_fit_physical_target_stats_per_gridpoint_for_spatial_variables():
     assert torch.allclose(var_x, x.var(dim=0, unbiased=False), rtol=1e-3)
     # The pooled fit folds in the map-wide climatology spread and is far larger.
     assert float(pooled["target"]["era5"][ps].var_x_.mean()) > 100 * float(var_x.mean())
+
+
+def test_fit_physical_target_stats_with_accelerator_batch():
+    """Ensures fit_physical_target_stats works when using the "best" accelerator available.
+    Regression test for issue #548; on macOS this failed before fixing that issue.
+    """
+    from credit.preblock.log import LogTransform
+    from credit.preblock.scaler import fit_physical_target_stats
+
+    # device to use (resolves to MPS on Apple Silicon, CUDA on GPU boxes, else CPU)
+    best_device = (
+        torch.accelerator.current_accelerator(check_available=True)
+        if hasattr(torch, "accelerator")
+        else None
+    ) or torch.device("cpu")
+
+    q = "era5/prognostic/3d/Q"
+    x = torch.rand(2, 3, 1, 4, 5, device=best_device) * 1e-2
+    batch = {"target": {"era5": {q: x}}}
+
+    stats = fit_physical_target_stats(LogTransform(variables=[q]), batch, None)
+
+    assert set(stats["target"]["era5"]) == {q}
+    expected = x.cpu().transpose(0, 1).reshape(3, -1).double().var(dim=1, unbiased=False)
+    got = stats["target"]["era5"][q].var_x_.cpu().double()
+    assert torch.allclose(got, expected, rtol=1e-4)
