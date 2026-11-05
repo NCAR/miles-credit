@@ -1,0 +1,547 @@
+# --------------------------------------------------------------------------------------------------------------------- #
+# CAMulator + SDL (stochastic decomposition layers): stage 1, single-step fine-tuning of white additive noise.
+#
+# Fine-tunes decoder noise-injection layers (docs/source/Ensembles.md) on the coupled CAMulator checkpoint
+# (b.e21.CREDIT_climate_branch_1980 training data, ICEFRAC + co2vmr_3d forcings, 874M parameters), with the base
+# weights FROZEN: only the noise layers train, so the zero-noise model stays exactly CAMulator.
+#
+# Derived from config/gen_2/camulator/camulator_gen2_casper.yml (data, preblocks, fixers, architecture) and
+# config/gen_2/examples/wxformer_sdl.yml (SDL keys). Choices that follow the SDL paper (arXiv 2512.18815):
+# decoder-only noise, noise factor 0.235, afCRPS alpha 0.95, single-step training, 20 x 1000 updates.
+# Deliberate deviations: frozen base (the paper fine-tuned all weights), ring-crps with one member per GPU (the
+# paper replicated each sample 10x in the batch), and a physical-space loss scored before the water/energy fixers.
+#
+# Before the first run:
+#   1. Copy the base checkpoint into save_loc as checkpoint.pt (load_weights reads only <save_loc>/checkpoint.pt).
+#      The released weights are epoch 69 of Will Chapman's run (climate/maintainer/stage_assets.sh, branch
+#      willychap/camulator_huggingface); verify the file before copying:
+#        mkdir -p /glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl
+#        cp /glade/derecho/scratch/wchapman/CREDIT_runs/NEW_CLI_JOHN_CASPER_extended_v2/checkpoint.pt00069.pt \
+#           /glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl/checkpoint.pt
+#   2. credit check -c config/gen_2/camulator/camulator_sdl.yml
+#   3. credit submit --cluster derecho -c config/gen_2/camulator/camulator_sdl.yml --gpus 4 --nodes 2 --dry-run
+#
+# Stage 2 (multi-step, after stage 1 converges): copy this file, point save_loc at a new directory holding stage 1's
+# checkpoint.pt, and set data.forecast_len (and validation_data.forecast_len) to 2-4. The base model's own last
+# stage was 3-step. Future red / multiplicative noise variants should get the same stage-2 schedule so they stay
+# comparable with this white baseline.
+# --------------------------------------------------------------------------------------------------------------------- #
+
+# A new directory, not the base model's. See step 1 above.
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl'
+seed: 1000
+
+
+# ---- Training data (unchanged from camulator_gen2_casper.yml) ---- #
+data:
+  source:
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"                # CESM hybrid sigma-pressure coordinate
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        diagnostic:
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: "/glade/campaign/cisl/aiml/credit/cesm_exercise/forcing/dynamic_forcing/%Y_forcing.zarr"
+
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/static/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "1980-01-01"
+  end_datetime: "2012-12-31"           # the base model's training years
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1                      # gen2 is 1-indexed: 1 = single step (stage 1)
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Validation data: 2013-2014, held out from the base model (paths as in camulator_gen2_casper.yml) ---- #
+validation_data:
+  source:
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        diagnostic:
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: '/glade/derecho/scratch/cbecker/cesm_camulator_data/dynamic_forcing/control/forcing_%Y.zarr'
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: '/glade/derecho/scratch/cbecker/cesm_camulator_data/static/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "2013-01-01"
+  end_datetime: "2014-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Training hyperparameters ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp                # ring-crps: one ensemble member per data-parallel rank
+    tensor: 1
+    domain: 1
+
+  cpu_offload: False
+  activation_checkpoint: True
+
+  # ring-crps trains one member per data-parallel GPU, and every GPU sees the SAME batch (per-rank seeds give
+  # each member different noise). Must equal --gpus x --nodes (pbs.nodes x pbs.ngpus); change them together.
+  # More GPUs add members, not samples per update.
+  ensemble_size: 8
+
+  # Load the base CAMulator weights from <save_loc>/checkpoint.pt (strict=False: the noise layers are new).
+  # Everything else starts fresh: optimizer and scheduler for the noise parameters only, epoch counter at 0.
+  load_weights: True
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: False          # the scheduler sets the learning rate
+
+  save_backup_weights: True
+  save_best_weights: True              # on the deterministic validation loss; select climate checkpoints by rollout
+  save_every_epoch: True
+
+  save_metric_vars: ["PRECT", "TREFHT", "TAUX", "TAUY", "U", "T"]
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  # Samples per GPU per update. Every rank holds the same samples, so this is also the samples per update.
+  train_batch_size: 2
+  valid_batch_size: 2
+
+  # 20 epochs x 1000 updates, as in the SDL paper.
+  batches_per_epoch: 1000
+  valid_batches_per_epoch: 100
+  stopping_patience: 999
+
+  start_epoch: 0
+  num_epoch: 10                        # epochs per job; credit submit chains epochs / num_epoch jobs. Re-time after a smoke run.
+  epochs: &epochs 20
+
+  use_tensorboard: True
+  use_ema: False
+
+  use_scheduler: True
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 200
+    total_steps: 20000                 # epochs x batches_per_epoch
+    min_lr: 1.0e-6
+
+  amp: False                           # fp32 throughout, as for the base model (fixers need full precision)
+  grad_accum_every: 1
+  grad_max_norm: 'dynamic'
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
+
+
+# ---- Preblocks (unchanged): must match the base model's normalization exactly ---- #
+# PS is scaled per grid point (spatial_variables), matching the gen1 "Mixed_Modal" mean/std the checkpoint was
+# trained with.
+preblocks:
+  per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables:
+          - CESM/prognostic/2d/PS
+        variables:
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/dynamic_forcing/2d/SOLIN
+          - CESM/dynamic_forcing/2d/SST
+          - CESM/dynamic_forcing/2d/ICEFRAC
+          - CESM/dynamic_forcing/2d/co2vmr_3d
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+        method: transform
+        scaler_params:
+          channels_last: False
+    concat:
+      type: concat
+
+
+# ---- Postblocks ---- #
+# Order mirrors the base model's training (gen1 trainerERA5 on willychap/camulator_huggingface): tracer clamp ->
+# mass fixer -> LOSS -> water fixer -> energy fixer. The snapshot after the mass fixer is what the training loss
+# scores (loss.args.pred_key); the fully fixed y_processed is what rolls forward and what validation scores.
+#
+# Differences from the base model's training, kept on purpose:
+#   - wind_filter runs before the snapshot, so the loss sees the jet-core levels (9-20) after the artifact filter.
+#     In gen1 it ran only at inference; here every rollout step applies it, so scoring after it matches deployment.
+#   - The gen1 water-balance penalty, 0.05 * (P_ratio - 1)^2, has no gen2 equivalent. It acted on the base weights,
+#     which are frozen here.
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: False   # REQUIRED for BaseLoss training: keeps y_processed on the autograd graph
+
+    wind_filter:
+      type: wind_artifact_filter
+      args:
+        u_var: CESM/prognostic/3d/U
+        v_var: CESM/prognostic/3d/V
+        target_vars:
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+        mask_level: 14
+        target_levels: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+        # tuned for normalized values: keep this block before inverse_scale
+        speed_threshold: 2.8
+        smooth_sigma: 1.2
+        smooth_sigma_zonal: 2.0
+        smooth_sigma_meridional: 0.5
+        dilation_zonal: 15
+        dilation_meridional: 5
+        falloff_sigma: 4.0
+        preserve_amplitude: true
+
+    inverse_scale:
+      type: bridgescaler_transform
+      args:
+        method: inverse_transform
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables:
+          - CESM/prognostic/2d/PS
+        variables:
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+
+    # Non-negativity for all nine, plus the gen1 upper cap of 1 on the cloud fractions (noise can push them past 1).
+    tracer_fixer:
+      type: tracer_fixer
+      args:
+        tracer_vars:
+          - CESM/prognostic/3d/Qtot
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+        tracer_thres: 0.0
+        tracer_thres_max: [null, null, 1.0, 1.0, 1.0, null, null, null, null]
+
+    mass_fixer:
+      type: global_mass_fixer
+      args:
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        fix_level_num: 14
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
+
+    # The training loss scores this copy (loss.args.pred_key): after the tracer clamp and mass fixer, before the
+    # water and energy fixers, as in the base model's training.
+    snapshot_raw:
+      type: snapshot
+      args:
+        key: y_processed
+        out_key: y_processed_raw
+
+    water_fixer:
+      type: global_water_fixer
+      args:
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
+        precip_var: CESM/diagnostic/2d/PRECT
+        evapor_var: CESM/diagnostic/2d/QFLX
+
+    energy_fixer_updown:
+      type: global_energy_fixer_updown
+      args:
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        surface_geopotential_name: PHIS
+        T_var: CESM/prognostic/3d/T
+        q_var: CESM/prognostic/3d/Qtot
+        U_var: CESM/prognostic/3d/U
+        V_var: CESM/prognostic/3d/V
+        sp_var: CESM/prognostic/2d/PS
+        toa_down_solar_input_var: CESM/dynamic_forcing/2d/SOLIN
+        toa_up_solar_var: CESM/diagnostic/2d/FSUTOA
+        toa_up_olr_var: CESM/diagnostic/2d/FLUT
+        surf_down_solar_var: CESM/diagnostic/2d/FSDS_J
+        surf_up_solar_var: CESM/diagnostic/2d/FSUS
+        surf_down_lw_var: CESM/diagnostic/2d/FLDS_J
+        surf_up_lw_var: CESM/diagnostic/2d/FLUS
+        surf_sh_var: CESM/diagnostic/2d/SHFLX
+        surf_lh_var: CESM/diagnostic/2d/LHFLX
+
+    # Target twin: the truth y in physical units, which BaseLoss and the gen2 metrics compare against.
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: y
+        out_key: y_target_processed
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        method: inverse_transform
+        key: y_target_processed
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables:
+          - CESM/prognostic/2d/PS
+        variables:
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+
+
+# ---- Model: CAMulator architecture (must match the checkpoint) + SDL ---- #
+model:
+  type: "crossformer-ensemble"  # CrossFormerWithNoise: the wxformer CrossFormer plus SDL layers
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 32
+  channels: 4               # 3D prognostic: U V T Qtot
+  surface_channels: 2       # 2D prognostic: PS TREFHT
+  input_only_channels: 6    # dynamic_forcing (4) + static (2)
+  output_only_channels: 17  # diagnostic variables
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [256, 512, 1024, 2048]
+  depth: [2, 2, 18, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  use_spectral_norm: True
+  spectral_norm_sharp: False  # CAMulator trains its decoder sharp convs without spectral norm; loading fails without this
+  interp: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [48, 48]
+    pad_lon: [48, 48]
+
+  # ---- SDL: everything above is the frozen base; the noise layers below are what trains ----
+  freeze: True                  # freeze every pretrained weight
+  encoder_noise: False          # decoder-only injection, as in the SDL paper
+  noise_latent_dim: 128         # dimension of the latent z behind the per-channel style
+  decoder_noise_factor: 0.235   # fixed alpha in F + alpha * R * S * M (the SDL paper's value; code default 0.275)
+  encoder_noise_factor: 0.05    # unused while encoder_noise is False
+  correlated: False             # a fresh z at every injection point
+
+
+# ---- Loss: ring-crps per variable in physical units (gen2 BaseLoss) ---- #
+loss:
+  type: base
+  args:
+    training_loss: "ring-crps"
+    base_loss_parameters: {alpha: 0.95}   # almost-fair CRPS, as in the SDL paper (1.0 = fair CRPS)
+    validation_loss: "mae"                # validation shards data across ranks, so keep it deterministic
+
+    # Weight each level by 1/sigma (sigma_exponent auto: CRPS and MAE scale linearly), which makes the
+    # physical-space score equal the normalized-space one.
+    var_weighting: "inverse_variance"
+    scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+    per_level_variance: true
+    sigma_exponent: auto
+    normalize_weights: true
+    # BaseLoss counts each variable once, whatever its levels. The base model's flat loss counted every channel
+    # once (3D state ~87% of the objective), so weight each 3D variable by its 32 levels to keep that emphasis.
+    variable_weights:
+      CESM/prognostic/3d/U: 32.0
+      CESM/prognostic/3d/V: 32.0
+      CESM/prognostic/3d/T: 32.0
+      CESM/prognostic/3d/Qtot: 32.0
+
+    include_computed_diagnostics: true
+
+    use_latitude_weights: true
+    latitude_weights: "/glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+
+    pred_key: y_processed_raw       # train on the snapshot (after tracer + mass, before water + energy)
+    valid_pred_key: y_processed     # validate on the fully fixed prediction; valid_loss_raw is logged too
+
+
+# ---- Inference (credit rollout) ---- #
+# Each member is one rollout with its own top-level `seed` and save_forecast directory (docs/source/Ensembles.md).
+# noise_scale (or --noise-scale) multiplies every SDL noise factor: 0.0 is the deterministic CAMulator, 1.0 the
+# trained amplitude. Sweep it (0, 0.5, 1, 1.5, 2) to measure how spread and the climate respond to the noise.
+inference:
+  run_mode: single
+  mode: none
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl/rollout'
+  # noise_scale: 1.0
+
+  batch_forecast:
+    forecast_length: "180d"
+    first_init_date: "2013-01-01"
+    last_init_date: "2013-12-31"
+    init_interval: "1d"
+
+  single_forecast:
+    forecast_length: "30d"
+    start_datetime: "2013-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: month
+    metadata: "/glade/campaign/cisl/aiml/credit/cesm_exercise/camulator_metadata.yaml"
+    variables:
+      - name: "CESM/prognostic/2d/PS"
+      - name: "CESM/prognostic/2d/TREFHT"
+      - name: "CESM/diagnostic/2d/PRECT"
+      - name: "CESM/diagnostic/2d/TS"
+      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDLOW"
+      - name: "CESM/diagnostic/2d/CLDMED"
+      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUY"
+      - name: "CESM/diagnostic/2d/U10"
+      - name: "CESM/diagnostic/2d/QFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/FSDS_J"
+      - name: "CESM/diagnostic/2d/FLDS_J"
+      - name: "CESM/diagnostic/2d/FSUS"
+      - name: "CESM/diagnostic/2d/FLUS"
+      - name: "CESM/diagnostic/2d/FSUTOA"
+      - name: "CESM/diagnostic/2d/FLUT"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 0
+
+
+pbs: # derecho: 2 nodes x 4 A100 = 8 ring members (trainer.ensemble_size)
+  conda: "credit-derecho"
+  project: "NAML0001"
+  job_name: "camulator_sdl"
+  walltime: "12:00:00"
+  nodes: 2
+  ncpus: 64
+  ngpus: 4
+  mem: '480GB'
+  queue: 'main'
