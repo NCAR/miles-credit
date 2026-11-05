@@ -1293,9 +1293,7 @@ def test_fit_physical_target_stats_with_accelerator_batch():
 
     # device to use (resolves to MPS on Apple Silicon, CUDA on GPU boxes, else CPU)
     best_device = (
-        torch.accelerator.current_accelerator(check_available=True)
-        if hasattr(torch, "accelerator")
-        else None
+        torch.accelerator.current_accelerator(check_available=True) if hasattr(torch, "accelerator") else None
     ) or torch.device("cpu")
 
     q = "era5/prognostic/3d/Q"
