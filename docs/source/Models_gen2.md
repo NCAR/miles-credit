@@ -11,6 +11,10 @@ what each one does, the major changes from the CREDIT v1 (arXiv 2024) release,
 and an annotated example config. For the exact constructor arguments, follow the
 AutoAPI link in each section.
 
+More architectures (Aurora, Pangu-Weather, GraphCast, FourCastNet, SFNO, U-Net, and others) are available in
+the companion [credit-zoo](https://github.com/NCAR/credit-zoo) package; see
+[More models: credit-zoo](#more-models-credit-zoo) for how to use them.
+
 ## How variables become model channels
 
 All CREDIT models share one convention that is worth understanding before
@@ -348,6 +352,43 @@ message, and `credit check` reports it.
 
 ---
 
+## More models: credit-zoo
+
+[credit-zoo](https://github.com/NCAR/credit-zoo) is a companion package of community and reference
+architectures that plug into CREDIT, including Aurora, Pangu-Weather, GraphCast, FourCastNet, SFNO, FuXi-ENS,
+ClimaX, Stormer, and the U-Net models. They train and roll out through the same `credit` CLI and config
+pipeline as the built-in models. See the
+[credit-zoo model reference](https://github.com/NCAR/credit-zoo/blob/main/credit_zoo/models/MODELS.md)
+for the full list.
+
+credit-zoo is not on PyPI yet. Install it from GitHub alongside CREDIT:
+
+```bash
+pip install git+https://github.com/NCAR/credit-zoo.git
+```
+
+A zoo model is an ordinary CREDIT model registered from an external package, so you add it with a
+[`custom_objects:`](Custom.md) block. The key you choose becomes the `model.type`:
+
+```yaml
+custom_objects:
+  aurora:                                   # the key you use in model.type
+    object_type: model
+    module_path: credit_zoo.models.aurora.model   # importable module containing the class
+    module_name: CREDITAurora                     # class name
+
+model:
+  type: "aurora"
+  # ... constructor arguments for the model
+```
+
+You don't need to import anything by hand: `load_model` reads `custom_objects` and imports the module.
+Each model has a ready-to-run example config in credit-zoo's
+[`config/`](https://github.com/NCAR/credit-zoo/tree/main/config) directory with the `custom_objects` block
+already filled in. Run `credit check -c your_config.yml` to confirm the class resolves before you train.
+
+---
+
 ## Choosing a model
 
 - **WXFormer** — the default choice for weather forecasting; best skill, most
@@ -363,4 +404,5 @@ message, and `credit check` reports it.
 
 Other registered backbones (FuXi, a graph transformer, and downscaling and WRF
 variants) are available as `model.type` keys; see the API reference for their
-arguments.
+arguments. For published architectures beyond these, check
+[credit-zoo](https://github.com/NCAR/credit-zoo) before writing your own.
