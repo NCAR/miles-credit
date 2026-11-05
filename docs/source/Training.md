@@ -113,7 +113,8 @@ trainer:
 
 `activation_checkpoint: True` checkpoints every block that opts in through a
 `_fsdp2_shard = True` attribute (the CrossFormer/WXFormer `Transformer` and
-`UpBlock` blocks do by default). For a model whose blocks do not opt in, list the
+`UpBlock` blocks, and CrossFormer's final full-resolution pixel-shuffle
+`up_block4`, do by default). For a model whose blocks do not opt in, list the
 block class names instead. Names must match exactly, so `Block` does not also
 catch `UpBlock`, and `Layer` does not catch `LayerNorm`:
 
@@ -160,7 +161,18 @@ comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
 instead of manual autocast — the trainer disables autocast and the GradScaler
 automatically because the policy replaces both. With spectral norm the policy
 is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
-explicitly.
+explicitly. `output_dtype` applies to the model's final output only; the
+per-block shards keep their outputs in `param_dtype`, so `output_dtype: float32`
+gives a full-precision `y_pred` for the postblocks while the blocks compute in bf16.
+
+```yaml
+trainer:
+  amp: True
+  fsdp2_mp_policy:
+    param_dtype: bfloat16
+    reduce_dtype: float32
+    output_dtype: float32
+```
 
 **Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
 `tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
@@ -321,6 +333,35 @@ use `torchrun --standalone` regardless of `--launcher`. The `pbsdsh` launcher ba
 fully-resolved conda/module environment into a per-node script, because pbsdsh's spawned
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
 libfabric for inter-node communication. Use `--dry-run` to compare the two scripts.
+
+### Extra torchrun flags
+
+`torchrun_args` in the `pbs:` or `slurm:` block (a string or a list of flags) is appended
+to every `torchrun` line `credit submit` generates, single- and multi-node, in every
+`--mode`. The `--torchrun-args` flag overrides it; write it with `=` because the value
+starts with `--`. For example, to bind each rank to its GPU's CPU socket:
+
+```yaml
+slurm:
+  torchrun_args: "--numa-binding=node"
+```
+
+```bash
+credit submit --cluster horizon --scheduler slurm -c config.yml --torchrun-args=--numa-binding=node --dry-run
+```
+
+A string is inserted as written, so it can hold several flags. In a list, each element
+is shell-quoted and stays one argument, even with spaces or shell metacharacters:
+
+```yaml
+pbs:
+  torchrun_args: ["--numa-binding=node", "--log-dir=/glade/derecho/scratch/me/my logs"]
+```
+
+The `pbsdsh` launcher passes the flags to each node's `torchrun`. Its per-node script is
+written through an unquoted heredoc, so a `$` in the flags expands when that script is
+written. The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
+`torchrun_args`; `credit submit` and `credit check` both warn when that happens.
 
 ## Job submission
 

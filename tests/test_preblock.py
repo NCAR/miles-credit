@@ -1233,3 +1233,52 @@ def test_sqrt_transform_partial_path_expands_to_matching_vars():
         assert torch.allclose(result["input"][_TRANSFORM_SOURCE][v].float(), originals[v].float()), (
             f"partial path should NOT have transformed {v}"
         )
+
+
+def test_fit_physical_target_stats_fits_pre_log_target_values():
+    """credit preprocess records exact physical-unit stats for log-transformed targets."""
+    from credit.preblock.log import LogTransform
+    from credit.preblock.scaler import fit_physical_target_stats, physical_stats_path
+
+    q, t = "era5/prognostic/3d/Q", "era5/prognostic/3d/T"
+    log_block = LogTransform(variables=[q])
+    batches = [
+        {
+            dt: {"era5": {q: torch.rand(2, 3, 1, 4, 5) * 1e-2, t: torch.rand(2, 3, 1, 4, 5) + 250}}
+            for dt in ("input", "target")
+        }
+        for _ in range(2)
+    ]
+    stats = None
+    for batch in batches:
+        stats = fit_physical_target_stats(log_block, batch, stats)
+
+    assert set(stats) == {"target"} and set(stats["target"]["era5"]) == {q}
+    q_all = torch.cat([b["target"]["era5"][q] for b in batches]).transpose(0, 1).reshape(3, -1).double()
+    assert torch.allclose(stats["target"]["era5"][q].var_x_.double(), q_all.var(dim=1, unbiased=False), rtol=1e-4)
+    # A block that only transforms inputs has no target stats to record.
+    assert fit_physical_target_stats(LogTransform(variables=[q], data_types=["input"]), batches[0]) is None
+    assert physical_stats_path("/a/scaler.json") == "/a/scaler_physical.json"
+
+
+def test_fit_physical_target_stats_per_gridpoint_for_spatial_variables():
+    """Grid-wise scaled variables get per-gridpoint physical variance, not a map-pooled one."""
+    from credit.preblock.log import LogTransform
+    from credit.preblock.scaler import fit_physical_target_stats
+
+    ps = "era5/prognostic/2d/PS"
+    torch.manual_seed(0)
+    # Each grid point has its own climatology (spread across the map) plus small noise in time.
+    climatology = torch.linspace(5e4, 1e5, 20).reshape(1, 1, 1, 4, 5)
+    batches = [{"target": {"era5": {ps: climatology + 100 * torch.randn(8, 1, 1, 4, 5)}}} for _ in range(2)]
+    pooled = fitted = None
+    for batch in batches:
+        pooled = fit_physical_target_stats(LogTransform(variables=[ps]), batch, pooled)
+        fitted = fit_physical_target_stats(LogTransform(variables=[ps]), batch, fitted, spatial_variables=[ps])
+
+    var_x = fitted["target"]["era5"][ps].var_x_.double()
+    assert var_x.numel() == 20
+    x = torch.cat([b["target"]["era5"][ps] for b in batches]).reshape(16, -1).double()
+    assert torch.allclose(var_x, x.var(dim=0, unbiased=False), rtol=1e-3)
+    # The pooled fit folds in the map-wide climatology spread and is far larger.
+    assert float(pooled["target"]["era5"][ps].var_x_.mean()) > 100 * float(var_x.mean())
