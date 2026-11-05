@@ -14,7 +14,8 @@
 # Before the first run:
 #   1. Copy the base checkpoint into save_loc as checkpoint.pt (load_weights reads only <save_loc>/checkpoint.pt).
 #      The released weights are epoch 69 of Will Chapman's run (climate/maintainer/stage_assets.sh, branch
-#      willychap/camulator_huggingface); verify the file before copying:
+#      willychap/camulator_huggingface), md5 c354ef6300ad3d8dc4d52ced11ab3f30. Not cesm_exercise/checkpoint.pt,
+#      which is epoch 65:
 #        mkdir -p /glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl
 #        cp /glade/derecho/scratch/wchapman/CREDIT_runs/NEW_CLI_JOHN_CASPER_extended_v2/checkpoint.pt00069.pt \
 #           /glade/derecho/scratch/$USER/CREDIT_runs/camulator_sdl/checkpoint.pt
@@ -69,7 +70,9 @@ data:
   skip_periods: null
 
 
-# ---- Validation data: 2013-2014, held out from the base model (paths as in camulator_gen2_casper.yml) ---- #
+# ---- Validation data: 2013-2014, held out from the base model ---- #
+# Same campaign store as training (it holds 1980-2014). camulator_gen2_casper.yml's validation forcing path,
+# .../cesm_camulator_data/dynamic_forcing/control/forcing_%Y.zarr, does not exist on glade.
 validation_data:
   source:
     CESM:
@@ -79,19 +82,19 @@ validation_data:
         prognostic:
           vars_3D: ['U', 'V', 'T', 'Qtot']
           vars_2D: ['PS', 'TREFHT']
-          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
 
         diagnostic:
           vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
                     'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
-          path: '/glade/derecho/scratch/wchapman/b_credit_runs/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
 
         dynamic_forcing:
           vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
-          path: '/glade/derecho/scratch/cbecker/cesm_camulator_data/dynamic_forcing/control/forcing_%Y.zarr'
+          path: "/glade/campaign/cisl/aiml/credit/cesm_exercise/forcing/dynamic_forcing/%Y_forcing.zarr"
         static:
           vars_2D: ['z_norm', 'LANDM_COSLAT']
-          path: '/glade/derecho/scratch/cbecker/cesm_camulator_data/static/statics_b_credit_runs_f32_02.nc'
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/static/statics_b_credit_runs_f32_02.nc'
 
   start_datetime: "2013-01-01"
   end_datetime: "2014-12-31"
@@ -536,7 +539,9 @@ inference:
 
 
 pbs: # derecho: 2 nodes x 4 A100 = 8 ring members (trainer.ensemble_size)
-  conda: "credit-derecho"
+  # A clone of the Derecho torch build (/glade/work/dgagne/conda-envs/credit-derecho: torch 2.8 + Cray MPICH + the
+  # NCCL OFI plugin for Slingshot) with this branch editable-installed, so other envs keep their own credit.
+  conda: "/glade/work/cbecker/conda-envs/credit-sdl"
   project: "NAML0001"
   job_name: "camulator_sdl"
   walltime: "12:00:00"
