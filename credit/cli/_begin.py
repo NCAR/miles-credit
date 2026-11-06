@@ -807,7 +807,6 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
         defaults = _PBS_DEFAULTS[system]
         result = {
             "conda": env or ("credit-derecho" if system == "derecho" else "credit-casper"),
-            "project": defaults["account"],
             "job_name": experiment,
             "walltime": defaults["walltime"],
             "nodes": nodes,
@@ -816,6 +815,16 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "mem": "auto",  # credit submit sizes it from the config; credit check reports the estimate
             "queue": defaults["queue"],
         }
+        # Only write the account when the user types one. When left out, `credit submit`
+        # falls back to $PBS_ACCOUNT at submit time, which keeps the config portable.
+        env_account = os.environ.get("PBS_ACCOUNT")
+        if env_account:
+            hint = f"PBS account (Enter to use $PBS_ACCOUNT={env_account} at submit time)"
+        else:
+            hint = "PBS project code to charge (Enter to skip; then export PBS_ACCOUNT before submitting)"
+        account = _prompt(hint, "")
+        if account:
+            result["project"] = account
         if system == "casper":
             choices = ["any"] + sorted(t for t in _CASPER_GPU_NODES if t)
             hint = ", ".join(choices)
@@ -827,12 +836,20 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
         return result
 
     defaults = _SLURM_CLUSTER_DEFAULTS["perlmutter"]
-    account = _prompt("Perlmutter account (include _g for GPU allocations)", "")
+    # Left blank, `credit submit` falls back to $SLURM_ACCOUNT, so don't write an empty key.
+    env_account = os.environ.get("SLURM_ACCOUNT")
+    if env_account:
+        hint = f"Perlmutter account (include _g for GPU allocations; Enter to use $SLURM_ACCOUNT={env_account})"
+    else:
+        print("  $SLURM_ACCOUNT is not set.")
+        hint = "Perlmutter account to charge (include _g for GPU allocations; Enter to use your default allocation)"
+    account = _prompt(hint, "")
     qos = _prompt("Perlmutter QOS", defaults["qos"])
+    result = {"conda": env or "credit"}
+    if account:
+        result["project"] = account
     return {
-        "conda": env or "credit",
-        "account": account,
-        "project": account,
+        **result,
         "job_name": experiment,
         "walltime": defaults["walltime"],
         "nodes": nodes,

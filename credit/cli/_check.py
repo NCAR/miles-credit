@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_DEFAULTS, _PBS_QUEUES, auto_mem, site_default_mem, torchrun_args_error
+from ._common import _PBS_DEFAULTS, _PBS_QUEUES, _nonblank, auto_mem, site_default_mem, torchrun_args_error
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -1341,9 +1341,50 @@ def _check_deep_loads(conf: dict, rep: _Report) -> None:
         )
 
 
+def _check_account(conf: dict, pbs: dict, rep: _Report) -> None:
+    """Report which account `credit submit` will charge, or that none resolves."""
+    # Perlmutter blocks (written by `credit begin` under pbs:) carry SLURM-only keys.
+    slurm = "slurm" in conf or any(k in pbs for k in ("constraint", "qos", "partition"))
+    env_var = "SLURM_ACCOUNT" if slurm else "PBS_ACCOUNT"
+    env_account = _nonblank(os.environ.get(env_var))
+    account = _nonblank(pbs.get("project")) or _nonblank(pbs.get("account"))
+    if account:
+        if env_account and env_account != account:
+            rep.info(
+                "pbs.project",
+                f"'{account}' overrides ${env_var} ({env_account}); `credit submit` will charge '{account}'.",
+                fix=f"Delete pbs.project to charge ${env_var} instead.",
+            )
+    elif env_account:
+        rep.info("pbs.project", f"Unset; `credit submit` will charge ${env_var} ({env_account}).")
+    elif slurm:
+        rep.info(
+            "pbs.project",
+            "No SLURM account; jobs will charge your default allocation.",
+            fix="project: <YOUR_ACCOUNT>   # or export SLURM_ACCOUNT",
+        )
+    else:
+        rep.warn(
+            "pbs.project",
+            "No PBS account: `credit submit` will fail unless you pass --account or export PBS_ACCOUNT.",
+            fix="project: <YOUR_ACCOUNT>   # or export PBS_ACCOUNT",
+        )
+
+
 def _check_pbs(conf: dict, rep: _Report) -> None:
     pbs = conf.get("pbs") or {}
     if not pbs:
+        # A SLURM-only config (`slurm:` block, no `pbs:`) still needs its account reported;
+        # the queue/gpu_type checks below are PBS-specific.
+        if conf.get("slurm"):
+            _check_account(conf, conf["slurm"], rep)
+        elif not _nonblank(os.environ.get("PBS_ACCOUNT")):
+            # INFO, not WARN: a laptop/workstation config has no pbs: block and never submits.
+            rep.info(
+                "pbs.project",
+                "No pbs: block and $PBS_ACCOUNT is unset; `credit submit` will need --account.",
+                fix="export PBS_ACCOUNT=<YOUR_ACCOUNT>   # or add pbs: {project: <YOUR_ACCOUNT>}",
+            )
         return
     # gpu_type is only used by the Casper template; leaving it unset requests any
     # NVIDIA GPGPU, which is a valid (and usually faster-queuing) choice.
@@ -1373,7 +1414,8 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
                 f"'{name}' is a {targets[0].capitalize()} queue; "
                 f"`credit submit --cluster {targets[0]}` is the matching target.",
             )
-    for key in ("project", "job_name", "walltime", "queue"):
+    _check_account(conf, pbs, rep)
+    for key in ("job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
     if len(targets) == 1:

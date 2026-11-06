@@ -164,7 +164,7 @@ loss:
 
 pbs:
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "dp_test"
     walltime: "00:30:00"
     nodes: 1

@@ -546,7 +546,7 @@ inference:
 
 pbs:
   conda: credit-aiml
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "camulator"
   walltime: "00:30:00"
   ncpus: 8

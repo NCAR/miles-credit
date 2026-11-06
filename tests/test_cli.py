@@ -63,7 +63,7 @@ def _make_minimal_conf(tmp_path, extra=None):
             "valid_forecast_len": 1,
         },
         "pbs": {
-            "project": "NAML0001",
+            "project": "TEST0000",
             "walltime": "06:00:00",
             "job_name": "test_job",
             "conda": "/glade/u/home/testuser/.conda/envs/credit",
@@ -88,7 +88,7 @@ def _casper_args(**kwargs):
         queue="casper",
         gpu_type="a100_80gb",
         walltime="06:00:00",
-        account="NAML0001",
+        account="TEST0000",
         conda_env="/some/env",
         torchrun="/usr/bin/torchrun",
         job_name="credit_gen2",
@@ -112,7 +112,7 @@ def _derecho_args(**kwargs):
         queue="main",
         gpu_type="a100_80gb",
         walltime="12:00:00",
-        account="NAML0001",
+        account="TEST0000",
         conda_env="/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
         torchrun=None,
         job_name="credit_gen2",
@@ -335,6 +335,41 @@ class TestResolvePbsOpts:
         pbs_cfg = {"project": "OTHER"}
         r = _resolve_pbs_opts(args, pbs_cfg)
         assert r.account == "MYACCT"
+
+    def test_cli_flag_beats_config_and_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        r = _resolve_pbs_opts(self._minimal_args(account="MYACCT"), {"project": "OTHER"})
+        assert r.account == "MYACCT"
+
+    def test_config_beats_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(), {"project": "FROMCONFIG"}).account == "FROMCONFIG"
+
+    def test_empty_config_account_falls_through_to_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(), {"project": ""}).account == "ENV_ACCOUNT"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_cli_account_falls_through(self, monkeypatch, blank):
+        # A wrapper passing --account "$PROJ" with $PROJ unset must not block the config/env fallback.
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {}).account == "ENV_ACCOUNT"
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {"project": "CFG"}).account == "CFG"
+
+    def test_blank_env_account_is_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "  ")
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(self._minimal_args(), {})
+
+    def test_account_is_stripped(self, monkeypatch):
+        assert _resolve_pbs_opts(self._minimal_args(account=" MYACCT "), {}).account == "MYACCT"
+
+    def test_dry_run_without_account_uses_placeholder(self, monkeypatch, capsys):
+        # A preview shouldn't need an account: render a placeholder and warn instead of exiting.
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+        r = _resolve_pbs_opts(self._minimal_args(dry_run=True), {})
+        assert r.account == "<UNSET>"
+        assert "PBS_ACCOUNT" in capsys.readouterr().err
 
     def test_falls_back_to_pbs_cfg(self):
         args = self._minimal_args(cluster="casper", account=None)
@@ -1255,7 +1290,7 @@ class TestConvertAutoTransform:
                 "y",
                 # cluster, account, conda, walltime, job_name
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1288,7 +1323,7 @@ class TestConvertAutoTransform:
                 "0.9999",
                 "y",
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1332,7 +1367,7 @@ class TestConvertAutoTransform:
                 "y",
                 "4",  # keep ensemble, size
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1369,7 +1404,7 @@ class TestConvertAutoTransform:
                 "n",  # EMA + no TensorBoard
                 "n",  # do NOT keep ensemble
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1398,7 +1433,7 @@ class TestConvertAutoTransform:
                 "0.9999",
                 "y",
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1567,8 +1602,8 @@ class TestResolvePbsOptsEnv:
         r = _resolve_pbs_opts(args, {})
         assert r.account == "ENV_ACCOUNT"
 
-    def test_ultimate_fallback_naml0001(self, monkeypatch):
-        # Remove PBS_ACCOUNT if set
+    def test_missing_account_exits(self, monkeypatch, capsys):
+        # No flag, no pbs.project, no $PBS_ACCOUNT: there is no built-in account to fall back to.
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1582,11 +1617,29 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
-        assert r.account == "NAML0001"
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
+        assert "PBS_ACCOUNT" in capsys.readouterr().err
+
+    def test_empty_env_account_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "")
+        args = argparse.Namespace(
+            cluster="casper",
+            account=None,
+            walltime=None,
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            queue=None,
+            gpu_type=None,
+            conda_env=None,
+        )
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
 
     def test_all_none_uses_hardcoded_defaults(self, monkeypatch):
-        """All fields None + empty pbs_cfg → _first() returns None path is exercised."""
+        """All CLI fields None and no pbs_cfg settings except the account → cluster defaults fill the rest."""
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1600,7 +1653,7 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
+        r = _resolve_pbs_opts(args, {"project": "TEST_ACCOUNT"})
         # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
         assert r.gpu_type is None
         assert r.walltime == "12:00:00"
@@ -1631,7 +1684,7 @@ class TestConvertCasperPath:
                 "0.9999",  # EMA
                 "n",  # TensorBoard
                 "casper",  # cluster
-                "NAML0001",  # account
+                "TEST0000",  # account
                 "credit-casper",  # conda
                 "04:00:00",  # walltime
                 "my_job",  # job_name
@@ -1650,6 +1703,31 @@ class TestConvertCasperPath:
         with open(out_path) as f:
             result = yaml.safe_load(f)
         assert result["pbs"]["queue"] == "casper"
+        assert result["pbs"]["project"] == "TEST0000"
+
+    @pytest.mark.parametrize("env_account", [None, "ENV_ACCOUNT"])
+    def test_blank_account_is_omitted(self, tmp_path, monkeypatch, env_account):
+        # Like `credit begin`: a blank answer leaves the key out so $PBS_ACCOUNT applies at submit time.
+        if env_account:
+            monkeypatch.setenv("PBS_ACCOUNT", env_account)
+        else:
+            monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+        conf = {
+            "trainer": {"type": "era5"},
+            "data": {"forecast_len": 0, "valid_forecast_len": 0},
+            "loss": {"training_loss": "mse"},
+        }
+        p = tmp_path / "v1.yml"
+        p.write_text(yaml.dump(conf))
+        out_path = str(tmp_path / "v2.yml")
+        answers = iter(["y", "0.9999", "n", "casper", "", "credit-casper", "04:00:00", "my_job"])
+        # Remaining prompts (gpus, cpus, ...) take their defaults; the last one is the output path.
+        monkeypatch.setattr("builtins.input", lambda _: next(answers, ""))
+        cli._convert(argparse.Namespace(config=str(p), output=out_path))
+
+        with open(out_path) as f:
+            result = yaml.safe_load(f)
+        assert "project" not in result["pbs"] and "account" not in result["pbs"]
 
 
 # ===========================================================================
@@ -2038,3 +2116,33 @@ class TestArcoLevels:
         self._answers(monkeypatch, "0", "138", "ten", "1,x", " , ", "all")
         assert self._arco_levels() == list(range(1, 138))
         assert capsys.readouterr().out.count("between 1 and 137") == 5
+
+
+# ===========================================================================
+# Account handling for SLURM and the job plan (issue #486)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_slurm_blank_cli_account_falls_through(monkeypatch, blank):
+    from credit.cli._submit import _resolve_slurm_opts
+
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    fields = ("walltime", "gpus", "nodes", "cpus", "mem", "queue", "gpu_type", "conda_env")
+    args = argparse.Namespace(cluster="perlmutter", account=blank, **dict.fromkeys(fields))
+    assert _resolve_slurm_opts(args, {}).account == "m0000_g"
+
+
+@pytest.mark.parametrize(
+    ("scheduler", "account", "expected"),
+    [
+        ("pbs", "ABCD0001", "ABCD0001"),
+        ("slurm", "m0000_g", "m0000_g"),
+        ("slurm", None, "default allocation"),  # used to print "None"
+        ("pbs", None, "<UNSET>"),
+    ],
+)
+def test_job_plan_account_label(scheduler, account, expected):
+    from credit.cli._submit import _account_label
+
+    assert expected in _account_label(argparse.Namespace(scheduler=scheduler, account=account))

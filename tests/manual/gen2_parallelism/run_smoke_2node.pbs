@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -N gen2par_3way
 #PBS -l walltime=00:30:00
 #PBS -l select=2:ncpus=64:ngpus=4:mem=440GB
@@ -17,7 +17,7 @@
 # spawns nproc-per-node children per MPI rank (N^2 processes) and NCCL
 # fails on duplicate GPUs. MPI sets the rank env vars get_rank_info() reads.
 #
-# Submit:  qsub tests/manual/gen2_parallelism/run_smoke_2node.pbs
+# Submit:  qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} tests/manual/gen2_parallelism/run_smoke_2node.pbs
 
 set -u
 module --force purge

@@ -1,6 +1,6 @@
 #!/bin/bash
 # PBS -N AddLevs
-# PBS -A NAML0001
+# PBS -A YOUR_ACCOUNT
 # PBS -l walltime=12:00:00
 # PBS -o AddLevs.out
 # PBS -e AddLevs.out

@@ -170,7 +170,7 @@ predict:
 
 pbs: #derecho
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "wxformer_1h"
     walltime: "00:30:00"
     nodes: 2

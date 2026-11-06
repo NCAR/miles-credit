@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -N tp415_parity
 #PBS -l walltime=01:00:00
 #PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
@@ -22,7 +22,7 @@
 # within a few steps — see check_parity.py).
 #
 # Submit from a Casper or Derecho login node:
-#   qsub tests/manual/gen2_parallelism/run_tp_parity.pbs
+#   qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} tests/manual/gen2_parallelism/run_tp_parity.pbs
 
 set -u
 module --force purge

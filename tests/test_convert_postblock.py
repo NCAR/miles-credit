@@ -74,7 +74,7 @@ def test_convert_writes_postblocks(tmp_path, mean_std_nc):
             "backprop_on_timestep": [0, 1],
         },
         "loss": {"training_loss": "mse"},
-        "pbs": {"project": "NAML0001", "job_name": "test", "walltime": "01:00:00", "conda": "credit"},
+        "pbs": {"project": "TEST0000", "job_name": "test", "walltime": "01:00:00", "conda": "credit"},
     }
     v1_path = str(tmp_path / "v1.yml")
     out_path = str(tmp_path / "v2.yml")

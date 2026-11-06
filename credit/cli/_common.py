@@ -227,6 +227,18 @@ def queue_cluster_error(queue: str, cluster: str) -> str:
     )
 
 
+def _nonblank(value) -> str | None:
+    """Return *value* as a stripped string, or None when it is unset or blank.
+
+    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
+    through to the config and environment, like an empty config key or env var does.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
 _PBS_DEFAULTS = {
     "casper": {
         "cpus": 8,
@@ -239,7 +251,9 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        "account": "NAML0001",
+        # Default account is none. It must come from --account,
+        # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
+        "account": None,
         "job_name": "credit_gen2",
     },
     "derecho": {
@@ -250,7 +264,9 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        "account": "NAML0001",
+        # Default account is none. It must come from --account,
+        # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
+        "account": None,
         "job_name": "credit_gen2",
     },
 }

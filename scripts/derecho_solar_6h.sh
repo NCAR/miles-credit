@@ -2,7 +2,7 @@
 #PBS -N credit_solar_6h
 #PBS -l select=4:ncpus=128:mpiprocs=128:ngpus=0
 #PBS -l walltime=01:00:00
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -q main@desched1
 #PBS -l job_priority=regular
 #PBS -j oe
