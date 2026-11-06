@@ -1117,6 +1117,17 @@ def test_examples_and_docs(env):
     assert call("docs", {"page": "../../README"}, check_ok=False)["error"]["code"] == "not_found"
 
 
+def test_logs_returns_the_cursor_offset(env):
+    run_id, _, save = make_run(env, jobs=["11.desched1"])
+    (save / "logs" / "credit_gen2.o11").write_bytes(b"line 1\nEpoch 0: 1%\rEpoch 0: 2%")
+    out = call("logs", {"run_id": run_id})
+    # A snapshot includes the unfinished last line; the offset stops before it, where a sync would continue.
+    assert out["text"] == "line 1\nEpoch 0: 2%" and out["current_frame"] == "Epoch 0: 2%"
+    assert out["offset"] == len(b"line 1\nEpoch 0: 1%\r")
+    d = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d["cursor"]["logs"]["11"]["off"] == out["offset"]  # the same cursor a sync continues from
+
+
 def test_pbsdsh_jobs_read_rank0_node_log(env):
     run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
     (save / "logs" / "credit_gen2.o11").write_text("mother superior\n")

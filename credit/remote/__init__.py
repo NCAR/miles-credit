@@ -463,6 +463,9 @@ def logs(req: dict) -> dict:
         "path": real,
         "text": _guard.redact(text)[0],
         "current_frame": _guard.redact(r["current_frame"])[0],
+        # The cursor after the last complete line: what a sync of this log would continue from, so a reader can tell
+        # which streamed appends it already has. (An unfinished last line in `text` lies past it.)
+        "offset": r["off"],
     }
 
 
