@@ -128,6 +128,35 @@ There are two distinct ways to build an ensemble in CREDIT, and it's worth being
 
 These aren't mutually exclusive — you can perturb the IC and use an SDL model in the same rollout — but each is sufficient on its own to produce an ensemble, and conflating them makes the ensemble's uncertainty harder to interpret.
 
+### Red-in-time noise
+
+By default SDL draws fresh noise at every step, so its noise is white in time. Two opt-in options give the noise memory. Both are AR(1) processes with an e-folding time `tau`: each step is `phi * previous + sqrt(1 - phi**2) * fresh` with `phi = exp(-timestep / tau)`. Both start from the stationary distribution, so every step has the same N(0, 1) marginal as white noise.
+
+**Why single-step training can't set tau.** An AR(1) process that starts from its stationary distribution has the same one-step marginal as white noise. Single-step CRPS training therefore cannot distinguish red noise from white or learn `tau`. Instead, set `tau` from an analysis of the model's error memory, or calibrate it with multi-step training. For the same reason, a white-trained checkpoint can run red noise without retraining.
+
+**AR(1) on SDL's own draws** (`model.red_noise`) applies the process to the latent `z` and to the per-pixel noise at every injection point:
+
+```yaml
+model:
+  type: "crossformer-ensemble"
+  # ... SDL keys as above ...
+  red_noise:                 # remove the block for white noise (the default, unchanged bit for bit)
+    tau_hours: 264           # one value for every injection point, or [coarse, mid, fine] for the
+                             # three decoder points (0 or null keeps a point white)
+    timestep_hours: 6        # the model step; credit check compares it with data.timestep
+    apply_to: [latent, pixel]
+```
+
+The process is still white in space, as SDL was trained, and it is untargeted: every variable and region gets the same memory.
+
+**Targeted physical-space red noise** is the [`targeted_red_noise`](postblocks_gen2.md#targeted_red_noise-targetedrednoise) postblock. It adds a spatially smooth AR(1) pattern, in physical units, to chosen fields over land and sea ice only. Each field can have its own `tau`.
+
+**State and reset.** Both keep their state in plain attributes, not buffers. Checkpoints are therefore unchanged, and DDP never copies one rank's noise to the others.
+- The gen2 trainer restarts the state at the first step of every batch: train and validation.
+- `credit rollout` restarts it at the start of every forecast.
+- Each batch row is an independent stream, so each ensemble member has its own noise history.
+- Over a multi-step training window the state carries from step to step but holds no autograd graph.
+
 ### Scaling across GPUs
 
 `ensemble_size` in the trainer config controls how many stochastic samples are drawn per input during training. Two placements of that ensemble matter for multi-GPU runs:

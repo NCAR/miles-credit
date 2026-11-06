@@ -1026,3 +1026,133 @@ def test_mass_fixer_after_energy_fixer_warns(conf):
     rep = _run(conf)
     assert _fixer_warnings(rep) == {"postblocks.per_step.mass_fixer"}
     assert "before the energy fixer" in _text(rep, "warning")
+
+
+# ===========================================================================
+# Red noise: model.red_noise and the targeted_red_noise postblock
+# ===========================================================================
+
+_SP = "ERA5/prognostic/2d/SP"
+
+
+def _red_block(**args):
+    fields = [{"var": _SP, "sigma": 10.0, "tau_days": 11}]
+    return {"type": "targeted_red_noise", "args": {"fields": fields, "length_scale_km": 2000.0, **args}}
+
+
+def _insert_after(conf, after, name, block):
+    items = list(conf["postblocks"]["per_step"].items())
+    i = [n for n, _ in items].index(after) + 1 if after else 0
+    conf["postblocks"]["per_step"] = dict(items[:i] + [(name, block)] + items[i:])
+
+
+@pytest.fixture
+def land_map(tmp_path):
+    import numpy as np
+    import xarray as xr
+
+    path = tmp_path / "statics.nc"
+    xr.Dataset({"LANDFRAC": (("lat", "lon"), np.ones((64, 64), np.float32))}).to_netcdf(path)
+    return str(path)
+
+
+def test_red_sdl_noise_clean(conf):
+    conf["model"]["type"] = "crossformer-ensemble"
+    conf["model"]["red_noise"] = {"tau_hours": 264, "timestep_hours": 6}
+    rep = _run(conf)
+    assert _wheres(rep) == set(), _text(rep)
+
+
+@pytest.mark.parametrize(
+    "red_noise, where, text",
+    [
+        ({"tau_hours": 264, "timestep_hours": 3}, "model.red_noise.timestep_hours", "data.timestep is 6"),
+        ({"tau_hours": [1, 2], "timestep_hours": 6}, "model.red_noise", "3 entries"),
+        ({"tau_hours": 264}, "model.red_noise", "timestep_hours"),
+    ],
+)
+def test_red_sdl_noise_errors(conf, red_noise, where, text):
+    conf["model"].update(type="crossformer-ensemble", encoder_noise=False, red_noise=red_noise)
+    rep = _run(conf)
+    assert where in _wheres(rep)
+    assert text in _text(rep)
+
+
+def test_targeted_red_noise_clean(conf, land_map):
+    fields = [
+        {"var": _SP, "sigma": {"path": land_map, "var": "LANDFRAC"}, "tau_days": 11, "pattern": "p"},
+        {"var": "ERA5/prognostic/3d/T", "levels": [-1], "sigma": 0.2, "tau_days": 11, "pattern": "p"},
+    ]
+    block = _red_block(fields=fields, land_file=land_map, ice_var="ERA5/dynamic_forcing/2d/tisr")
+    _insert_after(conf, "scaler", "red", block)
+    rep = _run(conf)
+    assert _wheres(rep) == set(), _text(rep)
+    assert not [w for w in _wheres(rep, "warning") if "red" in w], _text(rep, "warning")
+
+
+@pytest.mark.parametrize(
+    "args, text",
+    [
+        ({"fields": [{"var": "ERA5/prognostic/2d/XX", "sigma": 1.0, "tau_days": 11}]}, "not a predicted"),
+        ({"fields": [{"var": _SP, "levels": [0], "sigma": 1.0, "tau_days": 11}]}, "remove levels"),
+        ({"fields": [{"var": "ERA5/prognostic/3d/T", "levels": [5], "sigma": 1.0, "tau_days": 11}]}, "out of range"),
+        ({"fields": [{"var": _SP, "sigma": 1.0}]}, "tau_days"),
+        ({"ice_var": "ERA5/dynamic_forcing/2d/ICEFRAC"}, "not a model input"),
+        ({"land_file": "/nonexistent/statics.nc"}, "File not found"),
+        ({"land_file": "LAND", "land_var": "LANDM"}, "has no variable"),
+        ({"length_scale_km": 20.0}, "too short"),
+        ({"lead_time_periods": 3}, "lead_time_periods is 3"),
+    ],
+)
+def test_targeted_red_noise_errors(conf, land_map, args, text):
+    if args.get("land_file") == "LAND":
+        args["land_file"] = land_map
+    _insert_after(conf, "scaler", "red", _red_block(**args))
+    rep = _run(conf)
+    assert any(w.startswith("postblocks.per_step.red") for w in _wheres(rep)), _text(rep)
+    assert text in _text(rep)
+
+
+def test_targeted_red_noise_map_on_the_wrong_grid(conf, tmp_path):
+    import numpy as np
+    import xarray as xr
+
+    path = tmp_path / "small.nc"
+    xr.Dataset({"LANDFRAC": (("lat", "lon"), np.ones((32, 32), np.float32))}).to_netcdf(path)
+    _insert_after(conf, "scaler", "red", _red_block(land_file=str(path)))
+    assert "model grid is (64, 64)" in _text(_run(conf))
+
+
+def test_targeted_red_noise_must_run_per_step(conf):
+    conf["postblocks"]["post_rollout"] = {"red": _red_block()}
+    rep = _run(conf)
+    assert "postblocks.post_rollout.red" in _wheres(rep)
+
+
+def test_targeted_red_noise_placement_warnings(conf):
+    _insert_after(conf, None, "red_first", _red_block())  # before the inverse scaler
+    _insert_after(conf, "scaler", "mass_fixer", copy.deepcopy(_MASS_FIXER))
+    _insert_after(conf, "mass_fixer", "red_late", _red_block())  # after a budget fixer
+    rep = _run(conf)
+    warnings = _wheres(rep, "warning")
+    assert {"postblocks.per_step.red_first", "postblocks.per_step.red_late"} <= warnings
+    text = _text(rep, "warning")
+    assert "physical units" in text
+    assert "random-walks the budget" in text
+
+
+def test_targeted_red_noise_under_inference_postblocks_is_checked(conf):
+    per_step = copy.deepcopy(conf["postblocks"]["per_step"])
+    per_step["red"] = _red_block(amplitude=1.0)
+    conf["inference"] = {"postblocks": {"per_step": per_step}}
+    rep = _run(conf)
+    assert "inference.postblocks.per_step.red" in _wheres(rep)
+    assert "amplitude" in _text(rep)
+
+
+def test_targeted_red_noise_rejects_domain_parallelism(conf):
+    conf["trainer"]["parallelism"]["domain"] = 2
+    _insert_after(conf, "scaler", "red", _red_block())
+    rep = _run(conf)
+    assert "postblocks.per_step.red" in _wheres(rep)
+    assert "domain parallelism" in _text(rep)

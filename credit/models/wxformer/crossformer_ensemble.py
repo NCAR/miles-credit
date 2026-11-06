@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import logging
 import torch
+from credit.ensemble.red_noise import AR1Noise, ar1_phi, red_noise_errors
 from credit.models.wxformer.stochastic_decomposition_layer import StochasticDecompositionLayer
 
 
@@ -26,6 +27,7 @@ class CrossFormerWithNoise(CrossFormer):
         encoder_noise=True,
         freeze=True,
         correlated=False,
+        red_noise=None,
         **kwargs,
     ):
         """
@@ -37,6 +39,12 @@ class CrossFormerWithNoise(CrossFormer):
             decoder_noise_factor (float, optional): Scaling factor for decoder noise injection. Defaults to 0.275.
             encoder_noise (bool, optional): Whether to inject noise into encoder layers. Defaults to True.
             freeze (bool, optional): Whether to freeze pre-trained model weights. Defaults to True.
+            red_noise (dict, optional): Make the noise AR(1) in time instead of white. Keys:
+                ``tau_hours`` (one e-folding time for every injection point, or a list of three for the
+                decoder points, coarsest first; 0 or null keeps a point white), ``timestep_hours`` (the
+                model step) and ``apply_to`` (any of ``latent`` and ``pixel``; default both). Every step
+                keeps the white N(0, 1) marginal, so a white-trained checkpoint runs it unchanged.
+                None, the default, is white noise. See ``credit.ensemble.red_noise``.
             **kwargs: Additional arguments passed to the CrossFormer base class.
         """
 
@@ -106,6 +114,56 @@ class CrossFormerWithNoise(CrossFormer):
             decoder_noise_factors[2],
         )
 
+        # Red latent streams by injection point; empty means white latents.
+        self._latent_ar1 = {}
+        self.red_noise = red_noise
+        if red_noise is not None:
+            self._init_red_noise(red_noise)
+
+    def _init_red_noise(self, red_noise):
+        errors = red_noise_errors(red_noise, encoder_noise=self.encoder_noise, correlated=self.correlated)
+        if errors:
+            raise ValueError("model.red_noise: " + "; ".join(errors))
+        tau = red_noise["tau_hours"]
+        dt = red_noise["timestep_hours"]
+        apply_to = red_noise.get("apply_to", ["latent", "pixel"])
+
+        decoder_taus = tau if isinstance(tau, (list, tuple)) else [tau] * 3
+        points = [
+            (("decoder", i), layer, t)
+            for i, (layer, t) in enumerate(
+                zip([self.noise_inject1, self.noise_inject2, self.noise_inject3], decoder_taus)
+            )
+        ]
+        if self.encoder_noise:
+            points += [(("encoder", k), layer, tau) for k, layer in enumerate(self.encoder_noise_layers)]
+        for point, layer, t in points:
+            phi = ar1_phi(t, dt)
+            if not phi:
+                continue
+            if "pixel" in apply_to:
+                layer.pixel_ar1 = AR1Noise(phi)
+            if "latent" in apply_to and not self.correlated:
+                self._latent_ar1[point] = AR1Noise(phi)
+        if "latent" in apply_to and self.correlated and ar1_phi(tau, dt):
+            self._latent_ar1["shared"] = AR1Noise(ar1_phi(tau, dt))
+
+    def reset_noise_state(self):
+        """Restart the red latent streams (if any) from their stationary distribution.
+
+        The SDL layers' per-pixel streams reset themselves; call
+        ``credit.ensemble.red_noise.reset_noise_state(model)`` to reset both.
+        """
+        for stream in self._latent_ar1.values():
+            stream.reset()
+
+    def _latent(self, x, point):
+        """The latent z for one injection point: a fresh N(0, 1) draw, or the next AR(1) step if red."""
+        stream = self._latent_ar1.get(point)
+        if stream is None:
+            return torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+        return stream.sample((x.size(0), self.noise_latent_dim), x.device)
+
     def forward(self, x, noise=None, forecast_step=None):
         """
         Forward pass through the CrossFormer with noise injection.
@@ -119,7 +177,7 @@ class CrossFormerWithNoise(CrossFormer):
         """
 
         if self.correlated:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+            noise = self._latent(x, "shared")
 
         x_copy = None
         if self.use_post_block:
@@ -143,25 +201,25 @@ class CrossFormerWithNoise(CrossFormer):
             x = transformer(x)
             if self.encoder_noise and k < len(self.layers) - 1:
                 if not self.correlated:
-                    noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+                    noise = self._latent(x, ("encoder", k))
                 x = self.encoder_noise_layers[k](x, noise)
             encodings.append(x)
 
         x = self.up_block1(x)
         if not self.correlated:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+            noise = self._latent(x, ("decoder", 0))
         x = self.noise_inject1(x, noise)
         x = torch.cat([x, encodings[2]], dim=1)
 
         x = self.up_block2(x)
         if not self.correlated:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+            noise = self._latent(x, ("decoder", 1))
         x = self.noise_inject2(x, noise)
         x = torch.cat([x, encodings[1]], dim=1)
 
         x = self.up_block3(x)
         if not self.correlated:
-            noise = torch.randn(x.size(0), self.noise_latent_dim, device=x.device)
+            noise = self._latent(x, ("decoder", 2))
         x = self.noise_inject3(x, noise)
         x = torch.cat([x, encodings[0]], dim=1)
 

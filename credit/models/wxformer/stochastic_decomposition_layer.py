@@ -15,6 +15,8 @@ class StochasticDecompositionLayer(nn.Module):
         noise_transform (nn.Linear): A linear transformation to map latent noise to the feature map's channels.
         modulation (nn.Parameter): A learnable scaling factor applied to the noise.
         noise_factor (float): A scaling factor for controlling the intensity of the injected noise.
+        pixel_ar1 (AR1Noise or None): Makes the per-pixel noise AR(1) in time (set by CrossFormerWithNoise
+            from ``model.red_noise``). None, the default, draws fresh white noise on every call.
     """
 
     def __init__(self, noise_dim, feature_channels, noise_factor=0.1):
@@ -22,6 +24,12 @@ class StochasticDecompositionLayer(nn.Module):
         self.noise_transform = nn.Linear(noise_dim, feature_channels)
         self.modulation = nn.Parameter(torch.ones(1, feature_channels, 1, 1))
         self.noise_factor = nn.Parameter(torch.tensor([noise_factor]), requires_grad=False)
+        self.pixel_ar1 = None  # a plain attribute, not a buffer: see credit.ensemble.red_noise
+
+    def reset_noise_state(self):
+        """Restart the red per-pixel noise (if any) from its stationary distribution."""
+        if self.pixel_ar1 is not None:
+            self.pixel_ar1.reset()
 
     def forward(self, feature_map, noise):
         """
@@ -37,8 +45,13 @@ class StochasticDecompositionLayer(nn.Module):
 
         batch, channels, height, width = feature_map.shape
 
-        # Generate per-pixel, per-channel noise
-        pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
+        # Generate per-pixel, per-channel noise (AR(1) in time when red)
+        if self.pixel_ar1 is None:
+            pixel_noise = self.noise_factor * torch.randn(batch, channels, height, width, device=feature_map.device)
+        else:
+            pixel_noise = self.noise_factor * self.pixel_ar1.sample(
+                (batch, channels, height, width), feature_map.device
+            )
 
         # Transform latent noise and reshape
         style = self.noise_transform(noise).view(batch, channels, 1, 1)

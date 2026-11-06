@@ -941,6 +941,69 @@ class TestBaseLossMultiStep:
             torch.testing.assert_close(captured["scored"][step], captured["out"][step] + _SHIFT)
 
 
+class _NoiseStateModel(_ScaleModel):
+    """Logs its forward passes and the noise-state resets of itself and of a postblock, in order."""
+
+    def __init__(self):
+        super().__init__()
+        self.events = []
+
+    def reset_noise_state(self):
+        self.events.append("reset")
+
+    def forward(self, x):
+        self.events.append("step")
+        return super().forward(x)
+
+
+class TestNoiseStateReset:
+    """Red noise restarts with every trajectory: once per batch, before its first step, in model and postblocks."""
+
+    def _trainer(self, tmp_path):
+        from credit.postblock.base import BasePostblock
+        from credit.trainers.trainer_gen2 import TrainerERA5Gen2 as Trainer
+
+        conf = _era5_gen2_multistep_conf(forecast_len=2, tmp_path=tmp_path)
+        conf["trainer"]["batches_per_epoch"] = 2
+        conf["trainer"]["valid_batches_per_epoch"] = 2
+        conf["postblocks"] = {"per_step": {"reconstruct": {"type": "reconstruct"}}}
+        model = _NoiseStateModel()
+        trainer = Trainer(model, rank=0, conf=conf)
+
+        class _ResetLogger(BasePostblock):
+            def reset_noise_state(self):
+                model.events.append("postblock reset")
+
+            def forward(self, batch_dict):
+                return batch_dict
+
+        trainer.step_postblocks["red"] = _ResetLogger()
+        return trainer, model.events
+
+    def test_train_one_epoch_resets_each_batch(self, tmp_path):
+        trainer, events = self._trainer(tmp_path)
+        trainer.train_one_epoch(
+            epoch=0,
+            trainloader=_FakeLoader(1, 4, 4, 4, n_batches=4),
+            optimizer=torch.optim.SGD(trainer.model.parameters(), lr=1e-4),
+            criterion=nn.MSELoss(),
+            scaler=torch.amp.GradScaler("cpu", enabled=False),
+            scheduler=None,
+            metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
+        )
+        assert events == ["reset", "postblock reset", "step", "step"] * 2
+
+    def test_validate_resets_each_batch(self, tmp_path):
+        trainer, events = self._trainer(tmp_path)
+        trainer.validate(
+            epoch=0,
+            valid_loader=_FakeLoader(1, 4, 4, 4, n_batches=4),
+            criterion=nn.MSELoss(),
+            metrics=lambda p, y: {"acc": 0.0, "mae": 0.0},
+        )
+        assert events == ["reset", "postblock reset", "step", "step"] * 2
+
+
 # ---------------------------------------------------------------------------
 # assemble_rollout_batch — direct unit tests
 # ---------------------------------------------------------------------------

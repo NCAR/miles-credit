@@ -6,6 +6,7 @@ import torch
 from tqdm import tqdm
 
 from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
+from credit.ensemble.red_noise import reset_noise_state
 from credit.models import load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
@@ -248,6 +249,9 @@ def run_forecast(
     history_len = int(conf["data"].get("history_len", 1))
 
     full_data_dict: dict = {}
+
+    # A new forecast is a new trajectory: red noise restarts from its stationary distribution.
+    reset_noise_state(model, step_postblocks)
 
     # ── Step 0 (IC): load initial condition, run preblocks ──────────────────
     ic_batch = next(batch_iter)

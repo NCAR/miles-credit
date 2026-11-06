@@ -11,6 +11,7 @@ import tqdm
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema, resolve_num_levels
 from credit.datasets.gen_2.grid_utils import OUTPUT_GRID_SCHEMA_FILENAME, GridSchema
+from credit.ensemble.red_noise import reset_noise_state
 from credit.losses import BaseLoss, effective_loss_name, is_crps_loss
 from credit.metrics import BaseCombinedMetric, BaseVariableMetric
 from credit.parallel.collectives import all_reduce_avg, clip_grad_norm_
@@ -403,6 +404,8 @@ class TrainerERA5Gen2(BaseTrainer):
                         logger.warning("TrainerERA5Gen2: could not resolve grid schema (%s).", e)
 
                 if t == 1:
+                    # Each batch is a new trajectory: red noise restarts from its stationary distribution.
+                    reset_noise_state(self.model, self.step_postblocks)
                     full_data_dict["ic_raw"] = batch["input"]
                     full_data_dict["x_raw"] = batch["input"]
                     full_data_dict["y_raw"] = batch["target"]
@@ -621,6 +624,7 @@ class TrainerERA5Gen2(BaseTrainer):
                     batch = next(dl)
 
                     if t == 1:
+                        reset_noise_state(self.model, self.step_postblocks)
                         full_data_dict["ic_raw"] = batch["input"]
                         full_data_dict["x_raw"] = batch["input"]
                         full_data_dict["y_raw"] = batch["target"]

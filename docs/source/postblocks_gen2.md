@@ -504,6 +504,82 @@ args:
   # conf is supplied by the Samudra ocean trainer, not hand-written here
 ```
 
+## Stochastic Perturbations
+
+### `targeted_red_noise` (TargetedRedNoise)
+
+**AutoAPI:** {py:obj}`credit.postblock.red_noise.TargetedRedNoise`
+
+Adds slow, spatially smooth noise to chosen fields over land and sea ice, in
+physical units. It is a stochastic term for the part of an emulator's one-step
+error that has weeks of memory and that its inputs cannot predict, such as the
+hidden soil-moisture, snow and sea-ice surface state behind CAMulator's
+near-surface errors. Every step it adds
+
+    field += sigma(x) * mask(x) * pattern(x, t)
+
+- **`pattern`** is a unit-variance, isotropic random field on the sphere with
+  correlation `~exp(-d**2 / (2 L**2))` (`length_scale_km`), built from random
+  spherical harmonics (the SPPT/SKEBS construction).
+  - In time it is AR(1), with `phi = exp(-lead_time_periods / (24 * tau_days))`.
+  - It starts from its stationary distribution, so the added noise has the same
+    standard deviation `sigma * mask` at every step, the first one included.
+  - Each batch row (ensemble member) has its own stream.
+  - Fields that share a `pattern` name get the same pattern (they must share
+    `tau_days`). Otherwise each field has its own.
+- **`mask = 1 - (1 - land) * (1 - ice)`** joins two fractions:
+  - the static land fraction from `land_file` / `land_var`;
+  - the sea-ice fraction `ice_var`, read from the step's physical inputs.
+
+  Use CAM's `LANDFRAC`, not `LANDM_COSLAT`: `LANDM_COSLAT` is a smoothed coastal
+  transition field, above 0.5 over half the globe. Without either fraction the
+  noise is global.
+- **`sigma`** is the per-step standard deviation in the field's units: a number,
+  or `{path, var}` for a (lat, lon) map on the model grid, in the data's
+  orientation. NaN in a map means no perturbation.
+- **`levels`** restricts a 3-D field to some levels, e.g. `[31]` for CAM's lowest.
+
+**Where to put it:** after the inverse scaler and before the tracer clamp and the
+conservation fixers.
+- **Before the clamp:** the clamp then keeps a perturbed tracer non-negative.
+- **Before the fixers:** they close each step's budget with the perturbation included.
+- **Why not after the fixers:** the perturbation's global integral would become
+  the next step's baseline, because the fixers conserve from step to step, not
+  toward a fixed total. Red noise would then random-walk the global budgets.
+
+A perturbed prognostic feeds the next step; a perturbed diagnostic only adds
+spread. The pattern restarts with every trajectory: the gen2 trainer resets it at
+the first step of each batch, and `credit rollout` at the start of each forecast.
+To use it only at inference, put the postblock chain that contains it under
+`inference.postblocks`.
+
+```yaml
+# CAMulator: one shared pattern for the near-surface temperature error, one for moisture
+land_red_noise:
+  type: "targeted_red_noise"
+  args:
+    lead_time_periods: 6
+    length_scale_km: 500
+    land_file: "/path/statics_b_credit_runs_f32_02.nc"
+    land_var: "LANDFRAC"
+    ice_var: "CESM/dynamic_forcing/2d/ICEFRAC"
+    fields:
+      - {var: "CESM/prognostic/2d/TREFHT", sigma: {path: "/path/red_noise_sigma.nc", var: "TREFHT"},
+         tau_days: 11, pattern: "sfc_T"}
+      - {var: "CESM/prognostic/3d/T", levels: [31], sigma: {path: "/path/red_noise_sigma.nc", var: "T_lowest"},
+         tau_days: 11, pattern: "sfc_T"}
+      - {var: "CESM/prognostic/3d/Qtot", levels: [31],
+         sigma: {path: "/path/red_noise_sigma.nc", var: "Qtot_lowest"}, tau_days: 14}
+```
+
+`credit check` validates the block wherever it appears, including under
+`inference.postblocks`:
+- the perturbed variables and levels, and that `ice_var` is a model input;
+- the map files and their grid;
+- whether `length_scale_km` is resolvable on the model grid;
+- `lead_time_periods` against `data.timestep`;
+- its position relative to the inverse scaler, the tracer clamp and the budget fixers.
+
 ## Example: the WXFormer prediction + target-twin chain
 
 The config below is the standard chain for a `BaseLoss` scored in physical

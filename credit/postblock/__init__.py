@@ -30,6 +30,7 @@ _POSTBLOCK_REGISTRY = {
     "wind_artifact_filter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
     "se_to_latlon": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
+    "targeted_red_noise": ("credit.postblock.red_noise", "TargetedRedNoise"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -52,6 +53,7 @@ _CLASS_SOURCES = {
     "WindArtifactFilter": ("credit.postblock.wind_filter", "WindArtifactFilter"),
     "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
     "SEToLatLonPostBlock": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
+    "TargetedRedNoise": ("credit.postblock.red_noise", "TargetedRedNoise"),
 }
 
 

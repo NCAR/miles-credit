@@ -1031,6 +1031,207 @@ def _check_fixer_scoring(conf: dict, rep: _Report) -> None:
             )
 
 
+def _timestep_hours(data_conf: dict) -> float | None:
+    """``data.timestep`` in hours, or None if it is missing or unparseable."""
+    import pandas as pd
+
+    try:
+        return pd.Timedelta(data_conf["timestep"]).total_seconds() / 3600.0
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _data_vars(data_conf: dict, model_levels) -> tuple[dict, set]:
+    """``({predicted var key: level count, None for 2D}, {input var key})`` from a gen2 ``data:`` block."""
+    predicted, inputs = {}, set()
+    for src_name, src in ((data_conf or {}).get("source") or {}).items():
+        src = src or {}
+        n_lev = _n_levels_for_source(src, model_levels)
+        for group, grp in (src.get("variables") or {}).items():
+            for dim, n in (("3d", n_lev), ("2d", None)):
+                for name in (grp or {}).get(f"vars_{dim.upper()}") or []:
+                    key = f"{src_name}/{group}/{dim}/{name}"
+                    if group in ("prognostic", "diagnostic"):
+                        predicted[key] = n
+                    if group != "diagnostic":
+                        inputs.add(key)
+    return predicted, inputs
+
+
+def _check_map_file(rep: _Report, where: str, path: str, var: str, grid) -> None:
+    """A (lat, lon) map file exists, holds ``var`` and matches the model grid."""
+    expanded = os.path.expandvars(path)
+    if not os.path.exists(expanded):
+        rep.error(where, f"File not found: {expanded}")
+        return
+    import xarray as xr
+
+    try:
+        with xr.open_dataset(expanded) as ds:
+            if var not in ds:
+                rep.error(where, f"{expanded} has no variable {var!r}.{_suggest(var, list(ds.data_vars))}")
+                return
+            shape = ds[var].squeeze().shape
+    except Exception as exc:  # noqa: BLE001
+        rep.error(where, f"Could not read {expanded}: {type(exc).__name__}: {exc}")
+        return
+    if len(shape) != 2:
+        rep.error(where, f"{expanded}:{var} must be a 2-D (lat, lon) map, got shape {shape}.")
+    elif None not in grid and tuple(shape) != grid:
+        rep.error(where, f"{expanded}:{var} is {tuple(shape)} but the model grid is {grid}.")
+
+
+def _check_red_noise(conf: dict, rep: _Report) -> None:
+    """Validate ``model.red_noise`` and every ``targeted_red_noise`` postblock (including ``inference.postblocks``).
+
+    Beyond the arguments themselves: the timestep behind ``phi = exp(-dt / tau)``,
+    the perturbed variables and levels, the mask and sigma files, the pattern's
+    length scale on the model grid, and where the block sits relative to the
+    inverse scaler, the tracer clamp and the conservation fixers.
+    """
+    from numbers import Real
+
+    from credit.ensemble.red_noise import red_noise_errors, spectral_truncation_fraction
+    from credit.postblock.red_noise import TargetedRedNoise, targeted_red_noise_errors
+
+    mconf = conf.get("model") or {}
+    red = mconf.get("red_noise")
+    if red is not None:
+        for err in red_noise_errors(
+            red, encoder_noise=mconf.get("encoder_noise", True), correlated=mconf.get("correlated", False)
+        ):
+            rep.error("model.red_noise", err)
+        step = _timestep_hours(conf.get("data") or {})
+        dt = red.get("timestep_hours") if isinstance(red, dict) else None
+        if step and isinstance(dt, Real) and dt != step:
+            rep.error(
+                "model.red_noise.timestep_hours",
+                f"timestep_hours is {dt} but data.timestep is {step:g} h, so phi = exp(-dt / tau) would be wrong.",
+                fix=f"timestep_hours: {step:g}",
+            )
+
+    grid = (mconf.get("image_height"), mconf.get("image_width"))
+    inference_data = _get(conf, "inference", "data")
+    for prefix, cfg, data_conf in (
+        ("postblocks", conf.get("postblocks"), conf.get("data") or {}),
+        ("inference.postblocks", _get(conf, "inference", "postblocks"), inference_data or conf.get("data") or {}),
+    ):
+        if not isinstance(cfg, dict):
+            continue
+        predicted, inputs = _data_vars(data_conf, mconf.get("levels"))
+        step = _timestep_hours(data_conf)
+        for section, blocks in cfg.items():
+            if not isinstance(blocks, dict):
+                continue
+            chain = [(n, b) for n, b in blocks.items() if isinstance(b, dict) and "type" in b]
+            for i, (name, block) in enumerate(chain):
+                if block["type"] != "targeted_red_noise":
+                    continue
+                where = f"{prefix}.{section}.{name}"
+                if section != "per_step":
+                    rep.error(where, "targeted_red_noise must run every step.", fix="Move it under per_step.")
+                    continue
+                args = block.get("args") or {}
+                err = _bind_error(TargetedRedNoise, args)  # top-level blocks are also bound by _check_blocks
+                if err:
+                    if prefix.startswith("inference"):
+                        rep.error(
+                            where,
+                            f"'targeted_red_noise' {err}",
+                            fix=f"Accepted args: {', '.join(_accepted_params(TargetedRedNoise))}",
+                        )
+                    continue
+                if prefix == "postblocks" and (_get(conf, "trainer", "parallelism", "domain", default=1) or 1) > 1:
+                    rep.error(
+                        where,
+                        "targeted_red_noise needs the full grid, but domain parallelism hands postblocks a shard.",
+                        fix="Use it with trainer.parallelism.domain: 1, or only at inference (inference.postblocks).",
+                    )
+                length_scale = args.get("length_scale_km", 500.0)
+                lead = args.get("lead_time_periods", 6)
+                errors = targeted_red_noise_errors(args.get("fields"), length_scale, lead)
+                for e in errors:
+                    rep.error(where, e)
+                if errors:
+                    continue
+
+                for j, fld in enumerate(args["fields"]):
+                    fwhere = f"{where}.fields[{j}]"
+                    var, levels = fld["var"], fld.get("levels")
+                    if predicted and var not in predicted:
+                        rep.error(
+                            fwhere,
+                            f"{var} is not a predicted (prognostic or diagnostic) variable.{_suggest(var, predicted)}",
+                        )
+                    elif predicted and predicted[var] is None and levels is not None:
+                        rep.error(fwhere, f"{var} is 2-D; remove levels.")
+                    elif predicted and predicted[var] is not None:
+                        n = predicted[var]
+                        if levels is None:
+                            rep.warn(
+                                fwhere,
+                                f"No levels: all {n} levels of {var} are perturbed with the same pattern.",
+                                fix=f"levels: [{n - 1}]  (the lowest level when level 0 is the model top)",
+                            )
+                        elif any(not -n <= lv < n for lv in levels):
+                            rep.error(fwhere, f"levels {levels} out of range for {var}'s {n} levels.")
+                    if isinstance(fld["sigma"], dict):
+                        _check_map_file(rep, f"{fwhere}.sigma", fld["sigma"]["path"], fld["sigma"]["var"], grid)
+                if args.get("land_file"):
+                    _check_map_file(
+                        rep, f"{where}.land_file", args["land_file"], args.get("land_var", "LANDFRAC"), grid
+                    )
+                ice_var = args.get("ice_var")
+                if ice_var and inputs and ice_var not in inputs:
+                    rep.error(where, f"ice_var {ice_var} is not a model input variable.{_suggest(ice_var, inputs)}")
+
+                if None not in grid and spectral_truncation_fraction(*grid, length_scale) > 0.01:
+                    rep.error(
+                        where,
+                        f"length_scale_km={length_scale} is too short for the {grid[0]} x {grid[1]} grid: the "
+                        "pattern would lose its smallest scales.",
+                    )
+                if step and isinstance(lead, Real) and lead != step:
+                    rep.error(
+                        where,
+                        f"lead_time_periods is {lead} but the timestep is {step:g} h, so the pattern's memory is wrong.",
+                        fix=f"lead_time_periods: {step:g}",
+                    )
+
+                # Placement: physical units in, before the tracer clamp and the budget fixers.
+                key = args.get("key", "y_processed")
+                before = chain[:i]
+                if not any(
+                    b["type"] == "bridgescaler_transform"
+                    and (b.get("args") or {}).get("method") == "inverse_transform"
+                    and _block_output_key(b) == key
+                    for _n, b in before
+                ):
+                    rep.warn(
+                        where,
+                        f"No inverse bridgescaler_transform on {key} runs before it, but sigma is in physical units.",
+                        fix="Place it after the inverse scaler (ignore this if the prediction is already physical).",
+                    )
+                fixers = [n for n, b in before if b["type"] in _MASS_FIXERS | _OPEN_BUDGET_FIXERS]
+                if fixers:
+                    rep.warn(
+                        where,
+                        f"Runs after the budget fixer(s) {fixers}: they no longer see the perturbation, so its "
+                        "global integral carries into the next step and red noise random-walks the budget.",
+                        fix="Move it before the tracer clamp and the conservation fixers.",
+                    )
+                fields_vars = {fld["var"] for fld in args["fields"]}
+                for bname, b in before:
+                    if b["type"] == "tracer_fixer":
+                        clamped = fields_vars & set((b.get("args") or {}).get("tracer_vars") or [])
+                        if clamped:
+                            rep.warn(
+                                where,
+                                f"Runs after '{bname}', so {sorted(clamped)} can go negative.",
+                                fix="Move it before the tracer clamp.",
+                            )
+
+
 def _check_trainer(conf: dict, rep: _Report) -> None:
     from credit.parallel.mesh import parse_parallelism_conf
 
@@ -1501,6 +1702,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_model_geometry,
             _check_loss_pipeline,
             _check_fixer_scoring,
+            _check_red_noise,
             _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,
