@@ -10,7 +10,7 @@ from credit.conda_env import torchrun_path
 logger = logging.getLogger(__name__)
 
 
-def _pbs_account(pbs_options):
+def _pbs_account(pbs_options: dict) -> str:
     """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
     account = pbs_options.get("project") or pbs_options.get("account") or os.environ.get("PBS_ACCOUNT")
     if not account:
