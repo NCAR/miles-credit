@@ -81,6 +81,13 @@ the real constructor signatures, cross-checks the channel layout against the
 model geometry, verifies the loss postblock chain, and checks that every file
 the config points at exists.  Each finding comes with a suggested fix.
 
+A missing scaler file is reported as INFO, not as a warning or error, because a
+config fresh from `credit begin` has no scaler until you run `credit preprocess`.
+INFO findings don't fail `--strict`.  In `--json` output they appear in
+`findings` with `"severity": "info"` but aren't counted in `warnings`.  If you've already run `credit preprocess` and still see this
+message, check `scaler_path` and `save_loc`: training will fail when it tries to
+load the scaler.
+
 **When to use it:** before submitting a job, after editing a config, or in a
 CI pipeline.  A clean `credit check` means the config will at least start
 without import or shape errors.
