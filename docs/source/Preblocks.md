@@ -221,6 +221,11 @@ args:
   eps: 1.0e-8     # optional (default 1e-8)
 ```
 
+When this block transforms `target` variables, `credit preprocess` also records
+their physical-unit (pre-log) statistics in `<scaler>_physical.json` next to the
+scaler file; `BaseLoss` and the gen2 metrics use it to weight them by their exact
+variance (see [Losses](Losses.md)).
+
 ### `sqrt_transform` (SqrtTransform)
 
 **AutoAPI:** {py:obj}`credit.preblock.sqrt.SqrtTransform`

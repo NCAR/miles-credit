@@ -5,7 +5,7 @@ import os
 import sys
 import yaml
 
-from ._common import _prompt, _prompt_bool, _repo_root
+from ._common import _DEFAULT_LEVELS_16, _prompt, _prompt_bool, _repo_root
 
 
 def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out, source_name="ERA5"):
@@ -286,7 +286,6 @@ def _convert(args: argparse.Namespace) -> None:
         train_years = data.get("train_years") or [1979, 2018]
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
-        _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
         levels = list(data["level_ids"]) if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {

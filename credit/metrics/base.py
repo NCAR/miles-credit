@@ -152,6 +152,9 @@ class BaseVariableMetric(nn.Module, ABC):
         channel_schema: optional :class:`ChannelSchema` fixing the data target
             variable layout; when None the scored variables are discovered from
             the state dict on the first forward pass.
+        exp_transforms: ``exp_transform`` postblock specs
+            (:func:`credit.losses.base.exp_transform_specs`); variables they cover
+            get inverse-variance weights from the physical-unit variance.
 
     Attributes:
         last_var_scores: ``{var_key: float}`` detached per-variable scores
@@ -186,6 +189,7 @@ class BaseVariableMetric(nn.Module, ABC):
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
         channel_schema=None,
+        exp_transforms: list | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -227,7 +231,7 @@ class BaseVariableMetric(nn.Module, ABC):
                     f"scaler_path is required for var_weighting='{self.var_weighting}' "
                     f"with metric '{metric_name}' (scale_power={self.scale_power})."
                 )
-            self._variances = _load_target_variances(scaler_path)
+            self._variances = _load_target_variances(scaler_path, exp_transforms)
 
         self._combination_weights = None  # {var_key: float}; built at first forward
         self.var_keys = None  # full scoring list, resolved at first forward
@@ -429,6 +433,9 @@ class BaseCombinedMetric(nn.Module):
         latitude_weights: path to a dataset with a ``latitude`` coordinate.
         channel_schema: optional :class:`ChannelSchema` fixing the data target
             variable layout.
+        exp_transforms: ``exp_transform`` postblock specs
+            (:func:`credit.losses.base.exp_transform_specs`); variables they cover
+            get inverse-variance weights from the physical-unit variance.
 
     Attributes:
         metric_modules: ``{metric_name: BaseVariableMetric}`` child instances.
@@ -465,6 +472,7 @@ class BaseCombinedMetric(nn.Module):
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
         channel_schema=None,
+        exp_transforms: list | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -481,6 +489,7 @@ class BaseCombinedMetric(nn.Module):
             "use_latitude_weights": use_latitude_weights,
             "latitude_weights": latitude_weights,
             "channel_schema": channel_schema,
+            "exp_transforms": exp_transforms,
         }
 
         # Local import to avoid a circular import at module load
