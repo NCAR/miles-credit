@@ -10,7 +10,7 @@ and the `credit-main-derecho` conda env.
 ## Run the whole matrix
 
 ```bash
-qsub -A $PBS_ACCOUNT tests/manual/gen2_parallelism/run_smoke.pbs
+qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} tests/manual/gen2_parallelism/run_smoke.pbs
 ```
 
 Results (per-mode PASS/FAIL + log tails) are written to
@@ -44,7 +44,7 @@ reuses `crossformer.py`'s conv-based Transformer/Attention, which declares
 no `_tp_plan`. Its acceptance gate is its own run:
 
 ```bash
-qsub -A $PBS_ACCOUNT tests/manual/gen2_parallelism/run_tp_parity.pbs
+qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} tests/manual/gen2_parallelism/run_tp_parity.pbs
 ```
 
 This trains `wxformer_column` twice on 4 GPUs with the same dp layout and

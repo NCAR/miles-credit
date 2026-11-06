@@ -227,6 +227,18 @@ def queue_cluster_error(queue: str, cluster: str) -> str:
     )
 
 
+def _nonblank(value) -> str | None:
+    """Return *value* as a stripped string, or None when it is unset or blank.
+
+    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
+    through to the config and environment, like an empty config key or env var does.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
 _PBS_DEFAULTS = {
     "casper": {
         "cpus": 8,

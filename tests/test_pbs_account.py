@@ -14,6 +14,8 @@ from credit.pbs import _pbs_account, launch_script, launch_script_mpi, launch_sc
         ({"project": "PROJ0001", "account": "ALIAS0001"}, None, "PROJ0001"),  # `project` wins over the alias
         ({}, "ENV0001", "ENV0001"),
         ({"project": ""}, "ENV0001", "ENV0001"),  # an empty key counts as unset
+        ({"project": "  "}, "ENV0001", "ENV0001"),  # so does a whitespace-only one
+        ({"project": " PROJ0001 "}, None, "PROJ0001"),  # values are stripped
     ],
 )
 def test_pbs_account_resolution(monkeypatch, pbs_options, env_account, expected):
@@ -24,7 +26,7 @@ def test_pbs_account_resolution(monkeypatch, pbs_options, env_account, expected)
     assert _pbs_account(pbs_options) == expected
 
 
-@pytest.mark.parametrize("env_account", [None, ""])
+@pytest.mark.parametrize("env_account", [None, "", "  "])
 def test_pbs_account_missing_raises(monkeypatch, env_account):
     if env_account is None:
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)

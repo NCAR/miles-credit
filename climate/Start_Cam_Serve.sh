@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N camulator_server
-# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -q casper
 #PBS -l job_priority=premium
 #PBS -l walltime=12:00:00

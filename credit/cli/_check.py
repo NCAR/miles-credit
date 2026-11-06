@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_DEFAULTS, _PBS_QUEUES, auto_mem, site_default_mem, torchrun_args_error
+from ._common import _PBS_DEFAULTS, _PBS_QUEUES, _nonblank, auto_mem, site_default_mem, torchrun_args_error
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -1346,8 +1346,8 @@ def _check_account(conf: dict, pbs: dict, rep: _Report) -> None:
     # Perlmutter blocks (written by `credit begin` under pbs:) carry SLURM-only keys.
     slurm = "slurm" in conf or any(k in pbs for k in ("constraint", "qos", "partition"))
     env_var = "SLURM_ACCOUNT" if slurm else "PBS_ACCOUNT"
-    env_account = os.environ.get(env_var)
-    account = pbs.get("project") or pbs.get("account")
+    env_account = _nonblank(os.environ.get(env_var))
+    account = _nonblank(pbs.get("project")) or _nonblank(pbs.get("account"))
     if account:
         if env_account and env_account != account:
             rep.info(
@@ -1378,6 +1378,13 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
         # the queue/gpu_type checks below are PBS-specific.
         if conf.get("slurm"):
             _check_account(conf, conf["slurm"], rep)
+        elif not _nonblank(os.environ.get("PBS_ACCOUNT")):
+            # INFO, not WARN: a laptop/workstation config has no pbs: block and never submits.
+            rep.info(
+                "pbs.project",
+                "No pbs: block and $PBS_ACCOUNT is unset; `credit submit` will need --account.",
+                fix="export PBS_ACCOUNT=<YOUR_ACCOUNT>   # or add pbs: {project: <YOUR_ACCOUNT>}",
+            )
         return
     # gpu_type is only used by the Casper template; leaving it unset requests any
     # NVIDIA GPGPU, which is a valid (and usually faster-queuing) choice.

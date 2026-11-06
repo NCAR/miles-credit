@@ -16,6 +16,7 @@ from ._common import (
     _SLURM_CLUSTER_DEFAULTS,
     _SLURM_DEFAULTS,
     _repo_root,
+    _nonblank,
     _resolve_torchrun,
     auto_mem,
     casper_mem,
@@ -120,9 +121,9 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     d = _PBS_DEFAULTS["casper" if is_casper else "derecho"]
 
     r.account = _first(
-        args.account,
-        pbs_cfg.get("project") or pbs_cfg.get("account") or None,
-        os.environ.get("PBS_ACCOUNT") or None,
+        _nonblank(args.account),
+        _nonblank(pbs_cfg.get("project")) or _nonblank(pbs_cfg.get("account")),
+        _nonblank(os.environ.get("PBS_ACCOUNT")),
         d["account"],
     )
     if not r.account:
@@ -292,9 +293,9 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     # Layer any per-cluster overrides (e.g. Perlmutter) on top of the generic defaults.
     d = {**_SLURM_DEFAULTS, **_SLURM_CLUSTER_DEFAULTS.get(getattr(args, "cluster", ""), {})}
     r.account = _first(
-        args.account,
-        slurm_cfg.get("project") or slurm_cfg.get("account") or None,
-        os.environ.get("SLURM_ACCOUNT") or None,
+        _nonblank(args.account),
+        _nonblank(slurm_cfg.get("project")) or _nonblank(slurm_cfg.get("account")),
+        _nonblank(os.environ.get("SLURM_ACCOUNT")),
         d["account"],
     )
     r.walltime = _first(args.walltime, slurm_cfg.get("walltime"), d["walltime"])
@@ -878,6 +879,16 @@ def _compute_chain(args: argparse.Namespace) -> int:
         return 1
 
 
+def _account_label(args: argparse.Namespace) -> str:
+    """Return the account line for the job plan; a SLURM job with none charges the default allocation."""
+    account = getattr(args, "account", None)
+    if account:
+        return account
+    if getattr(args, "scheduler", "pbs") == "slurm":
+        return "(none; SLURM charges your default allocation)"
+    return _UNSET_ACCOUNT
+
+
 def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     """Print a human-readable summary of what is about to be submitted."""
     from credit.trainers.preflight import estimate_dataloader_memory_gib
@@ -917,7 +928,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         sep,
         sep,
         args.cluster,
-        getattr(args, "account", "unset"),
+        _account_label(args),
         getattr(args, "config", "unset"),
         gpu_str,
         getattr(args, "mem", None) or "site default",

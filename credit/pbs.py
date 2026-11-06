@@ -5,6 +5,7 @@ import shutil
 import logging
 import subprocess
 
+from credit.cli._common import _nonblank
 from credit.conda_env import torchrun_path
 
 logger = logging.getLogger(__name__)
@@ -12,7 +13,11 @@ logger = logging.getLogger(__name__)
 
 def _pbs_account(pbs_options: dict) -> str:
     """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
-    account = pbs_options.get("project") or pbs_options.get("account") or os.environ.get("PBS_ACCOUNT")
+    account = (
+        _nonblank(pbs_options.get("project"))
+        or _nonblank(pbs_options.get("account"))
+        or _nonblank(os.environ.get("PBS_ACCOUNT"))
+    )
     if not account:
         raise ValueError("No PBS account. Set pbs.project in the config or export PBS_ACCOUNT.")
     return account

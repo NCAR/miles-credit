@@ -200,10 +200,13 @@ See [Memory requests](Training.md#memory-requests-mem-auto).
 2. `pbs.project` (or its alias `pbs.account`) in the config
 3. the `$PBS_ACCOUNT` environment variable (`$SLURM_ACCOUNT` for SLURM sites)
 
-There is no built-in default.  If none of these is set, a PBS submit stops with
-an error that lists all three options; `--dry-run` instead shows `#PBS -A <UNSET>`
-in the preview and prints a warning.  `credit check` reports which account will
-be charged, and notes when `pbs.project` overrides a different `$PBS_ACCOUNT`.
+Blank values (`--account ""`, `project: ""`, an empty variable) count as unset,
+so they fall through to the next source.  There is no built-in default.  If none
+of these is set, a PBS submit stops with an error that lists all three options;
+`--dry-run` instead shows `#PBS -A <UNSET>` in the preview and prints a warning.
+`credit check` reports which account will be charged, notes when `pbs.project`
+overrides a different `$PBS_ACCOUNT`, and notes when a config has no `pbs:` block
+and `$PBS_ACCOUNT` is unset.
 
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /

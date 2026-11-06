@@ -349,6 +349,21 @@ class TestResolvePbsOpts:
         monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
         assert _resolve_pbs_opts(self._minimal_args(), {"project": ""}).account == "ENV_ACCOUNT"
 
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_cli_account_falls_through(self, monkeypatch, blank):
+        # A wrapper passing --account "$PROJ" with $PROJ unset must not block the config/env fallback.
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {}).account == "ENV_ACCOUNT"
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {"project": "CFG"}).account == "CFG"
+
+    def test_blank_env_account_is_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "  ")
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(self._minimal_args(), {})
+
+    def test_account_is_stripped(self, monkeypatch):
+        assert _resolve_pbs_opts(self._minimal_args(account=" MYACCT "), {}).account == "MYACCT"
+
     def test_dry_run_without_account_uses_placeholder(self, monkeypatch, capsys):
         # A preview shouldn't need an account: render a placeholder and warn instead of exiting.
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
@@ -2101,3 +2116,33 @@ class TestArcoLevels:
         self._answers(monkeypatch, "0", "138", "ten", "1,x", " , ", "all")
         assert self._arco_levels() == list(range(1, 138))
         assert capsys.readouterr().out.count("between 1 and 137") == 5
+
+
+# ===========================================================================
+# Account handling for SLURM and the job plan (issue #486)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_slurm_blank_cli_account_falls_through(monkeypatch, blank):
+    from credit.cli._submit import _resolve_slurm_opts
+
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    fields = ("walltime", "gpus", "nodes", "cpus", "mem", "queue", "gpu_type", "conda_env")
+    args = argparse.Namespace(cluster="perlmutter", account=blank, **dict.fromkeys(fields))
+    assert _resolve_slurm_opts(args, {}).account == "m0000_g"
+
+
+@pytest.mark.parametrize(
+    ("scheduler", "account", "expected"),
+    [
+        ("pbs", "ABCD0001", "ABCD0001"),
+        ("slurm", "m0000_g", "m0000_g"),
+        ("slurm", None, "default allocation"),  # used to print "None"
+        ("pbs", None, "<UNSET>"),
+    ],
+)
+def test_job_plan_account_label(scheduler, account, expected):
+    from credit.cli._submit import _account_label
+
+    assert expected in _account_label(argparse.Namespace(scheduler=scheduler, account=account))

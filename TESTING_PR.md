@@ -92,13 +92,16 @@ Old v1 ERA5 configs (`wxformer_1dg_6hr.yml`, `wxformer_6hr.yml`) are now in `con
 
 ### 3b. PBS settings now read from config file
 
-**Before this PR:** `credit submit` ignored the `pbs:` block in your config.
-Account always fell back to a hard-coded project code unless you passed `--account` every time.
+**Before this PR (#486):** when no account was set anywhere, `credit submit`, the gen1 launchers in
+`credit/pbs.py`, `credit begin` and `credit convert` fell back to a hard-coded project code, and
+`credit begin` wrote that code into new configs, where it then outranked your `$PBS_ACCOUNT`.
 
-**After this PR:** `credit submit` reads from `pbs:` first, CLI flags override.
+**After this PR:** there is no built-in account. `credit begin`/`credit convert` only write
+`pbs.project` when you type one, and `credit check` reports which account will be charged.
 
-**Resolution order:** CLI flag → `pbs:` in config → `$PBS_ACCOUNT` env var. There is no built-in
-default: a real submit exits with an error if none is set, and `--dry-run` shows `<UNSET>`.
+**Resolution order:** `--account` → `pbs.project` (alias `pbs.account`) in the config → `$PBS_ACCOUNT`.
+Blank values (`--account ""`, `project: ""`, an empty env var) count as unset. A real submit exits with
+an error if none is set, and `--dry-run` shows `<UNSET>`.
 
 #### Set up your config's pbs: block
 

@@ -36,7 +36,7 @@ import shutil
 import logging
 import subprocess
 
-from credit.cli._common import _PERLMUTTER_ENV_SETUP
+from credit.cli._common import _PERLMUTTER_ENV_SETUP, _nonblank
 from credit.conda_env import torchrun_path
 
 logger = logging.getLogger(__name__)
@@ -78,7 +78,11 @@ def _sbatch_directives(options, num_nodes, num_gpus, default_cpus=8, default_mem
 
     # No literal fallback: an unset account omits --account, so SLURM charges $SLURM_ACCOUNT
     # or the user's default allocation (same resolution as `credit submit`).
-    account = options.get("project") or options.get("account") or os.environ.get("SLURM_ACCOUNT")
+    account = (
+        _nonblank(options.get("project"))
+        or _nonblank(options.get("account"))
+        or _nonblank(os.environ.get("SLURM_ACCOUNT"))
+    )
     if perlmutter and account and not str(account).endswith("_g"):
         account = f"{account}_g"
 

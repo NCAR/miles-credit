@@ -437,7 +437,7 @@ Make sure to update:
 chmod +x RunQuickClimate.sh
 
 # Submit to PBS queue
-qsub -A $PBS_ACCOUNT RunQuickClimate.sh
+qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} RunQuickClimate.sh
 ```
 
 #### **Step 3: Monitor the job**
@@ -480,7 +480,7 @@ bash RunQuickClimate.sh
 
 ```bash
 # Submit job
-qsub -A $PBS_ACCOUNT RunQuickClimate.sh
+qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} RunQuickClimate.sh
 
 # Check status
 qstat -u $USER
@@ -489,7 +489,7 @@ qstat -u $USER
 qdel <job_id>
 
 # Interactive session (for debugging)
-qsub -I -A $PBS_ACCOUNT -l select=1:ncpus=8:ngpus=1:mem=64GB -l walltime=2:00:00 -q casper
+qsub -I -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} -l select=1:ncpus=8:ngpus=1:mem=64GB -l walltime=2:00:00 -q casper
 
 # Check remaining project hours
 gladequota

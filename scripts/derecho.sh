@@ -1,5 +1,5 @@
 #!/bin/bash
-# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -N out
 #PBS -l walltime=00:10:00
 #PBS -l select=16:ncpus=64:ngpus=4:mem=480GB

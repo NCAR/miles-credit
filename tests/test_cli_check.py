@@ -881,6 +881,19 @@ def test_slurm_account_message_is_scheduler_aware(conf, monkeypatch, env_account
     assert needle in text and "PBS_ACCOUNT" not in text
 
 
+@pytest.mark.parametrize(("env_account", "expect_info"), [(None, True), ("", True), ("ENV0001", False)])
+def test_no_pbs_block_notes_missing_account(conf, monkeypatch, env_account, expect_info):
+    # No pbs: block (e.g. a laptop config): INFO only, never a warning, and silent when $PBS_ACCOUNT is set.
+    if env_account is None:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    else:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    conf.pop("pbs", None)
+    conf.pop("slurm", None)
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == (["info"] if expect_info else [])
+
+
 # ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================

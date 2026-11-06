@@ -1,5 +1,5 @@
 #!/bin/bash -l
-# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -N smoke_camulator
 #PBS -l walltime=01:00:00
 #PBS -l select=1:ncpus=8:ngpus=1:mem=128GB:gpu_type=v100

@@ -64,7 +64,7 @@ python camulator_server.py \
     --daily_mean
 ```
 
-Or submit as a PBS job: `qsub -A $PBS_ACCOUNT Start_Cam_Serve.sh`
+Or submit as a PBS job: `qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} Start_Cam_Serve.sh`
 
 ### Step 5 — Submit CESM
 
