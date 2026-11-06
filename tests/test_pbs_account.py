@@ -93,3 +93,29 @@ def test_gen1_slurm_account(monkeypatch, options, env_account, expected):
         monkeypatch.delenv("SLURM_ACCOUNT", raising=False)
     lines = [ln for ln in _sbatch_directives(options, 1, 4).splitlines() if ln.startswith("#SBATCH --account")]
     assert lines == ([expected] if expected else [])
+
+
+def test_shipped_configs_do_not_hard_code_an_account():
+    """No config under config/ may set a scheduler account (issue #486).
+
+    A hard-coded project silently outranks the user's $PBS_ACCOUNT / $SLURM_ACCOUNT and charges
+    someone else's allocation. Ship it commented out, e.g. ``# project: YOUR_ACCOUNT``.
+    """
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1] / "config"
+    offenders = []
+    for path in sorted(root.rglob("*.y*ml")):
+        try:
+            conf = yaml.safe_load(path.read_text())
+        except yaml.YAMLError:
+            continue
+        if not isinstance(conf, dict):
+            continue
+        for block in ("pbs", "slurm"):
+            section = conf.get(block)
+            if isinstance(section, dict):
+                for key in ("project", "account"):
+                    if section.get(key):
+                        offenders.append(f"{path.relative_to(root.parent)}: {block}.{key}={section[key]!r}")
+    assert not offenders, "Hard-coded scheduler accounts:\n" + "\n".join(offenders)
