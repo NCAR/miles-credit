@@ -216,6 +216,17 @@ def main_cli():
 
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(conf, model, device)
 
+    # RNG state is not checkpointed, so a resumed job (start_epoch > 0, e.g. the
+    # next job of a credit submit chain) would replay the first job's draws.
+    # Offset the stage-2 seed by the start epoch; a multiple of the dp world
+    # size keeps every (rank, start_epoch) seed distinct.
+    start_epoch = conf["trainer"].get("start_epoch", 0)
+    if start_epoch > 0:
+        seed_everything(seed + data_rank + data_world_size * start_epoch)
+        logger.info(
+            f"Resuming at epoch {start_epoch}: training RNG re-seeded with offset {data_world_size * start_epoch}"
+        )
+
     from credit.losses import load_loss
 
     train_criterion = load_loss(conf)

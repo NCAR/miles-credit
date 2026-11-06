@@ -280,6 +280,9 @@ and passes `dp_rank` / `dp_size` to the dataloader. Two further rules follow:
    calls this), not from the seed.
 2. **Model RNG (dropout etc.) is seeded by `dp_rank`, not the global rank**, so
    TP/domain peers generate identical masks while dp replicas still differ.
+   RNG state is not saved in the checkpoint, so a resumed job (`start_epoch > 0`)
+   offsets that seed by `dp_size × start_epoch`; without it, each job of a chain
+   would replay the first job's dropout masks and noise draws.
 
 If you write a new entry point or trainer that supports the `parallelism:`
 block, reuse `data_parallel_coords` — passing the global rank/world_size into a
