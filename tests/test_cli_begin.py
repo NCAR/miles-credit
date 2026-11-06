@@ -224,6 +224,7 @@ def test_pbs_config_derecho(monkeypatch):
     result = _pbs_config("ncar", "exp", nodes=2, gpus=4)
     assert result["nodes"] == 2 and result["ngpus"] == 4
     assert {"queue", "walltime", "mem", "job_name"} <= set(result)
+    assert result["mem"] == "auto"
 
 
 def test_pbs_config_writes_typed_account(monkeypatch):

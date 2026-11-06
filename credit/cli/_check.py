@@ -21,12 +21,13 @@ import difflib
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_QUEUES
+from ._common import _PBS_DEFAULTS, _PBS_QUEUES, auto_mem, site_default_mem, torchrun_args_error
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -40,6 +41,9 @@ _DIAGNOSTIC_POSTBLOCKS = frozenset({"geopotential_diagnostic", "mslp_diagnostic"
 # Postblocks that change a variable's units.  Whatever runs on the prediction
 # must also run on the target twin or the loss compares mismatched units.
 _UNIT_POSTBLOCKS = frozenset({"bridgescaler_transform", "exp_transform", "square_transform"})
+# Lognormal / first-order physical-variance ratio above which an exp_transformed
+# variable's inverse-variance weight is flagged (3x ~ a log variance of 0.9).
+_LOG_VARIANCE_SPREAD_WARN = 3.0
 
 _GEN1_TRAINERS = frozenset({"era5", "era5-gen1", "era5-ensemble", "ensemble-gen1"})
 
@@ -993,6 +997,35 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
                     fix=f"Accepted: {', '.join(p for p in _accepted_params(cls) if p != 'optimizer')}",
                 )
 
+    grad_max_norm = _get(conf, "trainer", "grad_max_norm", default=0.0)
+    if grad_max_norm == "dynamic":
+        from credit.trainers.grad_clip import AdaptiveGradClipper
+
+        clip_args = _get(conf, "trainer", "dynamic_grad_clip", default={}) or {}
+        err = _bind_error(AdaptiveGradClipper, clip_args)
+        if err is None:
+            try:
+                AdaptiveGradClipper(**clip_args)
+            except ValueError as exc:
+                err = str(exc)
+        if err is not None:
+            rep.error(
+                "trainer.dynamic_grad_clip",
+                err,
+                fix="dynamic_grad_clip:\n  factor: 2.0\n  ema_decay: 0.99\n  warmup_steps: 50",
+            )
+    elif isinstance(grad_max_norm, str) or not (isinstance(grad_max_norm, (int, float)) and grad_max_norm >= 0):
+        rep.error(
+            "trainer.grad_max_norm",
+            f"grad_max_norm must be 'dynamic' or a number >= 0 (0 disables clipping), got {grad_max_norm!r}.",
+            fix="grad_max_norm: 'dynamic'   # or e.g. 1.0",
+        )
+    elif _get(conf, "trainer", "dynamic_grad_clip") is not None:
+        rep.warn(
+            "trainer.dynamic_grad_clip",
+            f"dynamic_grad_clip is ignored because grad_max_norm is {grad_max_norm!r}, not 'dynamic'.",
+        )
+
     ac = _get(conf, "trainer", "activation_checkpoint", default=False)
     if not isinstance(ac, bool) and not (isinstance(ac, list) and all(isinstance(n, str) for n in ac)):
         rep.error(
@@ -1062,6 +1095,175 @@ def _check_paths(conf: dict, rep: _Report) -> None:
                     f"postblocks.{section}.{name}.level_info_file",
                     f"Metadata file not found: {meta_file} (resolved to {get_meta_file_path(meta_file)})",
                 )
+
+
+def _check_scaler_stats(conf: dict, rep: _Report) -> None:
+    """Flag fitted scaler channels whose statistics make the transform NaN or inf.
+
+    A channel that was all-NaN or constant when ``credit preprocess`` fit it
+    (e.g. ARCO ERA5 cloud cover on the top hybrid levels) stores a NaN mean or a
+    zero variance/range. Scaling divides by it, so every sample comes out
+    NaN/inf and the first loss is NaN. Only files that already exist are read.
+    """
+    import torch
+
+    seen = set()
+    for where, path in _iter_config_paths(conf):
+        expanded = os.path.expandvars(path)
+        if "scaler" not in where or expanded in seen or not os.path.isfile(expanded):
+            continue
+        seen.add(expanded)
+        try:
+            from bridgescaler import load_scaler_dict
+
+            scaler_dict = load_scaler_dict(expanded)
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(where, f"Could not read scaler {expanded}: {type(exc).__name__}: {exc}")
+            continue
+        for keys, scaler in _iter_scalers(scaler_dict):
+            data_type, var_key = "/".join(keys[:-1]) or "-", keys[-1]
+            stats = {name: getattr(scaler, name, None) for name in ("mean_x_", "var_x_", "min_x_", "max_x_")}
+            stats = {k: torch.as_tensor(v).double().flatten() for k, v in stats.items() if v is not None}
+            if not stats:
+                continue
+            bad = torch.zeros_like(next(iter(stats.values())), dtype=torch.bool)
+            for value in stats.values():
+                bad |= ~torch.isfinite(value)
+            if "var_x_" in stats:
+                bad |= stats["var_x_"] <= 0
+            if "min_x_" in stats and "max_x_" in stats:
+                bad |= stats["max_x_"] <= stats["min_x_"]
+            if bad.any():
+                channels = (bad.nonzero().flatten() + 1).tolist()
+                shown = ", ".join(map(str, channels[:10])) + (" ..." if len(channels) > 10 else "")
+                rep.error(
+                    where,
+                    f"Scaler {expanded} [{data_type}] {var_key}: {len(channels)} channel(s) have a "
+                    f"NaN/inf statistic or zero variance (1-based channel/level: {shown}). Scaling "
+                    "them produces NaN/inf, so training fails on the first batch.",
+                    fix="Drop those levels, or fill their NaNs with a fill_values preblock before the "
+                    "scaler and give the now-constant channels a finite mean and a nonzero variance "
+                    "in the scaler JSON (e.g. the nearest valid level's variance).",
+                )
+
+
+def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
+    """Warn where an ``exp_transform``ed variable's inverse-variance weight is unreliable.
+
+    The scaler of a log-transformed variable holds its log-space mean ``m`` and
+    variance ``s2``; BaseLoss and the gen2 metrics turn them into a physical
+    variance with the first-order estimate ``exp(2m) * s2``
+    (``credit.losses.base._physical_variance_from_log``). With a small ``s2`` any
+    reasonable estimate agrees, but the lognormal moment exceeds the first-order
+    one by ``(exp(s2) - 1) * exp(s2) / s2`` (4.7x at ``s2 = 1``, 24x at 2). A
+    spread that wide means the variable's real physical variance, and so its
+    weight, is not pinned down by the scaler. Zero-inflated fields (precipitation,
+    cloud water) are the worst case: there the first-order estimate can be orders
+    of magnitude too small, so the variable dominates the loss. Variables with exact
+    physical-unit statistics in the scaler's ``*_physical.json`` sidecar (written
+    by ``credit preprocess``) are weighted by those instead and are not flagged.
+    """
+    import math
+
+    import torch
+
+    from credit.losses.base import (
+        _load_physical_scalers,
+        _matching_exp_spec,
+        _physical_variance_from_log,
+        _scaler_channel_variance,
+        exp_transform_specs,
+    )
+
+    specs = exp_transform_specs(conf)
+    if not specs:
+        return
+    sections = {}  # scaler path -> sections that weight by it
+    for top in ("loss", "metrics"):
+        if top == "loss" and _get(conf, "loss", "type") != "base":
+            continue
+        if _get(conf, top, "args", "var_weighting", default="inverse_variance") not in (
+            "inverse_variance",
+            "learnable",
+        ):
+            continue
+        path = _get(conf, top, "args", "scaler_path")
+        if isinstance(path, str) and os.path.isfile(os.path.expandvars(path)):
+            sections.setdefault(os.path.expandvars(path), []).append(top)
+
+    for path, tops in sections.items():
+        try:
+            from bridgescaler import load_scaler_dict
+
+            target = load_scaler_dict(path)["target"]
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(f"{tops[0]}.args.scaler_path", f"Could not read scaler {path}: {type(exc).__name__}: {exc}")
+            continue
+        try:
+            physical = _load_physical_scalers(path)
+        except Exception as exc:  # noqa: BLE001
+            rep.warn(
+                f"{tops[0]}.args.scaler_path",
+                f"Could not read the physical-unit stats next to {path}: {type(exc).__name__}: {exc}",
+            )
+            physical = {}
+        where = f"{tops[0]}.args.var_weighting"
+        users = " and ".join(tops)
+        refit = (
+            "Re-run `credit preprocess` (move the existing scaler aside first) to record exact physical-unit statistics"
+        )
+        for source_scalers in target.values():
+            for var_key, scaler in source_scalers.items():
+                spec = _matching_exp_spec(var_key, specs)
+                var = _scaler_channel_variance(scaler)
+                if spec is None or var is None or not torch.isfinite(var).all() or var_key in physical:
+                    continue
+                mean = getattr(scaler, "mean_x_", None)
+                if mean is None:
+                    rep.warn(
+                        where,
+                        f"'{var_key}' is exp_transformed back to physical units, but its scaler has no mean "
+                        f"to convert the log-space variance, so the {users} weight it with the log-space "
+                        "variance (orders of magnitude off).",
+                        fix=(
+                            f"{refit}, or set\n"
+                            f"variable_weights:\n  {var_key}: <1 / physical variance>   # or var_weighting: manual"
+                        ),
+                    )
+                    continue
+                mean = torch.as_tensor(mean, dtype=torch.float64).flatten()
+                s2 = var.double() * {"e": 1.0, "2": math.log(2.0), "10": math.log(10.0)}[spec["base"]] ** 2
+                first_order = _physical_variance_from_log(mean, var, spec["base"], spec["eps"])
+                lognormal = torch.expm1(s2) * torch.exp(s2) * first_order / s2.clamp_min(1e-300)
+                # The weight uses the level mean, so compare the estimators where it counts.
+                spread = float(lognormal.mean() / first_order.mean())
+                if math.isnan(spread) or spread < _LOG_VARIANCE_SPREAD_WARN:  # nan: all-zero variance
+                    continue
+                rep.warn(
+                    where,
+                    f"'{var_key}' is weighted in physical units from log-space scaler statistics with a "
+                    f"large spread (log variance up to {float(s2.max()):.2g}). The first-order variance "
+                    f"used for its {users} weight ({float(first_order.mean()):.3g}) and the lognormal "
+                    f"moment differ by {spread:.3g}x, so the weight is uncertain by at least that much; "
+                    "for zero-inflated fields the first-order estimate can be far too small.",
+                    fix=(
+                        f"{refit}, or measure the variable's physical-unit variance V (level mean) and set\n"
+                        f"variable_weights:\n  {var_key}: {float(first_order.mean()):.3g} / V"
+                    ),
+                )
+
+
+def _iter_scalers(tree, keys=()):
+    """Yield ``(key_path, scaler)`` for every fitted scaler in a ``load_scaler_dict`` tree.
+
+    Scaler files nest ``{data_type: {source: {var: scaler}}}`` or, for a single
+    data type, ``{source: {var: scaler}}``; walking recursively handles both.
+    """
+    if isinstance(tree, dict):
+        for key, value in tree.items():
+            yield from _iter_scalers(value, (*keys, str(key)))
+    elif tree is not None and keys:
+        yield keys, tree
 
 
 def _iter_config_paths(conf: dict):
@@ -1189,6 +1391,7 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     # machine this block was written for.  Say so — reusing a Derecho block on
     # Casper (or vice versa) is rejected by `credit submit`.
     queue = pbs.get("queue")
+    targets = []
     if queue:
         name = str(queue).split("@", 1)[0].strip().lower()
         targets = sorted(c for c, queues in _PBS_QUEUES.items() if name in queues)
@@ -1208,6 +1411,111 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     for key in ("job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
+    if len(targets) == 1:
+        _check_pbs_memory(conf, pbs, targets[0], rep)
+    else:
+        _report_pbs_memory_unknown_cluster(conf, pbs, rep)
+
+
+def _mem_gb(value) -> float | None:
+    """A PBS memory string ("480GB", "1tb", "512mb") in GB, or None if it does not parse."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?)b?\s*", str(value).lower())
+    if not match:
+        return None
+    return float(match.group(1)) * {"k": 2.0**-20, "m": 2.0**-10, "g": 1.0, "t": 1024.0, "": 2.0**-30}[match.group(2)]
+
+
+def _pbs_gpus(pbs: dict, cluster: str) -> int:
+    return int(pbs.get("ngpus") or pbs.get("gpus") or _PBS_DEFAULTS[cluster]["gpus"])
+
+
+def _check_pbs_memory(conf: dict, pbs: dict, cluster: str, rep: _Report) -> None:
+    """Compare the config-derived memory estimate (``auto_mem``, float32 data) with ``pbs.mem``.
+
+    ``pbs.mem: auto`` reports what ``credit submit`` will request; a numeric (or
+    unset, i.e. the built-in default) request below the training estimate, or an
+    estimate that exceeds one node, is a warning. The GPU count is ``pbs.ngpus``;
+    ``credit submit --gpus`` can change it, and the estimate scales with it.
+    """
+    gpus = _pbs_gpus(pbs, cluster)
+    gpu_type = pbs.get("gpu_type")
+    train = auto_mem(conf, cluster, gpus, gpu_type)
+    if train is None:
+        return
+    preprocess = auto_mem(conf, cluster, gpus, gpu_type, include_validation=False)
+    gpu_note = f"for {gpus} GPU(s) per node (pbs.ngpus; `credit submit --gpus` changes it)"
+    mem = pbs.get("mem")
+    if str(mem).strip().lower() == "auto":
+        rep.info(
+            "pbs.mem",
+            f"auto: `credit submit` will request {train.mem} per node for training {gpu_note} "
+            f"({train.explanation}) and {preprocess.mem} for preprocessing (training DataLoader only).",
+        )
+    elif not train.exceeds_node:  # a capped estimate gets the warning below instead
+        requested = mem if mem is not None else site_default_mem(cluster, gpus, gpu_type)
+        requested_gb = _mem_gb(requested)
+        if requested_gb is not None and requested_gb < train.need_gb:
+            shown = (
+                f"pbs.mem {mem}"
+                if mem is not None
+                else f"pbs.mem is unset, so `credit submit` requests {requested}, which"
+            )
+            rep.warn(
+                "pbs.mem",
+                f"{shown} is below the estimated {train.need_gb:.0f} GB per node for training {gpu_note} "
+                f"({train.explanation}). The job may run out of host memory.",
+                fix=f"mem: auto   # requests {train.mem}",
+            )
+    if train.exceeds_node:
+        rep.warn(
+            "pbs.mem",
+            f"The estimated memory is more than one {cluster} node offers {gpu_note} ({train.explanation}).",
+            fix="Reduce train_batch_size / valid_batch_size, thread_workers / valid_thread_workers or "
+            "prefetch_factor, or use fewer levels"
+            + (", or set pbs.gpu_type to a larger node type." if cluster == "casper" else "."),
+        )
+
+
+def _report_pbs_memory_unknown_cluster(conf: dict, pbs: dict, rep: _Report) -> None:
+    """Report the memory estimate when ``pbs.queue`` does not name a single cluster.
+
+    The node cap and site default depend on the cluster, so show what
+    ``credit submit`` would request on each; the estimate itself does not.
+    """
+    requests = {}
+    for cluster in sorted(_PBS_QUEUES):
+        estimate = auto_mem(conf, cluster, _pbs_gpus(pbs, cluster), pbs.get("gpu_type"))
+        if estimate is None:
+            return
+        requests[cluster] = estimate
+    first = next(iter(requests.values()))
+    per_cluster = ", ".join(f"{e.mem} on {c.capitalize()}" for c, e in requests.items())
+    if str(pbs.get("mem")).strip().lower() == "auto":
+        message = f"auto: the cluster depends on `credit submit --cluster`; training would request {per_cluster}"
+    else:
+        message = (
+            f"pbs.queue does not name one cluster, so pbs.mem was not compared; `mem: auto` would request {per_cluster}"
+        )
+    rep.info("pbs.mem", f"{message} (the config needs an estimated {first.need_gb:.0f} GB per node).")
+
+
+def _check_torchrun_args(conf: dict, rep: _Report) -> None:
+    for block in ("pbs", "slurm"):
+        sched = conf.get(block) or {}
+        if "torchrun_args" not in sched:
+            continue
+        err = torchrun_args_error(sched["torchrun_args"])
+        if err:
+            rep.error(f"{block}.torchrun_args", err, fix='torchrun_args: "--numa-binding=node"')
+    pbs = conf.get("pbs") or {}
+    # Casper jobs are always single-node, so nodes > 1 means a Derecho block.
+    if pbs.get("torchrun_args") and int(pbs.get("nodes") or 1) > 1:
+        rep.warn(
+            "pbs.torchrun_args",
+            "Multi-node Derecho jobs launch with mpiexec by default, which runs python directly "
+            "and ignores torchrun_args.",
+            fix="credit submit --cluster derecho --launcher pbsdsh ...",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1230,16 +1538,18 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
         rep.error("custom_objects", f"Failed to load: {type(exc).__name__}: {exc}")
 
     # A data-only fragment has nothing to say about models, losses, or training.
-    checks = [_check_data_sources, _check_validation_data, _check_paths]
+    checks = [_check_data_sources, _check_validation_data, _check_paths, _check_scaler_stats]
     if not _is_data_fragment(conf):
         checks += [
             _check_registry_keys,
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,
             _check_pbs,
+            _check_torchrun_args,
         ]
     for check in checks:
         try:

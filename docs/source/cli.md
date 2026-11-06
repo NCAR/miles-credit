@@ -51,6 +51,12 @@ your shell profile.
 **When to use it:** the first time you set up an experiment, or when you want a
 known-good starting point that you can then hand-edit for advanced options.
 
+For ARCO-ERA5, the wizard asks which of the 137 model levels to use: `all`
+(the default, which needs a lot of memory at 0.25°), `wxformer` (the 16 WXFormer v1
+levels), or a comma-separated list of level numbers (1 = top, 137 = lowest). On
+NCAR systems it writes `mem: 'auto'` in the `pbs:` block, so `credit submit` sizes the
+memory request from the config (see `credit submit` below).
+
 > The wizard runs `credit check` on the generated file automatically, so you
 > know the config is valid before you leave the wizard.
 
@@ -86,6 +92,9 @@ type, dataset type, each pre/postblock), checks each block's arguments against
 the real constructor signatures, cross-checks the channel layout against the
 model geometry, verifies the loss postblock chain, and checks that every file
 the config points at exists.  Each finding comes with a suggested fix.
+For a `pbs:` block it also estimates the host memory the job needs: it reports what
+`mem: auto` will request, and warns when a numeric or unset `mem` is below the estimate
+or the estimate exceeds one node.
 
 **When to use it:** before submitting a job, after editing a config, or in a
 CI pipeline.  A clean `credit check` means the config will at least start
@@ -178,7 +187,12 @@ Generates a PBS (Casper/Derecho) or SLURM (Perlmutter and other sites) batch
 script and submits it.  For training, `--chain N` submits N back-to-back jobs
 with `afterok` dependencies so each job resumes from the previous checkpoint
 automatically.  `--reload` patches the config to resume from the last
-checkpoint after a failure.
+checkpoint after a failure.  `--torchrun-args=<flags>` (or `torchrun_args:` in the
+`pbs:`/`slurm:` block) adds extra flags such as `--numa-binding=node` to the
+generated `torchrun` line; `credit rollout-ensemble` accepts the same flag.
+`mem: auto` in the `pbs:` block (or `--mem auto`) sizes the memory request of train and
+preprocess jobs from the config, never below the site default and capped at one node.
+See [Memory requests](Training.md#memory-requests-mem-auto).
 
 `credit submit` charges the first account it finds, in this order:
 

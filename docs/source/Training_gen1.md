@@ -111,6 +111,12 @@ table](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/#ca
 | unset (any GPGPU) / `v100` | 8 (1152GB) | 64GB | 224GB | 512GB | 1088GB |
 | `a100_80gb` / `h100` | 4 (1024GB) | 64GB | 368GB | 960GB | — |
 
+**Config-derived memory (`mem: auto`)** — `credit begin` writes `mem: 'auto'`, which makes
+`credit submit` size train and preprocess requests from the config's DataLoader settings. It
+never asks for less than the defaults above, and it is capped at one node. See
+[Memory requests](Training.md#memory-requests-mem-auto) for the formula and what `credit check`
+reports.
+
 **Queue / cluster mismatch** — a `pbs:` block written for one machine is easy to reuse against the
 other, and PBS only rejects the bad queue after the job is submitted. `credit submit` therefore fails
 up front when the resolved queue belongs to the other cluster:

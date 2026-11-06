@@ -166,6 +166,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Casper GPU type, e.g. a100_80gb/h100/v100 (default: any NVIDIA GPGPU)",
     )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
+    p.add_argument(
+        "--torchrun-args",
+        dest="torchrun_args",
+        default=None,
+        metavar="ARGS",
+        help="Extra flags for every torchrun launch, overriding pbs/slurm torchrun_args in the config. "
+        "Use '=' since the value starts with '--', e.g. --torchrun-args=--numa-binding=node",
+    )
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda env path")
     p.add_argument("--dry-run", action="store_true", help="Print PBS scripts without submitting")
 
@@ -234,7 +242,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node")
     p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node")
-    p.add_argument("--mem", default=None, help="Memory per node (Casper default: scales with --gpus)")
+    p.add_argument(
+        "--mem",
+        default=None,
+        help="Memory per node, or 'auto' to size train/preprocess jobs from the config (Casper default: scales with --gpus)",
+    )
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument(
         "--account",
@@ -256,6 +268,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="GPU type, e.g. a100_80gb/h100/v100 (Casper default: any NVIDIA GPGPU)",
     )
     p.add_argument("--torchrun", default=None, metavar="PATH", help="Path to torchrun binary")
+    p.add_argument(
+        "--torchrun-args",
+        dest="torchrun_args",
+        default=None,
+        metavar="ARGS",
+        help="Extra flags for every torchrun launch, overriding pbs/slurm torchrun_args in the config. "
+        "Use '=' since the value starts with '--', e.g. --torchrun-args=--numa-binding=node",
+    )
     p.add_argument("--conda-env", dest="conda_env", default=None, metavar="PATH", help="Conda environment path")
     p.add_argument(
         "--launcher",
