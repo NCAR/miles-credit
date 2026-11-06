@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Coding Agents (e.g. Anthropic Claude, OpenAI Codex, GitHub Copilot, Anysphere Cursor, etc.) when working with code in this repository.
 
 ## About
 
