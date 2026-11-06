@@ -1,4 +1,5 @@
 import copy
+import functools
 import importlib
 import logging
 import os
@@ -312,6 +313,27 @@ def load_custom_model_modules(conf):
         spec.loader.exec_module(module)
 
 
+def with_mps_conv_patch(load_fn):
+    """Make every model a loader returns safe on Apple MPS (see ``credit.models.mps_compat``).
+
+    A no-op on CPU/CUDA. ``mps_compat`` is imported at call time so that importing
+    ``credit.models`` does not import torch.
+    """
+
+    @functools.wraps(load_fn)
+    def wrapper(*args, **kwargs):
+        from credit.models.mps_compat import patch_mps_large_kernel_convs
+
+        model = load_fn(*args, **kwargs)
+        n = patch_mps_large_kernel_convs(model) if hasattr(model, "modules") else 0
+        if n:
+            logger.info("MPS-safe conv: %d large-kernel Conv2d layer(s) chunked when run on MPS", n)
+        return model
+
+    return wrapper
+
+
+@with_mps_conv_patch
 def load_model(conf, load_weights=False, model_name=False):
     conf = copy.deepcopy(conf)
     load_custom_model_modules(conf)
@@ -401,6 +423,7 @@ def load_model(conf, load_weights=False, model_name=False):
         raise ValueError(msg)
 
 
+@with_mps_conv_patch
 def load_model_name(conf, model_name, load_weights=False):
     conf = copy.deepcopy(conf)
     model_conf = conf["model"]
