@@ -136,12 +136,13 @@ def test_clean_config_reports_no_errors(conf):
     assert rep.exit_code() == 0
 
 
-def test_missing_scaler_is_a_warning_not_an_error(conf):
+def test_missing_scaler_is_info_not_a_warning(conf):
     """A not-yet-fitted scaler is expected before `credit preprocess`."""
     rep = _run(conf)
-    assert any("scaler_path" in w for w in _wheres(rep, "warning"))
+    assert any("scaler_path" in w for w in _wheres(rep, "info"))
+    assert not any("scaler_path" in w for w in _wheres(rep, "warning"))
     assert rep.exit_code() == 0
-    assert rep.exit_code(strict=True) == 1
+    assert rep.exit_code(strict=True) == 0
 
 
 # ===========================================================================
