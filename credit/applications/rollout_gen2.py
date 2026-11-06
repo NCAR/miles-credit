@@ -8,7 +8,7 @@ flows through preblocks → model → postblocks → assemble_rollout_batch at e
 No manual denormalization, no flat-tensor surgery (update_x / build_channel_layout).
 
 Config key:  inference.run_mode   (batch | single)
-CLI override: --run-mode, --init-time, --save-dir, --noise-scale
+CLI override: --run-mode, --init-time, --save-dir, --mode, --noise-scale
 
 Optional ``inference.noise_scale`` multiplies the learned noise amplitude of every
 StochasticDecompositionLayer (SDL) in an ensemble model before rollout: ``0.0``
@@ -108,6 +108,13 @@ Examples:
         "--save-dir", type=str, default=None, help="Output directory. Overrides inference.save_forecast."
     )
     parser.add_argument(
+        "--mode",
+        type=str,
+        default=None,
+        choices=["none", "ddp", "fsdp"],
+        help="Distributed mode. Overrides inference.mode (use 'none' for a single process without torchrun).",
+    )
+    parser.add_argument(
         "--noise-scale",
         type=float,
         default=None,
@@ -150,6 +157,8 @@ Examples:
     if args.init_time is not None:
         inf_conf.setdefault("single_forecast", {})["start_datetime"] = args.init_time
         inf_conf["run_mode"] = "single"  # --init-time implies single mode
+    if args.mode is not None:
+        inf_conf["mode"] = args.mode
     if args.noise_scale is not None:
         inf_conf["noise_scale"] = args.noise_scale
 
