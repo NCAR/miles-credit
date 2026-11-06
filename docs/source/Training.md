@@ -395,6 +395,48 @@ credit submit --cluster casper -c config.yml
 
 See `credit submit --help` for the full option list.
 
+### Memory requests (`mem: auto`)
+
+`credit begin` writes `mem: 'auto'` in the `pbs:` block. For train and preprocess jobs,
+`credit submit` then sizes the per-node host-memory request from the config:
+
+```text
+need = GPUs/node × (training DataLoader + validation DataLoader
+                    + 4 GiB runtime + 1 GiB × DataLoader workers) × 1.3
+DataLoader = (workers × prefetch_factor + 1) × batch_size × H × W × channels × 4 bytes
+```
+
+- **Channels** are summed over every data source. A sample's input holds the prognostic,
+  static and dynamic_forcing channels over `history_len` steps; its target holds the
+  prognostic and diagnostic channels at one step. Every value is assumed to be float32,
+  which is what the gen2 datasets produce.
+- **Training** uses `thread_workers` / `train_batch_size`; **validation** uses
+  `valid_thread_workers` / `valid_batch_size` and the `validation_data` sources. Both
+  loaders are counted because the trainer keeps both sets of workers and prefetched
+  batches alive. Validation is left out for preprocess jobs and when
+  `trainer.skip_validation` is set.
+- **The request** is `need` rounded up to a multiple of 32GB, but **never less than the
+  site default** (Casper's GPU-scaled default, Derecho's 480GB), so `auto` only raises a
+  request a large config needs. It is capped at what one node offers; on Casper that is
+  the smallest node that the job's `gpu_type` and GPU count can land on (704GB for up
+  to 4 GPUs with `gpu_type` unset, because 4x V100 nodes have 768GB). A capped request
+  is logged as a warning: reduce batch sizes, workers or `prefetch_factor`, use fewer
+  levels, or on Casper set `gpu_type` to a larger node.
+- `--mem auto` on the command line works the same way. An explicit `--mem 200GB` or a
+  numeric `mem` always wins. Rollout and realtime jobs treat `auto` as unset and keep
+  their own default, and SLURM (`slurm.mem: auto`) uses the site default.
+
+The overheads and the 1.3 safety factor are rough allowances, not yet calibrated
+against measured job memory. Treat the estimate as a sanity check, and compare it with
+`qstat -fx <jobid> | grep resources_used.mem` for your own runs.
+
+`credit check` reports the request `auto` will make, using `pbs.ngpus` (a
+`credit submit --gpus` override changes it). With a numeric or unset `mem` it warns when
+the request is below the estimate, and it always warns when the estimate exceeds a node.
+When `pbs.queue` does not name a single cluster, it shows the request for both Casper and
+Derecho. `credit submit` logs the calculation, and the job plan shows the resolved
+`Memory` line.
+
 ## Resuming training
 
 Wall-time limits on Casper (12 h) and Derecho mean a 70-epoch run typically needs

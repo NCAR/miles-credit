@@ -55,7 +55,8 @@ class TestEstimateDataloaderMemoryGib:
 
         gb1 = estimate_dataloader_memory_gib(self._conf(thread_workers=1))
         gb4 = estimate_dataloader_memory_gib(self._conf(thread_workers=4))
-        assert abs(gb4 / gb1 - 4.0) < 0.01
+        # workers x prefetch_factor (4) buffered batches + the one the main process holds
+        assert abs(gb4 / gb1 - (4 * 4 + 1) / (1 * 4 + 1)) < 0.01
 
     def test_scales_with_batch_size(self):
         from credit.trainers.preflight import estimate_dataloader_memory_gib

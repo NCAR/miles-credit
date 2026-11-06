@@ -21,12 +21,13 @@ import difflib
 import inspect
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
 import yaml
 
-from ._common import _PBS_QUEUES, torchrun_args_error
+from ._common import _PBS_DEFAULTS, _PBS_QUEUES, auto_mem, site_default_mem, torchrun_args_error
 
 # Field types that reach the model as input but are never predicted — together
 # they make up model.input_only_channels.
@@ -1356,6 +1357,7 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     # machine this block was written for.  Say so — reusing a Derecho block on
     # Casper (or vice versa) is rejected by `credit submit`.
     queue = pbs.get("queue")
+    targets = []
     if queue:
         name = str(queue).split("@", 1)[0].strip().lower()
         targets = sorted(c for c, queues in _PBS_QUEUES.items() if name in queues)
@@ -1374,6 +1376,92 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
     for key in ("project", "job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")
+    if len(targets) == 1:
+        _check_pbs_memory(conf, pbs, targets[0], rep)
+    else:
+        _report_pbs_memory_unknown_cluster(conf, pbs, rep)
+
+
+def _mem_gb(value) -> float | None:
+    """A PBS memory string ("480GB", "1tb", "512mb") in GB, or None if it does not parse."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([kmgt]?)b?\s*", str(value).lower())
+    if not match:
+        return None
+    return float(match.group(1)) * {"k": 2.0**-20, "m": 2.0**-10, "g": 1.0, "t": 1024.0, "": 2.0**-30}[match.group(2)]
+
+
+def _pbs_gpus(pbs: dict, cluster: str) -> int:
+    return int(pbs.get("ngpus") or pbs.get("gpus") or _PBS_DEFAULTS[cluster]["gpus"])
+
+
+def _check_pbs_memory(conf: dict, pbs: dict, cluster: str, rep: _Report) -> None:
+    """Compare the config-derived memory estimate (``auto_mem``, float32 data) with ``pbs.mem``.
+
+    ``pbs.mem: auto`` reports what ``credit submit`` will request; a numeric (or
+    unset, i.e. the built-in default) request below the training estimate, or an
+    estimate that exceeds one node, is a warning. The GPU count is ``pbs.ngpus``;
+    ``credit submit --gpus`` can change it, and the estimate scales with it.
+    """
+    gpus = _pbs_gpus(pbs, cluster)
+    gpu_type = pbs.get("gpu_type")
+    train = auto_mem(conf, cluster, gpus, gpu_type)
+    if train is None:
+        return
+    preprocess = auto_mem(conf, cluster, gpus, gpu_type, include_validation=False)
+    gpu_note = f"for {gpus} GPU(s) per node (pbs.ngpus; `credit submit --gpus` changes it)"
+    mem = pbs.get("mem")
+    if str(mem).strip().lower() == "auto":
+        rep.info(
+            "pbs.mem",
+            f"auto: `credit submit` will request {train.mem} per node for training {gpu_note} "
+            f"({train.explanation}) and {preprocess.mem} for preprocessing (training DataLoader only).",
+        )
+    elif not train.exceeds_node:  # a capped estimate gets the warning below instead
+        requested = mem if mem is not None else site_default_mem(cluster, gpus, gpu_type)
+        requested_gb = _mem_gb(requested)
+        if requested_gb is not None and requested_gb < train.need_gb:
+            shown = (
+                f"pbs.mem {mem}"
+                if mem is not None
+                else f"pbs.mem is unset, so `credit submit` requests {requested}, which"
+            )
+            rep.warn(
+                "pbs.mem",
+                f"{shown} is below the estimated {train.need_gb:.0f} GB per node for training {gpu_note} "
+                f"({train.explanation}). The job may run out of host memory.",
+                fix=f"mem: auto   # requests {train.mem}",
+            )
+    if train.exceeds_node:
+        rep.warn(
+            "pbs.mem",
+            f"The estimated memory is more than one {cluster} node offers {gpu_note} ({train.explanation}).",
+            fix="Reduce train_batch_size / valid_batch_size, thread_workers / valid_thread_workers or "
+            "prefetch_factor, or use fewer levels"
+            + (", or set pbs.gpu_type to a larger node type." if cluster == "casper" else "."),
+        )
+
+
+def _report_pbs_memory_unknown_cluster(conf: dict, pbs: dict, rep: _Report) -> None:
+    """Report the memory estimate when ``pbs.queue`` does not name a single cluster.
+
+    The node cap and site default depend on the cluster, so show what
+    ``credit submit`` would request on each; the estimate itself does not.
+    """
+    requests = {}
+    for cluster in sorted(_PBS_QUEUES):
+        estimate = auto_mem(conf, cluster, _pbs_gpus(pbs, cluster), pbs.get("gpu_type"))
+        if estimate is None:
+            return
+        requests[cluster] = estimate
+    first = next(iter(requests.values()))
+    per_cluster = ", ".join(f"{e.mem} on {c.capitalize()}" for c, e in requests.items())
+    if str(pbs.get("mem")).strip().lower() == "auto":
+        message = f"auto: the cluster depends on `credit submit --cluster`; training would request {per_cluster}"
+    else:
+        message = (
+            f"pbs.queue does not name one cluster, so pbs.mem was not compared; `mem: auto` would request {per_cluster}"
+        )
+    rep.info("pbs.mem", f"{message} (the config needs an estimated {first.need_gb:.0f} GB per node).")
 
 
 def _check_torchrun_args(conf: dict, rep: _Report) -> None:

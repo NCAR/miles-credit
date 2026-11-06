@@ -238,7 +238,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--gpus", type=int, default=None, metavar="N", help="GPUs per node")
     p.add_argument("--nodes", type=int, default=None, metavar="N", help="Number of nodes, derecho only")
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node")
-    p.add_argument("--mem", default=None, help="Memory per node (Casper default: scales with --gpus)")
+    p.add_argument(
+        "--mem",
+        default=None,
+        help="Memory per node, or 'auto' to size train/preprocess jobs from the config (Casper default: scales with --gpus)",
+    )
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
     p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
