@@ -65,3 +65,34 @@ jobs:
             env_vars: PYTHON
             token: ${{ secrets.CODECOV_TOKEN }}
 
+
+  # Core CREDIT (no extras) must install and import gen1 models without
+  # torch-harmonics / segmentation-models-pytorch -- see NCAR/miles-credit#519.
+  minimal-deps:
+    name: core install without optional extras
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+          cache: 'pip'
+      - name: Install core dependencies only
+        run: |
+          python -m pip install --upgrade pip
+          pip install uv
+          uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu --system
+          uv pip install . pytest --system
+      - name: Optional extras are absent
+        run: |
+          python -c "import importlib.util as u; found = [m for m in ('torch_harmonics', 'segmentation_models_pytorch') if u.find_spec(m)]; assert not found, f'unexpectedly installed: {found}'"
+      - name: Import gen1 models
+        run: |
+          python -c "from credit.models.camulator import Camulator; from credit.models.fuxi import Fuxi; from credit.models.crossformer import CrossFormer"
+      - name: Run optional-dependency tests
+        run: |
+          pytest tests/test_optional_deps.py

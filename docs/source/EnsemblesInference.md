@@ -139,6 +139,8 @@ recommended default for large-scale variables (Z500, T500, U500).
 
 ### `spherical` — Matérn covariance on the sphere
 
+Requires the optional `spectral` extra (`pip install "miles-credit[spectral]"`) for `torch-harmonics`.
+
 ```yaml
 noise:
   type: "spherical"

@@ -291,7 +291,7 @@ def _check_registry_keys(conf: dict, rep: _Report) -> None:
     """Resolve every ``type`` / ``dataset_type`` string against its registry."""
     from credit.datasets.gen_2.multi_source import _SOURCE_REGISTRY
     from credit.losses import _LOSS_REGISTRY
-    from credit.models import _MODEL_REGISTRY
+    from credit.models import _MODEL_REGISTRY, _MOVED_TO_CREDIT_ZOO, _moved_to_credit_zoo_message
     from credit.trainers import _TRAINER_REGISTRY
 
     # The loss section has two spellings: new-style `type:` + `args:`, and the
@@ -310,6 +310,9 @@ def _check_registry_keys(conf: dict, rep: _Report) -> None:
             rep.error(where, f"'{where}' is not set.", fix=f"Add one of: {', '.join(sorted(registry))}")
         elif where == "trainer.type" and value in _REMOVED_TRAINERS:
             rep.error(where, f"Trainer type '{value}' was removed.", fix=f"Use {_REMOVED_TRAINERS[value]}.")
+        elif where == "model.type" and value in _MOVED_TO_CREDIT_ZOO and value not in registry:
+            msg, _, snippet = _moved_to_credit_zoo_message(value).partition("\n\n")
+            rep.error(where, msg, fix=f"Add to your config:\n{snippet}")
         elif value not in registry:
             rep.error(
                 where,

@@ -34,6 +34,28 @@ with `credit check` and prints the `credit preprocess` / `credit train`
 commands to run next. See [QUICKSTART.md](QUICKSTART.md) for the NCAR
 Casper/Derecho install paths and the rest of the workflow.
 
+## More models: credit-zoo
+
+[credit-zoo](https://github.com/NCAR/credit-zoo) is a companion package of community and reference
+architectures (Aurora, Pangu-Weather, GraphCast, FourCastNet, SFNO, U-Net, and more) that plug into CREDIT
+through the `custom_objects:` config block. Install it with
+`pip install git+https://github.com/NCAR/credit-zoo.git`, then add the model to your config:
+
+```yaml
+custom_objects:
+  aurora:
+    object_type: model
+    module_path: credit_zoo.models.aurora.model
+    module_name: CREDITAurora
+
+model:
+  type: "aurora"
+```
+
+Every zoo model ships an example config in credit-zoo's
+[`config/`](https://github.com/NCAR/credit-zoo/tree/main/config) directory. See
+[Models](https://miles-credit.readthedocs.io/en/latest/Models_gen2.html#more-models-credit-zoo) in the docs.
+
 ## Documentation
 
 The [full documentation](https://miles-credit.readthedocs.io/en/latest/) covers installation,

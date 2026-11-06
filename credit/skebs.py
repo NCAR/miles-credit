@@ -4,9 +4,6 @@ from os.path import join
 
 import torch
 from torch import nn
-from torch_harmonics import RealSHT, InverseRealSHT, InverseRealVectorSHT
-from torch_harmonics.quadrature import clenshaw_curtiss_weights
-import segmentation_models_pytorch as smp
 
 from torch.amp import custom_fwd
 
@@ -18,6 +15,7 @@ from torch.nn.parameter import Parameter
 from torch.distributions.multivariate_normal import MultivariateNormal
 from credit.transforms import load_transforms
 from credit.physics_constants import RAD_EARTH, PI
+from credit._optional import require
 
 import logging
 
@@ -148,27 +146,27 @@ class BackscatterCNN(nn.Module):
         return x
 
 
-supported_models = {
-    "unet": smp.Unet,
-    "unet++": smp.UnetPlusPlus,
-    "manet": smp.MAnet,
-    "linknet": smp.Linknet,
-    "fpn": smp.FPN,
-    "pspnet": smp.PSPNet,
-    "pan": smp.PAN,
-    "deeplabv3": smp.DeepLabV3,
-    "deeplabv3+": smp.DeepLabV3Plus,
+SUPPORTED_MODEL_NAMES = {
+    "unet": "Unet",
+    "unet++": "UnetPlusPlus",
+    "manet": "MAnet",
+    "linknet": "Linknet",
+    "fpn": "FPN",
+    "pspnet": "PSPNet",
+    "pan": "PAN",
+    "deeplabv3": "DeepLabV3",
+    "deeplabv3+": "DeepLabV3Plus",
 }
 
 
 def load_premade_encoder_model(model_conf):
     model_conf = copy.deepcopy(model_conf)
     name = model_conf.pop("name")
-    if name in supported_models:
-        logger.info(f"Loading model {name} with settings {model_conf}")
-        return supported_models[name](**model_conf)
-    else:
-        raise OSError(f"Model name {name} not recognized. Please choose from {supported_models.keys()}")
+    if name not in SUPPORTED_MODEL_NAMES:
+        raise OSError(f"Model name {name} not recognized. Please choose from {SUPPORTED_MODEL_NAMES.keys()}")
+    smp = require("segmentation_models_pytorch", "SKEBS dissipation_type 'unet'")
+    logger.info(f"Loading model {name} with settings {model_conf}")
+    return getattr(smp, SUPPORTED_MODEL_NAMES[name])(**model_conf)
 
 
 class BackscatterUnet(nn.Module):
@@ -449,6 +447,10 @@ class SKEBS(nn.Module):
         Initialize spherical harmonics and inverse spherical harmonics transformations
         for both scalar and vector fields.
         """
+        th = require("torch_harmonics", "SKEBS")
+        RealSHT, InverseRealSHT, InverseRealVectorSHT = th.RealSHT, th.InverseRealSHT, th.InverseRealVectorSHT
+        clenshaw_curtiss_weights = th.quadrature.clenshaw_curtiss_weights
+
         # Initialize spherical harmonics transformation objects
         self.sht = RealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
         self.isht = InverseRealSHT(self.nlat, self.nlon, self.lmax, self.mmax, self.grid, csphase=False)
