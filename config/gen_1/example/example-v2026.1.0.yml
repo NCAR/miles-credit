@@ -608,7 +608,7 @@ trainer:
 pbs: 
     # example for derecho
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "train_model"
     walltime: "12:00:00"
     nodes: 1
@@ -626,5 +626,5 @@ pbs:
     # mem: '128GB'
     # walltime: '4:00:00'
     # gpu_type: 'v100'
-    # project: 'NAML0001'
+    # project: YOUR_ACCOUNT
     # queue: 'casper'

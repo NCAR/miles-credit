@@ -1,5 +1,5 @@
 #!/bin/bash -l
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
 #PBS -N v2parallel_smoke
 #PBS -l walltime=02:00:00
 #PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
@@ -12,7 +12,7 @@
 # Derecho node and the credit-main-derecho conda env.
 #
 # Submit from a Casper or Derecho login node:
-#   qsub tests/manual/gen2_parallelism/run_smoke.pbs
+#   qsub -A $PBS_ACCOUNT tests/manual/gen2_parallelism/run_smoke.pbs
 #
 # Each config trains 1 epoch / 5 batches with a tiny model. We launch each
 # parallelism mode with torchrun, choosing nproc-per-node so every parallel

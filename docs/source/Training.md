@@ -335,6 +335,14 @@ override them when provided.
 node count; use `--dry-run` to check the `select=` line first.
 ```
 
+The account to charge comes from `--account`, then `pbs.project` in the config,
+then `$PBS_ACCOUNT`; there is no built-in default.  Exporting it once in your
+shell profile keeps configs portable:
+
+```bash
+export PBS_ACCOUNT=YOUR_ACCOUNT   # e.g. in ~/.bashrc
+```
+
 ```bash
 # Minimal — all settings come from the pbs: block in config.yml
 credit submit --cluster derecho -c config.yml

@@ -48,7 +48,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     #PBS -N {pbs_options["job_name"]}
     #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}{gpu_type_select}
     #PBS -l walltime={pbs_options["walltime"]}
-    #PBS -A {pbs_options["project"]}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -q {pbs_options["queue"]}
     #PBS -j oe
     #PBS -k eod

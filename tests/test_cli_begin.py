@@ -243,6 +243,19 @@ def test_pbs_config_blank_account_is_omitted(monkeypatch, env_account):
     assert "project" not in result and "account" not in result
 
 
+def test_perlmutter_blank_account_is_omitted(monkeypatch):
+    # An empty key would shadow $SLURM_ACCOUNT at submit time.
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    result = _pbs_config("perlmutter", "exp", nodes=1, gpus=4)
+    assert "project" not in result and "account" not in result
+
+
+def test_perlmutter_typed_account_is_written(monkeypatch):
+    answers = iter(["m0000_g", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+    assert _pbs_config("perlmutter", "exp", nodes=1, gpus=4)["project"] == "m0000_g"
+
+
 @pytest.mark.parametrize(
     ("hostname", "expected"),
     [

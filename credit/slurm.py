@@ -76,14 +76,15 @@ def _sbatch_directives(options, num_nodes, num_gpus, default_cpus=8, default_mem
     """
     perlmutter = _is_perlmutter(options)
 
-    account = options.get("project", options.get("account", "default"))
+    # No literal fallback: an unset account omits --account, so SLURM charges $SLURM_ACCOUNT
+    # or the user's default allocation (same resolution as `credit submit`).
+    account = options.get("project") or options.get("account") or os.environ.get("SLURM_ACCOUNT")
     if perlmutter and account and not str(account).endswith("_g"):
         account = f"{account}_g"
 
-    lines = [
-        f"#SBATCH --job-name={options.get('job_name', default_job)}",
-        f"#SBATCH --account={account}",
-    ]
+    lines = [f"#SBATCH --job-name={options.get('job_name', default_job)}"]
+    if account:
+        lines.append(f"#SBATCH --account={account}")
 
     # Constraint / QOS (Perlmutter defaults: -C gpu, -q regular).
     constraint = options.get("constraint") or ("gpu" if perlmutter else None)

@@ -9,7 +9,7 @@ from dask_jobqueue import PBSCluster
 
 
 def main(year):
-    project_num = "NAML0001"  # Replace with your project key
+    project_num = os.environ["PBS_ACCOUNT"]  # your PBS project code
 
     print("...setting up dask client...")
     # Shutdown the client if it exists

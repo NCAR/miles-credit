@@ -1,6 +1,6 @@
 #!/bin/bash
 #PBS -N camulator_server
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
 #PBS -q main
 #PBS -l job_priority=premium
 #PBS -l walltime=12:00:00

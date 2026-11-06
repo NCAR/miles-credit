@@ -73,7 +73,7 @@ loss:
 
 # pbs: #derecho
 #     conda: "holodec"
-#     project: "NAML0001"
+#     project: YOUR_ACCOUNT
 #     job_name: "gwm"
 #     walltime: "01:00:00"
 #     nodes: 1
@@ -91,5 +91,5 @@ pbs: # casper
     mem: '128GB'
     walltime: '24:00:00'
     gpu_type: 'a100'
-    project: 'NAML0001'
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     queue: 'casper'

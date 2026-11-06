@@ -2,7 +2,7 @@
 #PBS -N scaler_t
 #PBS -l select=16:ncpus=128:mpiprocs=128:ngpus=0
 #PBS -l walltime=06:00:00
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
 #PBS -q main
 #PBS -l job_priority=regular
 #PBS -j oe

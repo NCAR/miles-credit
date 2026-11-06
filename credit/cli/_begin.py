@@ -805,12 +805,14 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
         return result
 
     defaults = _SLURM_CLUSTER_DEFAULTS["perlmutter"]
-    account = _prompt("Perlmutter account (include _g for GPU allocations)", "")
+    # Left blank, `credit submit` falls back to $SLURM_ACCOUNT, so don't write an empty key.
+    account = _prompt("Perlmutter account (include _g for GPU allocations; Enter to use $SLURM_ACCOUNT)", "")
     qos = _prompt("Perlmutter QOS", defaults["qos"])
+    result = {"conda": env or "credit"}
+    if account:
+        result["project"] = account
     return {
-        "conda": env or "credit",
-        "account": account,
-        "project": account,
+        **result,
         "job_name": experiment,
         "walltime": defaults["walltime"],
         "nodes": nodes,

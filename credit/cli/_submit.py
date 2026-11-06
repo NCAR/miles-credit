@@ -99,6 +99,10 @@ def _load_pbs_config(config_path: str) -> dict:
     return pbs
 
 
+# Shown in --dry-run output when no account resolves; a real submit exits instead.
+_UNSET_ACCOUNT = "<UNSET>"
+
+
 def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
     """Return a copy of *args* with None fields filled from *pbs_cfg* then cluster defaults."""
     r = copy.copy(args)
@@ -114,19 +118,24 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
 
     r.account = _first(
         args.account,
-        pbs_cfg.get("project") or pbs_cfg.get("account"),
+        pbs_cfg.get("project") or pbs_cfg.get("account") or None,
         os.environ.get("PBS_ACCOUNT") or None,
         d["account"],
     )
     if not r.account:
-        print(
-            "ERROR: no PBS account to charge. Set one of (highest priority first):\n"
+        how = (
+            "Set one of (highest priority first):\n"
             "  credit submit --account <PROJECT> ...\n"
             "  pbs:\n    project: <PROJECT>      # in the config\n"
-            "  export PBS_ACCOUNT=<PROJECT>",
-            file=sys.stderr,
+            "  export PBS_ACCOUNT=<PROJECT>"
         )
-        sys.exit(1)
+        if getattr(args, "dry_run", False):
+            # A preview shouldn't need an account; show a placeholder and say how to set one.
+            print(f"WARNING: no PBS account; the preview shows {_UNSET_ACCOUNT}. {how}", file=sys.stderr)
+            r.account = _UNSET_ACCOUNT
+        else:
+            print(f"ERROR: no PBS account to charge. {how}", file=sys.stderr)
+            sys.exit(1)
     r.walltime = _first(args.walltime, pbs_cfg.get("walltime"), d["walltime"])
     r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))
@@ -206,8 +215,8 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     d = {**_SLURM_DEFAULTS, **_SLURM_CLUSTER_DEFAULTS.get(getattr(args, "cluster", ""), {})}
     r.account = _first(
         args.account,
-        slurm_cfg.get("project") or slurm_cfg.get("account"),
-        os.environ.get("SLURM_ACCOUNT"),
+        slurm_cfg.get("project") or slurm_cfg.get("account") or None,
+        os.environ.get("SLURM_ACCOUNT") or None,
         d["account"],
     )
     r.walltime = _first(args.walltime, slurm_cfg.get("walltime"), d["walltime"])

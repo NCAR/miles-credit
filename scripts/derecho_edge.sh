@@ -3,7 +3,7 @@
 #PBS -l select=1:ncpus=128:ngpus=0:mem=200GB
 #PBS -l walltime=01:00:00
 #PBS -l job_priority=regular
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A $PBS_ACCOUNT <this script>
 #PBS -q main
 #PBS -j oe
 #PBS -k eod

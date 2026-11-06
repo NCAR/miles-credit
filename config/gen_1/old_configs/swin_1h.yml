@@ -171,7 +171,7 @@ visualization:
 
 pbs: #derecho
     conda: "credit"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "xformer-fsdp"
     walltime: "12:00:00"
     nodes: 1
@@ -190,5 +190,5 @@ pbs: #derecho
 #     walltime: '12:00:00'
 #     gpu_type: 'a100'
 #     cpu_type: 'milan'
-#     project: 'NAML0001'
+#     project: YOUR_ACCOUNT
 #     queue: 'casper'

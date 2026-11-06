@@ -93,11 +93,12 @@ Old v1 ERA5 configs (`wxformer_1dg_6hr.yml`, `wxformer_6hr.yml`) are now in `con
 ### 3b. PBS settings now read from config file
 
 **Before this PR:** `credit submit` ignored the `pbs:` block in your config.
-Account always defaulted to `NAML0001` unless you passed `--account` every time.
+Account always fell back to a hard-coded project code unless you passed `--account` every time.
 
 **After this PR:** `credit submit` reads from `pbs:` first, CLI flags override.
 
-**Resolution order:** CLI flag → `pbs:` in config → `$PBS_ACCOUNT` env var → `NAML0001`
+**Resolution order:** CLI flag → `pbs:` in config → `$PBS_ACCOUNT` env var. There is no built-in
+default: a real submit exits with an error if none is set, and `--dry-run` shows `<UNSET>`.
 
 #### Set up your config's pbs: block
 
@@ -119,7 +120,7 @@ pbs:
 #### Test it
 
 ```bash
-# Should show YOUR_ACCOUNT in the job plan, not NAML0001
+# Should show YOUR_ACCOUNT in the job plan
 credit submit --cluster derecho -c my_config.yml --dry-run
 ```
 
@@ -205,7 +206,7 @@ credit submit --cluster derecho -c /tmp/test_config.yml --chain 3 --dry-run
 ## 5. Things to look out for / report
 
 - Any config that was in the old `config/` root that you can't find in the new structure
-- `credit submit --dry-run` showing wrong account (should use `pbs.project`, not `NAML0001`)
+- `credit submit --dry-run` showing the wrong account (should use `--account`, then `pbs.project`, then `$PBS_ACCOUNT`)
 - `credit convert` producing a broken YAML or wrong `forecast_len`
 - Any `credit --help` output that looks wrong or missing
 

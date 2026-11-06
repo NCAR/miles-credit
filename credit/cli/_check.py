@@ -1139,6 +1139,36 @@ def _check_deep_loads(conf: dict, rep: _Report) -> None:
         )
 
 
+def _check_account(conf: dict, pbs: dict, rep: _Report) -> None:
+    """Report which account `credit submit` will charge, or that none resolves."""
+    # Perlmutter blocks (written by `credit begin` under pbs:) carry SLURM-only keys.
+    slurm = "slurm" in conf or any(k in pbs for k in ("constraint", "qos", "partition"))
+    env_var = "SLURM_ACCOUNT" if slurm else "PBS_ACCOUNT"
+    env_account = os.environ.get(env_var)
+    account = pbs.get("project") or pbs.get("account")
+    if account:
+        if env_account and env_account != account:
+            rep.info(
+                "pbs.project",
+                f"'{account}' overrides ${env_var} ({env_account}); `credit submit` will charge '{account}'.",
+                fix=f"Delete pbs.project to charge ${env_var} instead.",
+            )
+    elif env_account:
+        rep.info("pbs.project", f"Unset; `credit submit` will charge ${env_var} ({env_account}).")
+    elif slurm:
+        rep.info(
+            "pbs.project",
+            "No SLURM account; jobs will charge your default allocation.",
+            fix="project: <YOUR_ACCOUNT>   # or export SLURM_ACCOUNT",
+        )
+    else:
+        rep.warn(
+            "pbs.project",
+            "No PBS account: `credit submit` will fail unless you pass --account or export PBS_ACCOUNT.",
+            fix="project: <YOUR_ACCOUNT>   # or export PBS_ACCOUNT",
+        )
+
+
 def _check_pbs(conf: dict, rep: _Report) -> None:
     pbs = conf.get("pbs") or {}
     if not pbs:
@@ -1170,15 +1200,7 @@ def _check_pbs(conf: dict, rep: _Report) -> None:
                 f"'{name}' is a {targets[0].capitalize()} queue; "
                 f"`credit submit --cluster {targets[0]}` is the matching target.",
             )
-    if not (pbs.get("project") or pbs.get("account")):
-        if os.environ.get("PBS_ACCOUNT"):
-            rep.info("pbs.project", f"Unset; `credit submit` will charge $PBS_ACCOUNT ({os.environ['PBS_ACCOUNT']}).")
-        else:
-            rep.warn(
-                "pbs.project",
-                "No PBS account: `credit submit` will fail unless you pass --account or export PBS_ACCOUNT.",
-                fix="project: <YOUR_ACCOUNT>",
-            )
+    _check_account(conf, pbs, rep)
     for key in ("job_name", "walltime", "queue"):
         if key not in pbs:
             rep.warn(f"pbs.{key}", f"'{key}' is unset; `credit submit` will fall back to a built-in default.")

@@ -7,4 +7,4 @@ def _pbs_account(monkeypatch):
 
     Tests that exercise the missing-account path delete it with ``monkeypatch.delenv``.
     """
-    monkeypatch.setenv("PBS_ACCOUNT", "NAML0001")
+    monkeypatch.setenv("PBS_ACCOUNT", "TEST0000")

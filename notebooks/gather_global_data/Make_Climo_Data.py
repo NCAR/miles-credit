@@ -6,6 +6,7 @@ This script takes the gathered ERA5 zarr data and creates the scaling libraries
 """
 
 # Scientific python
+import os
 import xarray as xr
 import matplotlib.pyplot as plt
 import bokeh
@@ -31,7 +32,7 @@ from distributed import Client
 from dask_jobqueue import PBSCluster
 
 cluster = PBSCluster(
-    account="NAML0001",
+    account=os.environ["PBS_ACCOUNT"],  # your PBS project code
     walltime="12:00:00",
     cores=1,
     memory="100GB",

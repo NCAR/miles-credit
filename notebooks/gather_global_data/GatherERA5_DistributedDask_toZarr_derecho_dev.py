@@ -35,7 +35,7 @@ Settings (Modify this block):
 - interval_hours: 1 (Hour interval for data retrieval)
 - FPout: '/glade/derecho/scratch/wchapman/STAGING2/' (Output directory for files)
 - prefix_out: 'ERA5_e5.oper.ml.v3' (File prefix)
-- project_num: 'NAML0001' (Project key)
+- project_num: $PBS_ACCOUNT (Project key)
 - remove_dask_worker_scripts: True
 
 Single level variables (Modify this block):
@@ -79,7 +79,7 @@ FPout = (
     "/glade/derecho/scratch/wchapman/STAGING2/"  # where do you want the files stored?
 )
 prefix_out = "ERA5_e5.oper.ml.v3"  # what prefix do you want the files stored with?
-project_num = "NAML0001"  # what project key dfo you have?
+project_num = os.environ["PBS_ACCOUNT"]  # your PBS project code
 remove_dask_worker_scripts = True
 
 

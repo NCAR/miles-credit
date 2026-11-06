@@ -55,7 +55,7 @@ def _derecho_args(nodes=1, gpus=4, walltime="12:00:00", **kw):
 
 FAKE_CONFIG = "/glade/work/user/my_run/config.yml"
 FAKE_REPO = "/glade/work/user/miles-credit"
-FAKE_ACCOUNT = "NAML0001"
+FAKE_ACCOUNT = "TEST0000"
 
 
 def _casper_script(depend_on=None, **kw):
@@ -480,7 +480,7 @@ class TestSubmitSlurmDryRun:
                 {
                     "save_loc": str(tmp_path),
                     "trainer": {"epochs": 5, "num_epoch": 5},
-                    "slurm": {"conda": "/fake/env", "partition": "gpu", "project": "NAML0001"},
+                    "slurm": {"conda": "/fake/env", "partition": "gpu", "project": "TEST0000"},
                 }
             )
         )
@@ -1080,7 +1080,7 @@ class TestResolvePbsOpts:
         assert args.mem == "512GB"
         assert "casper" in args.queue
         assert args.walltime == "12:00:00"
-        assert args.account == "NAML0001"
+        assert args.account == "TEST0000"
 
     def test_derecho_defaults_filled(self):
         from credit.cli import _resolve_pbs_opts
@@ -1142,7 +1142,7 @@ class TestLoadPbsConfig:
 
         cfg = tmp_path / "conf.yml"
         cfg.write_text(
-            yaml.dump({"pbs": {"walltime": "04:00:00", "project": "NAML0001", "conda": "/my/env"}, "trainer": {}})
+            yaml.dump({"pbs": {"walltime": "04:00:00", "project": "TEST0000", "conda": "/my/env"}, "trainer": {}})
         )
         result = _load_pbs_config(str(cfg))
         assert result["walltime"] == "04:00:00"
@@ -1345,7 +1345,7 @@ class TestSubmitDryRun:
         )
 
     def _pbs_cfg(self):
-        return {"conda": "/fake/env", "walltime": "12:00:00", "project": "NAML0001"}
+        return {"conda": "/fake/env", "walltime": "12:00:00", "project": "TEST0000"}
 
     def test_dry_run_single_job_prints_script(self, tmp_path, capsys):
         import yaml

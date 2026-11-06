@@ -263,7 +263,7 @@ inference:
 
 # pbs: #derecho
 #   conda: "credit-derecho"
-#   project: "NAML0001"
+#   project: YOUR_ACCOUNT
 #   job_name: "credit_integration_test_hrrr_gen2"
 #   walltime: "01:00:00"
 #   nodes: 8
@@ -274,7 +274,7 @@ inference:
 
 pbs: #casper
   conda: "credit"
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "credit_integration_test_hrrr_gen2"
   walltime: "08:00:00"
   nodes: 1

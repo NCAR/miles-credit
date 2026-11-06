@@ -340,7 +340,7 @@ The `RunQuickClimate.sh` is a PBS job script for NCAR HPCs. Here's what each sec
 ```bash
 #!/bin/bash
 #PBS -N Run_Climate_CAMulator      # Job name (shows in qstat)
-#PBS -A NAML0001                   # Project code (UPDATE THIS!)
+#PBS -A YOUR_ACCOUNT               # Project code (UPDATE THIS!)
 #PBS -l walltime=12:00:00          # Max run time (hours:minutes:seconds)
 #PBS -o RUN_Climate.out            # Output file
 #PBS -e RUN_Climate.out            # Error file (same as output)
@@ -352,7 +352,7 @@ The `RunQuickClimate.sh` is a PBS job script for NCAR HPCs. Here's what each sec
 ```
 
 **Key PBS Options to Adjust:**
-- **`-A`**: Your project code (e.g., `NAML0001`, `NCAR0001`)
+- **`-A`**: Your project code (e.g., `NCAR0001`)
 - **`-q`**: Queue selection
   - `casper`: Analysis cluster with A100 GPUs (good for CAMulator)
   - `main`: Derecho main queue with H100 GPUs (for large runs)
@@ -437,7 +437,7 @@ Make sure to update:
 chmod +x RunQuickClimate.sh
 
 # Submit to PBS queue
-qsub RunQuickClimate.sh
+qsub -A $PBS_ACCOUNT RunQuickClimate.sh
 ```
 
 #### **Step 3: Monitor the job**
@@ -480,7 +480,7 @@ bash RunQuickClimate.sh
 
 ```bash
 # Submit job
-qsub RunQuickClimate.sh
+qsub -A $PBS_ACCOUNT RunQuickClimate.sh
 
 # Check status
 qstat -u $USER
@@ -489,7 +489,7 @@ qstat -u $USER
 qdel <job_id>
 
 # Interactive session (for debugging)
-qsub -I -A NAML0001 -l select=1:ncpus=8:ngpus=1:mem=64GB -l walltime=2:00:00 -q casper
+qsub -I -A $PBS_ACCOUNT -l select=1:ncpus=8:ngpus=1:mem=64GB -l walltime=2:00:00 -q casper
 
 # Check remaining project hours
 gladequota

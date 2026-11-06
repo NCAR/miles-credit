@@ -31,7 +31,7 @@ def _pbs_options(**kw):
         ncpus=64,
         mem="480GB",
         conda="credit-derecho",
-        project="NAML0001",
+        project="TEST0000",
         job_name="test_pbsdsh",
         walltime="02:00:00",
         queue="main",
@@ -92,7 +92,7 @@ class TestPbsdshLauncher:
         assert "CUDA_VISIBLE_DEVICES=0,1,2" in _script(ngpus=3)
 
     def test_account_in_header(self):
-        assert "#PBS -A NAML0001" in _script(project="NAML0001")
+        assert "#PBS -A TEST0000" in _script(project="TEST0000")
 
     def test_walltime_in_header(self):
         assert "#PBS -l walltime=03:00:00" in _script(walltime="03:00:00")
@@ -226,7 +226,7 @@ class TestPbsdshLauncher:
 
 FAKE_CONFIG = "/glade/work/user/my_run/config.yml"
 FAKE_REPO = "/glade/work/user/miles-credit"
-FAKE_ACCOUNT = "NAML0001"
+FAKE_ACCOUNT = "TEST0000"
 
 
 def _derecho_args(launcher="mpiexec", nodes=2, gpus=4, **kw):

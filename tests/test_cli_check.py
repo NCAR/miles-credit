@@ -841,6 +841,9 @@ def test_checks_do_not_mutate_the_config(conf):
         ({"queue": "main"}, None, "warning"),  # submit would fail: nothing to charge
         ({"queue": "main"}, "ENV_ACCOUNT", "info"),  # $PBS_ACCOUNT covers it
         ({"queue": "main", "project": "ABCD0001"}, None, None),
+        ({"queue": "main", "project": "ABCD0001"}, "ABCD0001", None),  # agree: nothing to say
+        ({"queue": "main", "project": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # config overrides env
+        ({"queue": "main", "account": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # alias too
     ],
 )
 def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
@@ -852,3 +855,18 @@ def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
     rep = _run(conf)
     found = {f.severity for f in rep.findings if f.where == "pbs.project"}
     assert found == ({severity} if severity else set())
+
+
+@pytest.mark.parametrize(("env_account", "needle"), [(None, "SLURM_ACCOUNT"), ("m0000_g", "m0000_g")])
+def test_slurm_account_message_is_scheduler_aware(conf, monkeypatch, env_account, needle):
+    # A Perlmutter block (written under pbs: by `credit begin`) resolves $SLURM_ACCOUNT, not $PBS_ACCOUNT.
+    monkeypatch.setenv("PBS_ACCOUNT", "PBS_ONLY")
+    if env_account:
+        monkeypatch.setenv("SLURM_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("SLURM_ACCOUNT", raising=False)
+    conf["pbs"] = {"constraint": "gpu", "qos": "regular", "job_name": "j", "walltime": "01:00:00", "queue": "main"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"]
+    text = found[0].message + (found[0].fix or "")
+    assert needle in text and "PBS_ACCOUNT" not in text
