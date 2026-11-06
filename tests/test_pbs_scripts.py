@@ -1320,13 +1320,49 @@ class TestDerechoNodesHonoredInAllModes:
 
     @pytest.mark.parametrize("mode", ALL_MODES)
     @pytest.mark.parametrize("nodes,launcher", [(1, "mpiexec"), (3, "mpiexec"), (3, "pbsdsh")])
-    def test_mpich_gtl_fix_follows_conda_activate(self, mode, nodes, launcher):
-        """Every Derecho script puts the loaded cray-mpich's gtl/lib first after activating the env."""
-        from credit.pbs import DERECHO_MPICH_GTL_FIX
+    def test_mpich_gtl_fix_follows_cray_mpich_load(self, mode, nodes, launcher):
+        """Every Derecho script puts the loaded cray-mpich's gtl/lib first after loading it."""
+        _assert_gtl_fix_after_pinned_mpich(self._script(mode, nodes=nodes, launcher=launcher))
 
-        script = self._script(mode, nodes=nodes, launcher=launcher)
-        assert script.count(DERECHO_MPICH_GTL_FIX) == 1
-        assert script.index("conda activate") < script.index(DERECHO_MPICH_GTL_FIX)
+
+def _assert_gtl_fix_after_pinned_mpich(script):
+    """The GTL fix runs once, after the pinned ``cray-mpich/8.1.29`` load and any ``conda activate``.
+
+    The fix trusts ``CRAY_MPICH_ROOTDIR``, so an unpinned ``cray-mpich`` (Lmod default) would put
+    whatever MPICH the module system defaults to first on the path.
+    """
+    from credit.pbs import DERECHO_MPICH_GTL_FIX
+
+    assert script.count(DERECHO_MPICH_GTL_FIX) == 1
+    fix_at = script.index(DERECHO_MPICH_GTL_FIX)
+    # Join backslash continuations so a wrapped `module load` reads as one command.
+    joined = script.replace("\\\n", " ")
+    loads = [line for line in joined.splitlines() if line.lstrip().startswith("module load") and "cray-mpich" in line]
+    assert loads, "no module load brings in cray-mpich"
+    for line in loads:
+        assert "cray-mpich/8.1.29" in line.split(), f"cray-mpich is not pinned: {line!r}"
+    assert script.index("cray-mpich/8.1.29") < fix_at
+    if "conda activate" in script:
+        assert script.index("conda activate") < fix_at
+
+
+class TestStandaloneLaunchersGtlFix:
+    """credit/pbs.py's launch_script_mpi / launch_script_torchrun get the fix too."""
+
+    @pytest.mark.parametrize("launcher_name", ["launch_script_mpi", "launch_script_torchrun"])
+    @pytest.mark.parametrize("nodes", [1, 2])
+    def test_launch_sh_applies_gtl_fix(self, tmp_path, monkeypatch, launcher_name, nodes):
+        import yaml
+
+        import credit.pbs
+
+        save_loc = tmp_path / "run"
+        save_loc.mkdir()
+        config_file = tmp_path / "model.yml"
+        config_file.write_text(yaml.safe_dump({"save_loc": str(save_loc), "pbs": {"nodes": nodes, "ngpus": 4}}))
+        monkeypatch.chdir(tmp_path)
+        getattr(credit.pbs, launcher_name)(str(config_file), "/fake/train_gen2.py", launch=False)
+        _assert_gtl_fix_after_pinned_mpich((tmp_path / "launch.sh").read_text())
 
 
 class TestDerechoMpichGtlFix:
@@ -1350,16 +1386,22 @@ class TestDerechoMpichGtlFix:
         )
         return out.stdout
 
-    def test_prepends_gtl_dir(self):
-        env = {"CRAY_MPICH_ROOTDIR": "/opt/cray/pe/mpich/8.1.29", "LD_LIBRARY_PATH": "/a:/b"}
-        assert self._run(env) == "/opt/cray/pe/mpich/8.1.29/gtl/lib:/a:/b"
+    def test_prepends_gtl_dir_and_logs_it(self, tmp_path):
+        (tmp_path / "gtl" / "lib").mkdir(parents=True)
+        out = self._run({"CRAY_MPICH_ROOTDIR": str(tmp_path), "LD_LIBRARY_PATH": "/a:/b"})
+        assert out == f"credit: using MPICH GTL from {tmp_path}/gtl/lib\n{tmp_path}/gtl/lib:/a:/b"
 
-    def test_empty_ld_library_path_has_no_trailing_colon(self):
-        assert self._run({"CRAY_MPICH_ROOTDIR": "/opt/cray/pe/mpich/8.1.29"}) == "/opt/cray/pe/mpich/8.1.29/gtl/lib"
+    def test_empty_ld_library_path_has_no_trailing_colon(self, tmp_path):
+        (tmp_path / "gtl" / "lib").mkdir(parents=True)
+        out = self._run({"CRAY_MPICH_ROOTDIR": str(tmp_path)})
+        assert out.splitlines()[-1] == f"{tmp_path}/gtl/lib"
 
     def test_no_op_without_cray_mpich(self):
         assert self._run({"LD_LIBRARY_PATH": "/a"}) == "/a"
         assert self._run({}) == "<unset>"
+
+    def test_no_op_when_gtl_dir_missing(self, tmp_path):
+        assert self._run({"CRAY_MPICH_ROOTDIR": str(tmp_path), "LD_LIBRARY_PATH": "/a"}) == "/a"
 
     def test_casper_script_has_no_gtl_fix(self):
         from credit.pbs import DERECHO_MPICH_GTL_FIX

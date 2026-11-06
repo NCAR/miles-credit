@@ -10,7 +10,7 @@ import textwrap
 
 import yaml
 
-from credit.pbs import DERECHO_MPICH_GTL_FIX
+from credit.pbs import DERECHO_MPICH_GTL_FIX, PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
 
 from ._common import (
     _PBS_DEFAULTS,
@@ -586,8 +586,6 @@ def _derecho_pbsdsh_script(
     ``app_args`` carries entrypoint-specific flags (e.g. realtime's ``--init-time`` /
     ``--steps``) appended after ``-c <config>``.
     """
-    from credit.pbs import PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
-
     logs_dir = os.path.join(os.path.expandvars(save_loc), "logs") if save_loc else "."
     conda_env = args.conda_env
     torchrun = _resolve_torchrun(conda_env)
