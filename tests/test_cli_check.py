@@ -857,6 +857,15 @@ def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
     assert found == ({severity} if severity else set())
 
 
+def test_slurm_only_block_reports_account(conf, monkeypatch):
+    # A config with only a slurm: block (no pbs:) still gets its account reported.
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    conf.pop("pbs", None)
+    conf["slurm"] = {"conda": "credit", "partition": "gpu"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"] and "m0000_g" in found[0].message
+
+
 @pytest.mark.parametrize(("env_account", "needle"), [(None, "SLURM_ACCOUNT"), ("m0000_g", "m0000_g")])
 def test_slurm_account_message_is_scheduler_aware(conf, monkeypatch, env_account, needle):
     # A Perlmutter block (written under pbs: by `credit begin`) resolves $SLURM_ACCOUNT, not $PBS_ACCOUNT.

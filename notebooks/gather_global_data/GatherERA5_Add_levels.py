@@ -44,6 +44,7 @@ Single level variables (Modify this block):
 import xarray as xr
 import glob
 import os
+import sys
 import numpy as np
 import pandas as pd
 from dask.diagnostics import ProgressBar
@@ -74,6 +75,11 @@ FPout = (
     "/glade/derecho/scratch/wchapman/STAGING2/"  # where do you want the files stored?
 )
 prefix_out = "ERA5_e5.oper.ml.v3"  # what prefix do you want the files stored with?
+if not os.environ.get("PBS_ACCOUNT"):
+    sys.exit(
+        "ERROR: $PBS_ACCOUNT is not set. This script charges its Dask PBS workers to that project code.\n"
+        "Set it and rerun, e.g.:  export PBS_ACCOUNT=<YOUR_PROJECT_CODE>"
+    )
 project_num = os.environ["PBS_ACCOUNT"]  # your PBS project code
 remove_dask_worker_scripts = True
 

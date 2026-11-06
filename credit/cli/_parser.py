@@ -153,7 +153,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per job")
     p.add_argument("--mem", default=None, help="Memory per job (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Walltime per job")
-    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
+    p.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        help="PBS account code (default: pbs.project in the config, then $PBS_ACCOUNT)",
+    )
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue")
     p.add_argument(
         "--gpu-type",
@@ -232,7 +236,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--cpus", type=int, default=None, metavar="N", help="CPUs per node")
     p.add_argument("--mem", default=None, help="Memory per node (Casper default: scales with --gpus)")
     p.add_argument("--walltime", default=None, metavar="HH:MM:SS", help="Job walltime")
-    p.add_argument("--account", metavar="ACCOUNT", help="PBS account code")
+    p.add_argument(
+        "--account",
+        metavar="ACCOUNT",
+        help="Account to charge (default: pbs.project in the config, then $PBS_ACCOUNT; $SLURM_ACCOUNT for SLURM)",
+    )
     p.add_argument("--queue", metavar="QUEUE", help="PBS queue (SLURM partition)")
     p.add_argument(
         "--constraint",

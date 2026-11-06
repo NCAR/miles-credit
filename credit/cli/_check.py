@@ -1172,6 +1172,10 @@ def _check_account(conf: dict, pbs: dict, rep: _Report) -> None:
 def _check_pbs(conf: dict, rep: _Report) -> None:
     pbs = conf.get("pbs") or {}
     if not pbs:
+        # A SLURM-only config (`slurm:` block, no `pbs:`) still needs its account reported;
+        # the queue/gpu_type checks below are PBS-specific.
+        if conf.get("slurm"):
+            _check_account(conf, conf["slurm"], rep)
         return
     # gpu_type is only used by the Casper template; leaving it unset requests any
     # NVIDIA GPGPU, which is a valid (and usually faster-queuing) choice.

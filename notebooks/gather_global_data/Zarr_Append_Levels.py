@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import argparse
 
@@ -9,6 +10,11 @@ from dask_jobqueue import PBSCluster
 
 
 def main(year):
+    if not os.environ.get("PBS_ACCOUNT"):
+        sys.exit(
+            "ERROR: $PBS_ACCOUNT is not set. This script charges its Dask PBS workers to that project code.\n"
+            "Set it and rerun, e.g.:  export PBS_ACCOUNT=<YOUR_PROJECT_CODE>"
+        )
     project_num = os.environ["PBS_ACCOUNT"]  # your PBS project code
 
     print("...setting up dask client...")

@@ -250,6 +250,23 @@ def test_perlmutter_blank_account_is_omitted(monkeypatch):
     assert "project" not in result and "account" not in result
 
 
+@pytest.mark.parametrize("env_account", [None, "m0000_g"])
+def test_perlmutter_account_prompt_reflects_slurm_account(monkeypatch, capsys, env_account):
+    # With $SLURM_ACCOUNT set the prompt offers it; without, the wizard says it's unset and asks.
+    if env_account:
+        monkeypatch.setenv("SLURM_ACCOUNT", env_account)
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or "")
+    _pbs_config("perlmutter", "exp", nodes=1, gpus=4)
+    out = capsys.readouterr().out
+    if env_account:
+        assert f"$SLURM_ACCOUNT={env_account}" in prompts[0]
+        assert "not set" not in out
+    else:
+        assert "$SLURM_ACCOUNT is not set" in out
+        assert "default allocation" in prompts[0]
+
+
 def test_perlmutter_typed_account_is_written(monkeypatch):
     answers = iter(["m0000_g", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
