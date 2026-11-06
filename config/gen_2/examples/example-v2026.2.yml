@@ -326,5 +326,6 @@ pbs: #derecho
   nodes: 8
   ncpus: 64
   ngpus: 4
-  mem: '480GB'
+  mem: 'auto'               # size from this config (train/preprocess), never below the site default;
+                             # or a fixed request such as '480GB'. `credit check` reports the estimate.
   queue: 'main'

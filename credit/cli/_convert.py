@@ -5,7 +5,7 @@ import os
 import sys
 import yaml
 
-from ._common import _prompt, _prompt_bool, _repo_root
+from ._common import _DEFAULT_LEVELS_16, _prompt, _prompt_bool, _repo_root
 
 
 def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out, source_name="ERA5"):
@@ -121,9 +121,6 @@ def _yaml_dump(conf, f):
 
 
 _SPATIAL_TIME_DIMS = frozenset(("time", "lat", "lon", "latitude", "longitude", "x", "y"))
-
-# ERA5 model levels (1 = top, 137 = lowest) of the 16-level WXFormer v1 / arXiv 2024 data.
-_DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
 
 
 def _zarr_dims(glob_path: str) -> list[str] | None:

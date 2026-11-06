@@ -42,12 +42,15 @@ def estimate_dataloader_memory_gib(conf: dict, validation: bool = False) -> floa
 
         buffered_batches × batch_size × sample_bytes
 
-    where buffered_batches = workers × prefetch_factor (1 with no workers) and
-    sample_bytes = H × W × total_channels × 4, i.e. **every value is assumed to
-    be float32** (4 bytes). Channels are summed over every data source and
-    variable group (prognostic, diagnostic, dynamic_forcing, static), and
-    input and target are counted separately (×2). The workers / prefetch
-    defaults match ``credit.trainers.utils.load_dataloader``.
+    where buffered_batches = workers × prefetch_factor + 1 (the batch the main
+    process holds, or its pinned copy; 1 with no workers) and sample_bytes is
+    H × W × channels × 4, i.e. **every value is assumed to be float32**
+    (4 bytes) — the gen2 datasets emit float32 tensors. A sample is the first
+    step of a forecast (the largest): its input holds the prognostic, static
+    and dynamic_forcing channels over ``history_len`` steps, its target the
+    prognostic and diagnostic channels at one step. Channels are summed over
+    every data source. The workers / prefetch defaults match
+    ``credit.trainers.utils.load_dataloader``.
 
     This is per process: a multi-GPU job runs one DataLoader per GPU.
 
@@ -67,14 +70,21 @@ def estimate_dataloader_memory_gib(conf: dict, validation: bool = False) -> floa
         model_conf = conf.get("model", {})
         sources = data_conf.get("source", {})
         if validation:
-            sources = (conf.get("validation_data") or {}).get("source") or sources
+            data_conf = conf.get("validation_data") or data_conf
+            sources = data_conf.get("source") or sources
 
         total_ch = 0
         for src in sources.values():
             n_levels = resolve_num_levels(src, conf)
-            for group in (src.get("variables") or {}).values():
+            # Resolved like BaseDataset._load_history_len: source first, then data block.
+            history_len = src.get("history_len", data_conf.get("history_len", 1))
+            channels = {}
+            for field_type, group in (src.get("variables") or {}).items():
                 group = group or {}
-                total_ch += len(group.get("vars_3D") or []) * n_levels + len(group.get("vars_2D") or [])
+                channels[field_type] = len(group.get("vars_3D") or []) * n_levels + len(group.get("vars_2D") or [])
+            n_input = sum(channels.get(t, 0) for t in ("prognostic", "static", "dynamic_forcing"))
+            n_target = sum(channels.get(t, 0) for t in ("prognostic", "diagnostic"))
+            total_ch += history_len * n_input + n_target
 
         if total_ch == 0:
             return 0.0
@@ -82,13 +92,12 @@ def estimate_dataloader_memory_gib(conf: dict, validation: bool = False) -> floa
         H = model_conf.get("image_height", 721)
         W = model_conf.get("image_width", 1440)
 
-        bytes_per_sample = H * W * total_ch * 4  # float32 4 bytes
-        bytes_per_sample *= 2  # input + target
+        bytes_per_sample = H * W * total_ch * 4  # float32 4 bytes, input + target
 
         workers = trainer_conf.get("valid_thread_workers" if validation else "thread_workers", 4)
         prefetch = trainer_conf.get("prefetch_factor", 2)
         batch_size = trainer_conf.get("valid_batch_size" if validation else "train_batch_size", 1)
-        buffered = workers * prefetch if workers > 0 else 1
+        buffered = workers * prefetch + 1 if workers > 0 else 1
 
         total_bytes = buffered * batch_size * bytes_per_sample
         return total_bytes / 2**30

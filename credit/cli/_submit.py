@@ -134,12 +134,14 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
     # On Casper the memory ask scales with the fraction of the node's GPUs in use
     # (64GB for one GPU up to the whole node's memory for all of them); an explicit
-    # --mem / pbs.mem always wins.  pbs.mem: auto sizes it from the config instead.
+    # --mem / pbs.mem always wins.  ``auto`` (from either) sizes it from the config instead.
     fallback_mem = casper_mem(r.gpus, r.gpu_type) if is_casper else d["mem"]
-    pbs_mem = pbs_cfg.get("mem")
-    if str(pbs_mem).lower() == "auto":
-        pbs_mem = _auto_mem_request(args, r) if args.mem is None else None
-    r.mem = _first(args.mem, pbs_mem, fallback_mem)
+    cli_mem = None if _is_auto(args.mem) else args.mem
+    pbs_mem = None if _is_auto(pbs_cfg.get("mem")) else pbs_cfg.get("mem")
+    if cli_mem is None and (_is_auto(args.mem) or _is_auto(pbs_cfg.get("mem"))):
+        # Rollout / realtime (and an inestimable config) keep the configured or default request.
+        pbs_mem = _auto_mem_request(args, r) or pbs_mem
+    r.mem = _first(cli_mem, pbs_mem, fallback_mem)
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
     r.torchrun_args = _resolve_torchrun_args(args, pbs_cfg, "pbs")
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
@@ -151,6 +153,10 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
             r.torchrun_args,
         )
     return r
+
+
+def _is_auto(mem) -> bool:
+    return str(mem).strip().lower() == "auto"
 
 
 def _auto_mem_request(args: argparse.Namespace, r: argparse.Namespace) -> str | None:
@@ -166,19 +172,18 @@ def _auto_mem_request(args: argparse.Namespace, r: argparse.Namespace) -> str | 
     # Preprocess only fits scalers on the training data, so it has no validation loader.
     estimate = auto_mem(conf, args.cluster, r.gpus, r.gpu_type, include_validation=mode == "train")
     if estimate is None:
-        logger.warning("pbs.mem: auto — nothing to estimate memory from in the config; using the default request.")
+        logger.warning("mem: auto — nothing to estimate memory from in the config; using the default request.")
         return None
-    mem, explanation, exceeds_node = estimate
-    if exceeds_node:
+    if estimate.exceeds_node:
         logger.warning(
-            "Memory (pbs.mem: auto): %s = %s. The job likely needs more than one node offers; "
+            "Memory (mem: auto): %s = %s. The job likely needs more than one node offers; "
             "reduce trainer.train_batch_size, thread_workers or prefetch_factor, or use fewer levels.",
-            mem,
-            explanation,
+            estimate.mem,
+            estimate.explanation,
         )
     else:
-        logger.info("Memory (pbs.mem: auto): %s = %s.", mem, explanation)
-    return mem
+        logger.info("Memory (mem: auto): %s = %s.", estimate.mem, estimate.explanation)
+    return estimate.mem
 
 
 # ---------------------------------------------------------------------------
@@ -275,8 +280,9 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     r.gpus = int(_first(args.gpus, slurm_cfg.get("ngpus") or slurm_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, slurm_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, slurm_cfg.get("ncpus") or slurm_cfg.get("cpus"), d["cpus"]))
+    # ``auto`` is PBS-only; on SLURM it means the site default.
     slurm_mem = slurm_cfg.get("mem")
-    r.mem = _first(args.mem, None if str(slurm_mem).lower() == "auto" else slurm_mem, d["mem"])
+    r.mem = _first(*(None if _is_auto(m) else m for m in (args.mem, slurm_mem)), d["mem"])
     # --queue doubles as the SLURM partition selector.
     r.partition = _first(args.queue, slurm_cfg.get("partition") or slurm_cfg.get("queue"), d["partition"])
     r.queue = r.partition
@@ -1393,7 +1399,10 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         "walltime": "06:00:00",
     }
     # pbs.mem: auto is sized for training; a rollout keeps its own default.
-    merged_cfg = {**_rollout_defaults, **{k: v for k, v in sched_cfg.items() if v is not None and v != "auto"}}
+    merged_cfg = {
+        **_rollout_defaults,
+        **{k: v for k, v in sched_cfg.items() if v is not None and not (k == "mem" and _is_auto(v))},
+    }
 
     if not hasattr(args, "nodes"):
         args.nodes = None

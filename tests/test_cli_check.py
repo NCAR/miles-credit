@@ -957,3 +957,67 @@ def test_dynamic_grad_clip_ignored_without_dynamic_warns(conf):
     conf["trainer"]["grad_max_norm"] = 1.0
     conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0}
     assert "trainer.dynamic_grad_clip" in _wheres(_run(conf), "warning")
+
+
+# ---------------------------------------------------------------------------
+# pbs.mem — config-derived memory estimate
+# ---------------------------------------------------------------------------
+
+
+def _mem_findings(conf):
+    from credit.cli._check import _check_pbs
+
+    rep = _Report("test.yml")
+    _check_pbs(conf, rep)
+    return [f for f in rep.findings if f.where == "pbs.mem"]
+
+
+def _big_conf(tmp_path, gib_per_channel, **pbs):
+    """_base_conf (13 channels per sample) on a grid where one float32 channel is *gib_per_channel* GiB."""
+    conf = _base_conf(tmp_path)
+    conf["model"]["image_height"] = 1
+    conf["model"]["image_width"] = int(gib_per_channel * 2**28)
+    conf["trainer"].update(thread_workers=0, valid_thread_workers=0)
+    conf["pbs"] = {"project": "X", "job_name": "j", "walltime": "01:00:00", "ngpus": 4, **pbs}
+    return conf
+
+
+def test_mem_gb_parses_pbs_units():
+    from credit.cli._check import _mem_gb
+
+    assert [_mem_gb(v) for v in ("480GB", "1tb", "512mb", " 64 gb ")] == [480, 1024, 0.5, 64]
+    assert _mem_gb("auto") is None and _mem_gb(None) is None
+
+
+def test_pbs_mem_auto_reports_the_request(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, queue="main", mem="auto"))
+    assert finding.severity == "info"
+    assert "will request 480GB per node for training" in finding.message
+    assert "--gpus" in finding.message
+
+
+def test_request_below_estimate_warns(tmp_path):
+    # (2 loaders x 13 GiB + 4) x 4 GPUs x 1.3 = 156 GB: over 64GB, under a Casper node.
+    (finding,) = _mem_findings(_big_conf(tmp_path, 1.0, queue="casper", gpu_type="a100_80gb", mem="64GB"))
+    assert finding.severity == "warning" and "pbs.mem 64GB is below the estimated" in finding.message
+    assert "mem: auto" in finding.fix
+    assert _mem_findings(_big_conf(tmp_path, 1.0, queue="casper", gpu_type="a100_80gb", mem="256GB")) == []
+    # unset mem is compared with the site default: 64GB for one Casper GPU vs (26 x 3 + 4) x 1.3 = 107 GB
+    (finding,) = _mem_findings(_big_conf(tmp_path, 3.0, queue="casper", gpu_type="a100_80gb", ngpus=1))
+    assert "pbs.mem is unset, so `credit submit` requests 64GB" in finding.message
+
+
+def test_estimate_over_a_node_warns_once(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 20.0, queue="main", mem="480GB"))
+    assert "more than one derecho node offers" in finding.message
+    info, warning = _mem_findings(_big_conf(tmp_path, 20.0, queue="casper", mem="auto"))
+    assert "will request 704GB" in info.message
+    assert "pbs.gpu_type" in warning.fix
+
+
+def test_unknown_cluster_still_reports_memory(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, mem="auto"))  # no queue
+    assert finding.severity == "info"
+    assert "on Casper" in finding.message and "on Derecho" in finding.message
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, queue="gpudev", mem="100GB"))  # both clusters
+    assert "was not compared" in finding.message
