@@ -91,7 +91,21 @@ and some model settings. Modify the config file later with more advanced options
 
 For a laptop-runnable starting point, see
 `config/gen_2/examples/weatherbench2_era5_wxformer_tiny.yml`, which streams a
-small WeatherBench2 ERA5 subset from the cloud — no local data required.
+small WeatherBench2 ERA5 subset from the cloud — no local data required. Its
+`save_loc` and `scaler_path` point to NCAR's `scratch` directory, so change
+both to local paths first.
+
+### What the config contains
+
+The config is one YAML file that describes the whole experiment: the data
+sources and variables, the [preblocks](Preblocks.md) that prepare data for the
+model (for example, normalization), the [model](Models_gen2.md), the
+[postblocks](postblocks_gen2.md) that process the model output (for example,
+converting back to physical units), the loss, the trainer settings, and the
+`inference:` settings. `credit check`, `credit preprocess`, `credit train`,
+`credit rollout`, `credit plot`, and `credit submit` all read it with `-c`.
+The *Config Settings* page in the sidebar describes the Gen 1 format; for Gen 2,
+use the annotated reference config linked at the end of this step.
 
 ### Validating a config with `credit check`
 
@@ -133,7 +147,18 @@ credit preprocess -c my_experiment.yml
 [bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
 by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
 config. Training will fail without this file, so run it once before your first
-training job (and re-run it if you change the variable list or date range).
+training job (and re-run it if you change the variables, levels, training date
+range, or any preblock that runs before the scaler).
+
+### Why the data is scaled
+
+Weather variables differ by orders of magnitude: surface pressure is around
+100,000 Pa, while specific humidity stays below about 0.03 kg/kg. The
+`bridgescaler_transform` preblock rescales each variable with statistics fitted
+on your training data before the model sees it (by default a standard scaler:
+subtract the mean, divide by the standard deviation), and a
+`bridgescaler_transform` postblock converts the predictions back to physical
+units.
 
 ## 4. Start a training job
 
@@ -303,10 +328,19 @@ credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mo
 
 Rollout jobs are independent, so there is no `afterok` chain like training.
 
+### What you have at this point
+
+- In `save_loc`: the trained model checkpoint (`checkpoint.pt`, or
+  `model_checkpoint.pt` for FSDP runs), `training_log.csv`, and `tensorboard/`
+  if `trainer.use_tensorboard` is on.
+- The fitted scaler JSON at each `scaler_path`. Rollout uses the same file to
+  normalize its inputs and convert predictions back to physical units.
+
 Output lands in `save_forecast/<YYYYMMDD_HHMMZ>/`, one subdirectory per init time,
 as NetCDF (or Zarr) files in physical units. `inference.output.group_by` sets the file
 granularity (one file per step, day, month, or whole run). These forecasts are the
-input for evaluation with `credit metrics` (see [Evaluation](Evaluation.md)) and
+input for evaluation with
+[`credit metrics`](cli.md#credit-metrics--weatherbench2-style-evaluation) and
 for any downstream analysis.
 
 > **More detail**: [Inference guide](Inference.md) | `credit rollout --help`
