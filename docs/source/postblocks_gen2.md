@@ -580,6 +580,64 @@ land_red_noise:
 - `lead_time_periods` against `data.timestep`;
 - its position relative to the inverse scaler, the tracer clamp and the budget fixers.
 
+### `tendency_noise` (TendencyNoise)
+
+**AutoAPI:** {py:obj}`credit.postblock.tendency_noise.TendencyNoise`
+
+Multiplicative noise in the spirit of SPPT (stochastically perturbed
+parameterization tendencies). Every step it rescales the model's predicted
+change of chosen prognostic fields by a random factor,
+
+    y' = x + (1 + r) * (y - x)
+
+where `x` is the step's input state and `y` the prediction, both in physical
+units. The noise is therefore large where the model predicts big changes and
+vanishes where it predicts none.
+
+- **`r`** is one random field shared by every perturbed field and level, as in
+  SPPT. It is the sum over `scales` of `sigma` times a unit-variance, spatially
+  smooth pattern (the same construction as `targeted_red_noise`), AR(1) in time
+  with e-folding time `tau_days`, clipped to `[-clip, clip]`.
+  - The default `scales` are ECMWF's three: (0.52, 6 h, 500 km), (0.18, 3 d,
+    1000 km) and (0.06, 30 d, 2000 km) as `(sigma, tau_days, length_scale_km)`.
+    The 500 km scale needs a grid of about 1 degree or finer.
+  - `clip` is at most 1, so `1 + r` never reverses a change.
+  - Each batch row (ensemble member) has its own stream, starting from its
+    stationary distribution.
+- **`fields`** lists the prognostic fields, each `{var[, levels]}`. A field must be
+  both predicted and a model input. `levels` restricts a 3-D field, for example to
+  the levels below about 100 hPa.
+
+Unlike SPPT in a GCM, an emulator's 6-hour change includes the resolved dynamics
+(advection), so the dynamics are perturbed too. Leave the winds out of `fields`
+for a thermodynamic-only variant.
+
+**Where to put it:** like `targeted_red_noise`, after the inverse scaler and
+before the tracer clamp and the conservation fixers, so the clamp keeps tracers
+non-negative and the fixers close each step's budget with the perturbation
+included. The patterns restart with every trajectory, and the block can be used
+at inference only through `inference.postblocks`.
+
+```yaml
+# CAMulator: T, Qtot, U and V below about 100 hPa (CAM levels 10-31), ECMWF's default scales
+tendency_noise:
+  type: "tendency_noise"
+  args:
+    lead_time_periods: 6
+    fields:
+      - {var: "CESM/prognostic/3d/T", levels: &troposphere [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31]}
+      - {var: "CESM/prognostic/3d/Qtot", levels: *troposphere}
+      - {var: "CESM/prognostic/3d/U", levels: *troposphere}
+      - {var: "CESM/prognostic/3d/V", levels: *troposphere}
+```
+
+`credit check` validates the block wherever it appears, including under
+`inference.postblocks`:
+- that every field is a prognostic variable, and its levels;
+- whether every scale's `length_scale_km` is resolvable on the model grid;
+- `lead_time_periods` against `data.timestep`;
+- its position relative to the inverse scaler, the tracer clamp and the budget fixers.
+
 ## Example: the WXFormer prediction + target-twin chain
 
 The config below is the standard chain for a `BaseLoss` scored in physical

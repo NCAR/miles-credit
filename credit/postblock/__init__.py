@@ -31,6 +31,7 @@ _POSTBLOCK_REGISTRY = {
     "semilagrangian_advection": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
     "se_to_latlon": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
     "targeted_red_noise": ("credit.postblock.red_noise", "TargetedRedNoise"),
+    "tendency_noise": ("credit.postblock.tendency_noise", "TendencyNoise"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -54,6 +55,7 @@ _CLASS_SOURCES = {
     "SemiLagrangianAdvectionPost": ("credit.postblock.advect", "SemiLagrangianAdvectionPost"),
     "SEToLatLonPostBlock": ("credit.postblock.regrid_se_to_latlon", "SEToLatLonPostBlock"),
     "TargetedRedNoise": ("credit.postblock.red_noise", "TargetedRedNoise"),
+    "TendencyNoise": ("credit.postblock.tendency_noise", "TendencyNoise"),
 }
 
 

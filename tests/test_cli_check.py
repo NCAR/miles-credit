@@ -1156,3 +1156,137 @@ def test_targeted_red_noise_rejects_domain_parallelism(conf):
     rep = _run(conf)
     assert "postblocks.per_step.red" in _wheres(rep)
     assert "domain parallelism" in _text(rep)
+
+
+# ===========================================================================
+# Tendency noise (tendency_noise postblock) and start perturbations (start_perturbation preblock)
+# ===========================================================================
+
+_T3 = "ERA5/prognostic/3d/T"
+_LONG_SCALES = [{"sigma": 0.3, "tau_days": 1, "length_scale_km": 2500.0}]
+
+
+def _sppt_block(**args):
+    fields = [{"var": _T3}, {"var": _SP}]
+    return {"type": "tendency_noise", "args": {"fields": fields, "scales": _LONG_SCALES, **args}}
+
+
+def test_tendency_noise_clean(conf):
+    _insert_after(conf, "scaler", "sppt", _sppt_block())
+    rep = _run(conf)
+    assert _wheres(rep) == set(), _text(rep)
+    assert not [w for w in _wheres(rep, "warning") if "sppt" in w], _text(rep, "warning")
+
+
+@pytest.mark.parametrize(
+    "args, text",
+    [
+        ({"fields": [{"var": "ERA5/diagnostic/2d/TP"}]}, "not a model input"),
+        ({"fields": [{"var": "ERA5/prognostic/2d/XX"}]}, "not a predicted"),
+        ({"fields": [{"var": _SP, "levels": [0]}]}, "remove levels"),
+        ({"fields": [{"var": _T3, "levels": [5]}]}, "out of range"),
+        ({"scales": [{"sigma": 0.5, "tau_days": 1, "length_scale_km": 100.0}]}, "too short"),
+        ({"clip": 2}, "clip must be"),
+        ({"lead_time_periods": 3}, "lead_time_periods is 3"),
+    ],
+)
+def test_tendency_noise_errors(conf, args, text):
+    _insert_after(conf, "scaler", "sppt", _sppt_block(**args))
+    rep = _run(conf)
+    assert any(w.startswith("postblocks.per_step.sppt") for w in _wheres(rep)), _text(rep)
+    assert text in _text(rep)
+
+
+def test_tendency_noise_default_scales_need_a_finer_grid(conf):
+    block = _sppt_block()
+    del block["args"]["scales"]  # ECMWF's 500 km scale cannot be resolved on the 64 x 64 test grid
+    _insert_after(conf, "scaler", "sppt", block)
+    rep = _run(conf)
+    assert "postblocks.per_step.sppt.scales[0]" in _wheres(rep)
+    assert "1-degree grid" in _text(rep)
+
+
+def test_tendency_noise_placement_and_phase(conf):
+    _insert_after(conf, None, "sppt_first", _sppt_block())  # before the inverse scaler
+    _insert_after(conf, "scaler", "mass_fixer", copy.deepcopy(_MASS_FIXER))
+    _insert_after(conf, "mass_fixer", "sppt_late", _sppt_block())  # after a budget fixer
+    conf["postblocks"]["post_rollout"] = {"sppt_once": _sppt_block()}
+    rep = _run(conf)
+    assert {"postblocks.per_step.sppt_first", "postblocks.per_step.sppt_late"} <= _wheres(rep, "warning")
+    assert "postblocks.post_rollout.sppt_once" in _wheres(rep)
+
+
+def test_tendency_noise_under_inference_postblocks_is_checked(conf):
+    per_step = copy.deepcopy(conf["postblocks"]["per_step"])
+    per_step["sppt"] = _sppt_block(sigma=1.0)
+    conf["inference"] = {"postblocks": {"per_step": per_step}}
+    rep = _run(conf)
+    assert "inference.postblocks.per_step.sppt" in _wheres(rep)
+    assert "sigma" in _text(rep)
+
+
+@pytest.fixture
+def donor_stores(tmp_path):
+    """Yearly stores for 1990 and 1991 holding T and SP (no Q)."""
+    import numpy as np
+    import pandas as pd
+    import xarray as xr
+
+    for year in (1990, 1991):
+        times = pd.date_range(f"{year}-01-01", periods=4, freq="6h")
+        xr.Dataset(
+            {
+                "T": (("time", "level", "lat", "lon"), np.zeros((4, 2, 4, 4), np.float32)),
+                "SP": (("time", "lat", "lon"), np.zeros((4, 4, 4), np.float32)),
+            },
+            coords={"time": times},
+        ).to_zarr(tmp_path / f"donor_{year}.zarr")
+    return str(tmp_path / "donor_%Y.zarr")
+
+
+def _kick_block(path, **args):
+    return {
+        "type": "start_perturbation",
+        "args": {"path": path, "fields": [_T3, _SP], "amplitude": 0.2, "years": [1990, 1991], **args},
+    }
+
+
+def test_start_perturbation_clean(conf, donor_stores):
+    conf["preblocks"]["ic_only"] = {"kick": _kick_block(donor_stores)}
+    rep = _run(conf)
+    assert _wheres(rep) == set(), _text(rep)
+    assert not [w for w in _wheres(rep, "warning") if "kick" in w], _text(rep, "warning")
+
+
+@pytest.mark.parametrize(
+    "args, text",
+    [
+        ({"fields": ["ERA5/diagnostic/2d/TP"]}, "not a prognostic"),
+        ({"fields": [_T3, "ERA5/prognostic/3d/Q"]}, "lacks Q"),
+        ({"years": [1990, 1992]}, "No data store for 1 donor year(s) (1992)"),
+        ({"amplitude": 0}, "amplitude must be"),
+        ({"time_coord": "valid_time"}, "no time coordinate"),
+    ],
+)
+def test_start_perturbation_errors(conf, donor_stores, args, text):
+    conf["preblocks"]["ic_only"] = {"kick": _kick_block(donor_stores, **args)}
+    rep = _run(conf)
+    assert any(w.startswith("preblocks.ic_only.kick") for w in _wheres(rep)), _text(rep)
+    assert text in _text(rep)
+
+
+def test_start_perturbation_must_be_first_and_ic_only(conf, donor_stores):
+    conf["preblocks"]["ic_only"] = {"kick": _kick_block(donor_stores), "kick2": _kick_block(donor_stores)}
+    conf["preblocks"]["per_step"] = {"kick3": _kick_block(donor_stores), **conf["preblocks"]["per_step"]}
+    rep = _run(conf)
+    assert "preblocks.ic_only.kick2" in _wheres(rep, "warning")
+    assert "preblocks.per_step.kick3" in _wheres(rep)
+    assert "Move it under ic_only" in _text(rep)
+
+
+def test_start_perturbation_warns_when_donors_overlap_the_forecasts(conf, donor_stores):
+    conf["preblocks"]["ic_only"] = {"kick": _kick_block(donor_stores)}
+    conf["inference"] = {"batch_forecast": {"first_init_date": "1991-01-01", "last_init_date": "1991-06-01"}}
+    rep = _run(conf)
+    assert "preblocks.ic_only.kick.years" in _wheres(rep, "warning")
+    assert "true future" in _text(rep, "warning")

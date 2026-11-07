@@ -151,7 +151,11 @@ The process is still white in space, as SDL was trained, and it is untargeted: e
 
 **Targeted physical-space red noise** is the [`targeted_red_noise`](postblocks_gen2.md#targeted_red_noise-targetedrednoise) postblock. It adds a spatially smooth AR(1) pattern, in physical units, to chosen fields over land and sea ice only. Each field can have its own `tau`.
 
-**State and reset.** Both keep their state in plain attributes, not buffers. Checkpoints are therefore unchanged, and DDP never copies one rank's noise to the others.
+**Multiplicative tendency noise** is the [`tendency_noise`](postblocks_gen2.md#tendency_noise-tendencynoise) postblock: an SPPT-style random factor on each step's predicted change, red in time on three scales.
+
+**Perturbed starts.** The [`start_perturbation`](Preblocks.md#start_perturbation-startperturbation) preblock perturbs the initial state once, with a scaled difference of two other states from the same time of year. It gives a start-perturbed ensemble to compare against noise injected every step.
+
+**State and reset.** These noise options keep their state in plain attributes, not buffers. Checkpoints are therefore unchanged, and DDP never copies one rank's noise to the others.
 - The gen2 trainer restarts the state at the first step of every batch: train and validation.
 - `credit rollout` restarts it at the start of every forecast.
 - Each batch row is an independent stream, so each ensemble member has its own noise history.

@@ -24,6 +24,7 @@ _PREBLOCK_REGISTRY = {
     "semilagrangian_advection": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
     "tripole_to_se": ("credit.preblock.latlon_to_se", "TripoleToSEPreBlock"),
     "to_device": ("credit.preblock.device", "ToDevice"),
+    "start_perturbation": ("credit.preblock.start_perturbation", "StartPerturbation"),
 }
 
 # Direct-import table: maps Python class names → class for lazy module attribute access.
@@ -41,6 +42,7 @@ _CLASS_SOURCES = {
     "SemiLagrangianAdvectionPre": ("credit.preblock.advect", "SemiLagrangianAdvectionPre"),
     "TripoleToSEPreBlock": ("credit.preblock.latlon_to_se", "TripoleToSEPreBlock"),
     "ToDevice": ("credit.preblock.device", "ToDevice"),
+    "StartPerturbation": ("credit.preblock.start_perturbation", "StartPerturbation"),
 }
 
 

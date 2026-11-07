@@ -1082,17 +1082,19 @@ def _check_map_file(rep: _Report, where: str, path: str, var: str, grid) -> None
 
 
 def _check_red_noise(conf: dict, rep: _Report) -> None:
-    """Validate ``model.red_noise`` and every ``targeted_red_noise`` postblock (including ``inference.postblocks``).
+    """Validate ``model.red_noise`` and the noise postblocks (including ``inference.postblocks``).
 
-    Beyond the arguments themselves: the timestep behind ``phi = exp(-dt / tau)``,
-    the perturbed variables and levels, the mask and sigma files, the pattern's
-    length scale on the model grid, and where the block sits relative to the
+    The noise postblocks are ``targeted_red_noise`` and ``tendency_noise``. Beyond
+    the arguments themselves: the timestep behind ``phi = exp(-dt / tau)``, the
+    perturbed variables and levels, the mask and sigma files, the patterns'
+    length scales on the model grid, and where the block sits relative to the
     inverse scaler, the tracer clamp and the conservation fixers.
     """
     from numbers import Real
 
-    from credit.ensemble.red_noise import red_noise_errors, spectral_truncation_fraction
-    from credit.postblock.red_noise import TargetedRedNoise, targeted_red_noise_errors
+    from credit.ensemble.red_noise import red_noise_errors
+    from credit.postblock.red_noise import TargetedRedNoise
+    from credit.postblock.tendency_noise import TendencyNoise
 
     mconf = conf.get("model") or {}
     red = mconf.get("red_noise")
@@ -1110,6 +1112,10 @@ def _check_red_noise(conf: dict, rep: _Report) -> None:
                 fix=f"timestep_hours: {step:g}",
             )
 
+    noise_blocks = {
+        "targeted_red_noise": (TargetedRedNoise, _check_targeted_red_noise_args),
+        "tendency_noise": (TendencyNoise, _check_tendency_noise_args),
+    }
     grid = (mconf.get("image_height"), mconf.get("image_width"))
     inference_data = _get(conf, "inference", "data")
     for prefix, cfg, data_conf in (
@@ -1125,111 +1131,287 @@ def _check_red_noise(conf: dict, rep: _Report) -> None:
                 continue
             chain = [(n, b) for n, b in blocks.items() if isinstance(b, dict) and "type" in b]
             for i, (name, block) in enumerate(chain):
-                if block["type"] != "targeted_red_noise":
+                btype = block["type"]
+                if btype not in noise_blocks:
                     continue
+                cls, check_args = noise_blocks[btype]
                 where = f"{prefix}.{section}.{name}"
                 if section != "per_step":
-                    rep.error(where, "targeted_red_noise must run every step.", fix="Move it under per_step.")
+                    rep.error(where, f"{btype} must run every step.", fix="Move it under per_step.")
                     continue
                 args = block.get("args") or {}
-                err = _bind_error(TargetedRedNoise, args)  # top-level blocks are also bound by _check_blocks
+                err = _bind_error(cls, args)  # top-level blocks are also bound by _check_blocks
                 if err:
                     if prefix.startswith("inference"):
-                        rep.error(
-                            where,
-                            f"'targeted_red_noise' {err}",
-                            fix=f"Accepted args: {', '.join(_accepted_params(TargetedRedNoise))}",
-                        )
+                        rep.error(where, f"'{btype}' {err}", fix=f"Accepted args: {', '.join(_accepted_params(cls))}")
                     continue
                 if prefix == "postblocks" and (_get(conf, "trainer", "parallelism", "domain", default=1) or 1) > 1:
                     rep.error(
                         where,
-                        "targeted_red_noise needs the full grid, but domain parallelism hands postblocks a shard.",
+                        f"{btype} needs the full grid, but domain parallelism hands postblocks a shard.",
                         fix="Use it with trainer.parallelism.domain: 1, or only at inference (inference.postblocks).",
                     )
-                length_scale = args.get("length_scale_km", 500.0)
-                lead = args.get("lead_time_periods", 6)
-                errors = targeted_red_noise_errors(args.get("fields"), length_scale, lead)
-                for e in errors:
-                    rep.error(where, e)
-                if errors:
+                if not check_args(rep, where, args, predicted, inputs, grid):
                     continue
-
-                for j, fld in enumerate(args["fields"]):
-                    fwhere = f"{where}.fields[{j}]"
-                    var, levels = fld["var"], fld.get("levels")
-                    if predicted and var not in predicted:
-                        rep.error(
-                            fwhere,
-                            f"{var} is not a predicted (prognostic or diagnostic) variable.{_suggest(var, predicted)}",
-                        )
-                    elif predicted and predicted[var] is None and levels is not None:
-                        rep.error(fwhere, f"{var} is 2-D; remove levels.")
-                    elif predicted and predicted[var] is not None:
-                        n = predicted[var]
-                        if levels is None:
-                            rep.warn(
-                                fwhere,
-                                f"No levels: all {n} levels of {var} are perturbed with the same pattern.",
-                                fix=f"levels: [{n - 1}]  (the lowest level when level 0 is the model top)",
-                            )
-                        elif any(not -n <= lv < n for lv in levels):
-                            rep.error(fwhere, f"levels {levels} out of range for {var}'s {n} levels.")
-                    if isinstance(fld["sigma"], dict):
-                        _check_map_file(rep, f"{fwhere}.sigma", fld["sigma"]["path"], fld["sigma"]["var"], grid)
-                if args.get("land_file"):
-                    _check_map_file(
-                        rep, f"{where}.land_file", args["land_file"], args.get("land_var", "LANDFRAC"), grid
-                    )
-                ice_var = args.get("ice_var")
-                if ice_var and inputs and ice_var not in inputs:
-                    rep.error(where, f"ice_var {ice_var} is not a model input variable.{_suggest(ice_var, inputs)}")
-
-                if None not in grid and spectral_truncation_fraction(*grid, length_scale) > 0.01:
-                    rep.error(
-                        where,
-                        f"length_scale_km={length_scale} is too short for the {grid[0]} x {grid[1]} grid: the "
-                        "pattern would lose its smallest scales.",
-                    )
+                lead = args.get("lead_time_periods", 6)
                 if step and isinstance(lead, Real) and lead != step:
                     rep.error(
                         where,
                         f"lead_time_periods is {lead} but the timestep is {step:g} h, so the pattern's memory is wrong.",
                         fix=f"lead_time_periods: {step:g}",
                     )
+                _check_noise_placement(rep, where, chain[:i], args.get("key", "y_processed"), args["fields"])
 
-                # Placement: physical units in, before the tracer clamp and the budget fixers.
-                key = args.get("key", "y_processed")
-                before = chain[:i]
-                if not any(
-                    b["type"] == "bridgescaler_transform"
-                    and (b.get("args") or {}).get("method") == "inverse_transform"
-                    and _block_output_key(b) == key
-                    for _n, b in before
-                ):
+
+def _check_targeted_red_noise_args(rep: _Report, where: str, args: dict, predicted, inputs, grid) -> bool:
+    """A ``targeted_red_noise`` block's own arguments, variables, files and length scale; False on argument errors."""
+    from credit.ensemble.red_noise import spectral_truncation_fraction
+    from credit.postblock.red_noise import targeted_red_noise_errors
+
+    length_scale = args.get("length_scale_km", 500.0)
+    errors = targeted_red_noise_errors(args.get("fields"), length_scale, args.get("lead_time_periods", 6))
+    for e in errors:
+        rep.error(where, e)
+    if errors:
+        return False
+
+    for j, fld in enumerate(args["fields"]):
+        fwhere = f"{where}.fields[{j}]"
+        var, levels = fld["var"], fld.get("levels")
+        if predicted and var not in predicted:
+            rep.error(
+                fwhere, f"{var} is not a predicted (prognostic or diagnostic) variable.{_suggest(var, predicted)}"
+            )
+        elif predicted and predicted[var] is None and levels is not None:
+            rep.error(fwhere, f"{var} is 2-D; remove levels.")
+        elif predicted and predicted[var] is not None:
+            n = predicted[var]
+            if levels is None:
+                rep.warn(
+                    fwhere,
+                    f"No levels: all {n} levels of {var} are perturbed with the same pattern.",
+                    fix=f"levels: [{n - 1}]  (the lowest level when level 0 is the model top)",
+                )
+            elif any(not -n <= lv < n for lv in levels):
+                rep.error(fwhere, f"levels {levels} out of range for {var}'s {n} levels.")
+        if isinstance(fld["sigma"], dict):
+            _check_map_file(rep, f"{fwhere}.sigma", fld["sigma"]["path"], fld["sigma"]["var"], grid)
+    if args.get("land_file"):
+        _check_map_file(rep, f"{where}.land_file", args["land_file"], args.get("land_var", "LANDFRAC"), grid)
+    ice_var = args.get("ice_var")
+    if ice_var and inputs and ice_var not in inputs:
+        rep.error(where, f"ice_var {ice_var} is not a model input variable.{_suggest(ice_var, inputs)}")
+    if None not in grid and spectral_truncation_fraction(*grid, length_scale) > 0.01:
+        rep.error(
+            where,
+            f"length_scale_km={length_scale} is too short for the {grid[0]} x {grid[1]} grid: the "
+            "pattern would lose its smallest scales.",
+        )
+    return True
+
+
+def _check_tendency_noise_args(rep: _Report, where: str, args: dict, predicted, inputs, grid) -> bool:
+    """A ``tendency_noise`` block's own arguments, variables and length scales; False on argument errors."""
+    from credit.ensemble.red_noise import spectral_truncation_fraction
+    from credit.postblock.tendency_noise import DEFAULT_SCALES, tendency_noise_errors
+
+    scales = args.get("scales", DEFAULT_SCALES)
+    errors = tendency_noise_errors(args.get("fields"), scales, args.get("clip", 1.0), args.get("lead_time_periods", 6))
+    for e in errors:
+        rep.error(where, e)
+    if errors:
+        return False
+
+    for j, fld in enumerate(args["fields"]):
+        fwhere = f"{where}.fields[{j}]"
+        var, levels = fld["var"], fld.get("levels")
+        if predicted and var not in predicted:
+            rep.error(fwhere, f"{var} is not a predicted variable.{_suggest(var, predicted)}")
+        elif inputs and var not in inputs:
+            rep.error(
+                fwhere,
+                f"{var} is not a model input: tendency noise scales the change from the input, so it needs a "
+                "prognostic variable.",
+            )
+        elif predicted[var] is None and levels is not None:
+            rep.error(fwhere, f"{var} is 2-D; remove levels.")
+        elif (
+            predicted[var] is not None
+            and levels is not None
+            and any(not -predicted[var] <= lv < predicted[var] for lv in levels)
+        ):
+            rep.error(fwhere, f"levels {levels} out of range for {var}'s {predicted[var]} levels.")
+    if None not in grid:
+        for k, scale in enumerate(scales):
+            if spectral_truncation_fraction(*grid, scale["length_scale_km"]) > 0.01:
+                rep.error(
+                    f"{where}.scales[{k}]",
+                    f"length_scale_km={scale['length_scale_km']} is too short for the {grid[0]} x {grid[1]} grid: "
+                    "the pattern would lose its smallest scales.",
+                    fix="Pass scales with longer length scales (the default's 500 km needs about a 1-degree grid).",
+                )
+    return True
+
+
+def _check_noise_placement(rep: _Report, where: str, before: list, key: str, fields: list) -> None:
+    """A noise postblock works in physical units, before the tracer clamp and the budget fixers."""
+    if not any(
+        b["type"] == "bridgescaler_transform"
+        and (b.get("args") or {}).get("method") == "inverse_transform"
+        and _block_output_key(b) == key
+        for _n, b in before
+    ):
+        rep.warn(
+            where,
+            f"No inverse bridgescaler_transform on {key} runs before it, but the noise is in physical units.",
+            fix="Place it after the inverse scaler (ignore this if the prediction is already physical).",
+        )
+    fixers = [n for n, b in before if b["type"] in _MASS_FIXERS | _OPEN_BUDGET_FIXERS]
+    if fixers:
+        rep.warn(
+            where,
+            f"Runs after the budget fixer(s) {fixers}: they no longer see the perturbation, so its "
+            "global integral carries into the next step and red noise random-walks the budget.",
+            fix="Move it before the tracer clamp and the conservation fixers.",
+        )
+    fields_vars = {fld["var"] for fld in fields}
+    for bname, b in before:
+        if b["type"] == "tracer_fixer":
+            clamped = fields_vars & set((b.get("args") or {}).get("tracer_vars") or [])
+            if clamped:
+                rep.warn(
+                    where,
+                    f"Runs after '{bname}', so {sorted(clamped)} can go negative.",
+                    fix="Move it before the tracer clamp.",
+                )
+
+
+def _forecast_years(conf: dict) -> set[int]:
+    """Calendar years the configured forecasts start in, plus the following year (their leads); empty if unknown."""
+    import pandas as pd
+
+    inf = conf.get("inference") or {}
+    batch = inf.get("batch_forecast") or {}
+    try:
+        if batch.get("first_init_date") and batch.get("last_init_date"):
+            first, last = pd.Timestamp(batch["first_init_date"]).year, pd.Timestamp(batch["last_init_date"]).year
+        elif (inf.get("single_forecast") or {}).get("start_datetime"):
+            first = last = pd.Timestamp(inf["single_forecast"]["start_datetime"]).year
+        else:
+            return set()
+    except (ValueError, TypeError):
+        return set()
+    return set(range(first, last + 2))
+
+
+def _check_start_perturbation(conf: dict, rep: _Report) -> None:
+    """Validate every ``start_perturbation`` preblock (including ``inference.preblocks``).
+
+    It must be the first ``ic_only`` block; its fields must be prognostic
+    inputs; every donor year needs a data store holding those variables; and
+    donor years should exclude the forecasts' years, where a donor within
+    ``window_days`` of a start can be that start's own true future.
+    """
+    from credit.preblock.start_perturbation import StartPerturbation, start_perturbation_errors
+
+    mconf = conf.get("model") or {}
+    for prefix, cfg, data_conf in (
+        ("preblocks", conf.get("preblocks"), conf.get("data") or {}),
+        (
+            "inference.preblocks",
+            _get(conf, "inference", "preblocks"),
+            _get(conf, "inference", "data") or conf.get("data") or {},
+        ),
+    ):
+        if not isinstance(cfg, dict):
+            continue
+        predicted, inputs = _data_vars(data_conf, mconf.get("levels"))
+        for section, blocks in cfg.items():
+            if not isinstance(blocks, dict):
+                continue
+            chain = [(n, b) for n, b in blocks.items() if isinstance(b, dict) and "type" in b]
+            for i, (name, block) in enumerate(chain):
+                if block["type"] != "start_perturbation":
+                    continue
+                where = f"{prefix}.{section}.{name}"
+                if section != "ic_only":
+                    rep.error(
+                        where, "start_perturbation perturbs the initial state only.", fix="Move it under ic_only."
+                    )
+                    continue
+                args = block.get("args") or {}
+                err = _bind_error(StartPerturbation, args)
+                if err:
+                    if prefix.startswith("inference"):
+                        rep.error(
+                            where,
+                            f"'start_perturbation' {err}",
+                            fix=f"Accepted args: {', '.join(_accepted_params(StartPerturbation))}",
+                        )
+                    continue
+                errors = start_perturbation_errors(
+                    args.get("path"),
+                    args.get("fields"),
+                    args.get("amplitude"),
+                    args.get("years"),
+                    args.get("window_days", 15),
+                    args.get("nonnegative"),
+                )
+                for e in errors:
+                    rep.error(where, e)
+                if errors:
+                    continue
+                if i:
                     rep.warn(
                         where,
-                        f"No inverse bridgescaler_transform on {key} runs before it, but sigma is in physical units.",
-                        fix="Place it after the inverse scaler (ignore this if the prediction is already physical).",
+                        f"Runs after {[n for n, _ in chain[:i]]}, but it adds fields read raw from the data store.",
+                        fix="Make it the first ic_only preblock.",
                     )
-                fixers = [n for n, b in before if b["type"] in _MASS_FIXERS | _OPEN_BUDGET_FIXERS]
-                if fixers:
+                prognostic = sorted(set(predicted) & inputs)
+                for var in args["fields"]:
+                    if predicted and var not in prognostic:
+                        rep.error(f"{where}.fields", f"{var} is not a prognostic variable.{_suggest(var, prognostic)}")
+
+                path, (first, last) = args["path"], args["years"]
+                stores = {y: os.path.expandvars(path.replace("%Y", f"{y:04d}")) for y in range(first, last + 1)}
+                missing = [y for y, store in stores.items() if not os.path.exists(store)]
+                if missing:
+                    shown = ", ".join(map(str, missing[:5])) + (", ..." if len(missing) > 5 else "")
+                    rep.error(f"{where}.path", f"No data store for {len(missing)} donor year(s) ({shown}): {path}")
+                present = [store for store in stores.values() if os.path.exists(store)]
+                if present:
+                    _check_donor_store(rep, f"{where}.path", present[0], args)
+                src = args["fields"][0].split("/")[0]
+                data_path = _get(data_conf, "source", src, "variables", "prognostic", "path")
+                if isinstance(data_path, str) and data_path != path:
+                    rep.warn(f"{where}.path", f"Differs from the prognostic data path ({data_path}).")
+                overlap = sorted(set(range(first, last + 1)) & _forecast_years(conf))
+                if overlap:
                     rep.warn(
-                        where,
-                        f"Runs after the budget fixer(s) {fixers}: they no longer see the perturbation, so its "
-                        "global integral carries into the next step and red noise random-walks the budget.",
-                        fix="Move it before the tracer clamp and the conservation fixers.",
+                        f"{where}.years",
+                        f"Donor years {overlap} overlap the forecasts: a donor near a start can be that start's own "
+                        "true future, which leaks the truth into the perturbation.",
+                        fix="Use donor years outside the forecast period (e.g. the training years).",
                     )
-                fields_vars = {fld["var"] for fld in args["fields"]}
-                for bname, b in before:
-                    if b["type"] == "tracer_fixer":
-                        clamped = fields_vars & set((b.get("args") or {}).get("tracer_vars") or [])
-                        if clamped:
-                            rep.warn(
-                                where,
-                                f"Runs after '{bname}', so {sorted(clamped)} can go negative.",
-                                fix="Move it before the tracer clamp.",
-                            )
+
+
+def _check_donor_store(rep: _Report, where: str, store: str, args: dict) -> None:
+    """One donor store holds the time coordinate and every perturbed variable."""
+    import xarray as xr
+
+    try:
+        opener = xr.open_zarr if store.rstrip("/").endswith(".zarr") else xr.open_dataset
+        with opener(store) as ds:
+            names = set(ds.variables)
+    except Exception as exc:  # noqa: BLE001
+        rep.error(where, f"Could not open {store}: {type(exc).__name__}: {exc}")
+        return
+    time_coord = args.get("time_coord", "time")
+    if time_coord not in names:
+        rep.error(where, f"{store} has no time coordinate {time_coord!r}.")
+    absent = [var for var in args["fields"] if var.split("/")[-1] not in names]
+    if absent:
+        rep.error(where, f"{store} lacks {', '.join(v.split('/')[-1] for v in absent)}.")
 
 
 def _check_trainer(conf: dict, rep: _Report) -> None:
@@ -1703,6 +1885,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_loss_pipeline,
             _check_fixer_scoring,
             _check_red_noise,
+            _check_start_perturbation,
             _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,

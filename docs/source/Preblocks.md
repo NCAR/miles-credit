@@ -316,6 +316,57 @@ args:
   data_types: ["input"]
 ```
 
+### `start_perturbation` (StartPerturbation)
+
+**AutoAPI:** {py:obj}`credit.preblock.start_perturbation.StartPerturbation`
+
+Perturbs the initial state for an ensemble of forecasts from perturbed starts.
+For each batch row (ensemble member) it draws two donor states from the data
+record, at the start's hour of day and within `window_days` of its calendar day
+in randomly chosen `years`, and adds
+
+    delta = amplitude * (s1 - s2) / sqrt(2)
+
+to every listed field. Two independent states differ by about `sqrt(2)` times the
+field's anomaly standard deviation, so `delta` has roughly `amplitude` times that
+standard deviation. Its structure across space, levels and variables is that of
+real weather differences, so the perturbation is balanced and grows like a real
+error instead of partly decaying in the first steps.
+
+- **`path`** is the prognostic data store, as in the data config, with `%Y` for
+  the year (one store per year) or without (one store for all years). The store's
+  variable is the last part of each field key.
+- **`amplitude`** is a number, or `{field: number}`.
+- **`nonnegative`** clamps tracers such as `Qtot` at 0 after perturbing.
+- **`seed`** makes the draws depend only on (seed, start time, batch row), so
+  every experiment arm with the same seed gets the same perturbation. Without it
+  the draws come from the global torch RNG.
+- **Donor years** should exclude the forecast period: a donor a few days after a
+  start, in the same year, is that start's own true future.
+
+Put it first in `ic_only`: it works on the raw initial state, before any
+regridding or normalization, and runs only at the start of each forecast.
+
+```yaml
+preblocks:
+  ic_only:
+    start_perturbation:
+      type: "start_perturbation"
+      args:
+        path: "/glade/campaign/.../b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr"
+        fields: ["CESM/prognostic/3d/U", "CESM/prognostic/3d/V", "CESM/prognostic/3d/T",
+                 "CESM/prognostic/3d/Qtot", "CESM/prognostic/2d/PS", "CESM/prognostic/2d/TREFHT"]
+        amplitude: 0.15
+        years: [1980, 2012]          # training years; the forecasts are 2013-2014
+        window_days: 15
+        nonnegative: ["CESM/prognostic/3d/Qtot"]
+        seed: 1                      # one seed per ensemble member
+```
+
+`credit check` validates its arguments, that it is the first `ic_only` block,
+that its fields are prognostic, that a store exists for every donor year and
+holds the fields, and warns when the donor years overlap the forecasts.
+
 ## Example: processing the ARCOERA5Dataset
 
 The config below trains on ARCO-ERA5 with a full preblock pipeline. The
