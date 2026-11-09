@@ -2,60 +2,9 @@
 
 import argparse
 import json
-import os
 import sys
 
 from credit import runs
-
-# Event types worth parsing for a status summary; everything else is skipped
-# by a substring test before json.loads, so long progress logs stay cheap.
-_STATUS_TYPES = ("run.cancelled", "job.started", "job.exited", "job.signaled", "train.stopped", "error", "train.epoch")
-
-
-def _status_events(run_dir: str) -> tuple:
-    """Return ``(events, last_progress)``: the state-relevant events of a run and its latest ``train.progress``."""
-    events, last_progress = [], None
-    events_dir = os.path.join(run_dir, "events")
-    try:
-        names = sorted(n for n in os.listdir(events_dir) if n.endswith(".jsonl"))
-    except FileNotFoundError:
-        return [], None
-    for name in names:
-        try:
-            with open(os.path.join(events_dir, name), "rb") as f:
-                lines = f.read().split(b"\n")[:-1]
-        except OSError:
-            continue
-        for raw in lines:
-            if b'"train.progress"' in raw:
-                last_progress = raw
-                continue
-            if not any(f'"{t}"'.encode() in raw for t in _STATUS_TYPES):
-                continue
-            try:
-                event = json.loads(raw)
-            except ValueError:
-                continue
-            if isinstance(event, dict):
-                event["file"] = name
-                events.append(event)
-    try:
-        progress = json.loads(last_progress) if last_progress else None
-    except ValueError:
-        progress = None
-    return events, progress
-
-
-def _csv_last_epoch(save_loc: str | None) -> int | None:
-    """Return the last ``epoch`` in ``<save_loc>/training_log.csv`` (0-based), or None."""
-    import csv
-
-    try:
-        with open(os.path.join(save_loc or "", "training_log.csv"), newline="") as f:
-            rows = list(csv.DictReader(f))
-        return int(float(rows[-1]["epoch"])) if rows else None
-    except (OSError, KeyError, ValueError, IndexError):
-        return None
 
 
 def _summaries(entries: list, index: dict) -> list:
@@ -67,16 +16,13 @@ def _summaries(entries: list, index: dict) -> list:
     loaded, jobs = [], []
     for entry in entries:
         try:
-            record = runs.read_run(entry["run_dir"])
+            record = runs.load_run(entry["run_dir"])
         except (OSError, ValueError):
             loaded.append((entry, None))
             continue
-        record["jobs"] = runs.jobs_of(entry["run_dir"], record)  # submit.jsonl is authoritative
         loaded.append((entry, record))
         scheduler = (record.get("target") or {}).get("scheduler") or "pbs"
-        for job in record.get("jobs") or []:
-            if job.get("job_id") and not _delta.job_finished(entry["run_dir"], job.get("job_key")):
-                jobs.append((scheduler, job["job_id"], entry["run_dir"]))
+        jobs += [(scheduler, j["job_id"], entry["run_dir"]) for j in _sched.unfinished_jobs(entry["run_dir"], record)]
     states, errors = _sched.query(jobs)
     for where, message in errors.items():
         print(f"WARNING: could not query {where}: {message}", file=sys.stderr)
@@ -93,7 +39,11 @@ def _summaries(entries: list, index: dict) -> list:
         if record is None:
             out.append({**summary, "state": "missing", "jobs": []})
             continue
-        events, progress = _status_events(entry["run_dir"])
+        try:
+            events, _, _ = _delta.read_events(entry["run_dir"], {}, "latest")
+        except OSError:
+            events = []
+        progress = next((e for e in reversed(events) if e.get("type") == "train.progress"), None)
         job_rows = []
         for job in record.get("jobs") or []:
             st = states.get(job.get("job_id"))
@@ -110,7 +60,9 @@ def _summaries(entries: list, index: dict) -> list:
                     record,
                     events,
                     states,
-                    csv_last_epoch=_csv_last_epoch(record.get("save_loc")) if record.get("kind") == "train" else None,
+                    csv_last_epoch=runs.csv_last_epoch(record.get("save_loc"))
+                    if record.get("kind") == "train"
+                    else None,
                     has_child=entry["run_id"] in parents,
                 ),
                 "config": record.get("config"),

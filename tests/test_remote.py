@@ -9,7 +9,6 @@ import json
 import os
 import subprocess
 import sys
-import textwrap
 import threading
 import time
 
@@ -18,115 +17,11 @@ import yaml
 
 from credit import runs
 from credit.remote import _delta, _sched
-
-REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-SENTINEL = b"\x1eCREDIT\x1e"
-
+from tests.conftest import REPO, SENTINEL, _write_exe, call, make_config, make_run, submit_req
 
 # ---------------------------------------------------------------------------
-# Fixtures and helpers
+# Helpers (the `env` fixture, `call`, `make_config`, `make_run` and `submit_req` are in conftest.py)
 # ---------------------------------------------------------------------------
-
-
-def _write_exe(path, text):
-    path.write_text(textwrap.dedent(text))
-    path.chmod(0o755)
-
-
-@pytest.fixture
-def env(tmp_path, monkeypatch):
-    """An isolated HOME / CREDIT_HOME, fake PBS + SLURM tools, and the same env for subprocesses."""
-    home = tmp_path / "home"
-    home.mkdir()
-    bindir = tmp_path / "bin"
-    bindir.mkdir()
-    calls = tmp_path / "calls.log"
-    _write_exe(
-        bindir / "qsub",
-        f"""\
-        #!/bin/bash
-        echo "qsub $*" >> {calls}
-        n=$(cat {tmp_path}/qsub.n 2>/dev/null || echo 1000)
-        n=$((n + 1)); echo $n > {tmp_path}/qsub.n
-        echo "$n.desched1"
-        """,
-    )
-    _write_exe(bindir / "qstat", f'#!/bin/bash\necho "qstat $*" >> {calls}\ncat {tmp_path}/qstat.json\n')
-    _write_exe(bindir / "qdel", f'#!/bin/bash\necho "qdel $*" >> {calls}\n')
-    _write_exe(bindir / "sbatch", f'#!/bin/bash\necho "sbatch $*" >> {calls}\necho "Submitted batch job 77"\n')
-    _write_exe(bindir / "sacct", f'#!/bin/bash\necho "sacct $*" >> {calls}\ncat {tmp_path}/sacct.json\n')
-    _write_exe(bindir / "squeue", f'#!/bin/bash\necho "squeue $*" >> {calls}\necho "{{}}"\n')
-    values = {
-        "HOME": str(home),
-        "CREDIT_HOME": str(home / ".credit"),
-        "CREDIT_PBS_BIN": str(bindir),
-        "CREDIT_SLURM_BIN": str(bindir),
-        "PYTHONPATH": REPO,
-    }
-    for k, v in values.items():
-        monkeypatch.setenv(k, v)
-    for var in ("SCRATCH", "WORK", "PSCRATCH", "CREDIT_REMOTE_LOCAL_CMD", "CREDIT_RUN_DIR"):
-        monkeypatch.delenv(var, raising=False)
-    # Without a remote.yaml nothing is served by default, so the tests name the test HOME explicitly.
-    monkeypatch.setenv("CREDIT_REMOTE_ALLOW", str(home))
-    return {"home": home, "tmp": tmp_path, "calls": calls}
-
-
-def call(verb, req=None, raw=None, check_ok=True):
-    """Run one verb in a subprocess and return the decoded response."""
-    proc = subprocess.run(
-        [sys.executable, "-P", "-m", "credit.remote", verb],
-        input=raw if raw is not None else json.dumps(req or {}).encode(),
-        capture_output=True,
-        env=os.environ.copy(),
-        timeout=120,
-    )
-    assert proc.returncode == 0, proc.stderr.decode()
-    lines = [ln for ln in proc.stdout.split(b"\n") if ln.startswith(SENTINEL)]
-    assert len(lines) == 1, proc.stdout
-    resp = json.loads(lines[-1][len(SENTINEL) :])
-    assert resp["protocol"] == 1
-    if check_ok:
-        assert resp["ok"], resp
-        return resp["result"]
-    return resp
-
-
-def make_config(env, name="exp", **extra):
-    exp = env["home"] / name
-    exp.mkdir(exist_ok=True)
-    conf = {
-        "save_loc": str(exp / "save"),
-        "trainer": {"epochs": 4, "num_epoch": 2, "train_batch_size": 2},
-        "pbs": {"conda": "/opt/envs/credit", "account": "NAML0001", "queue": "main"},
-    }
-    conf.update(extra)
-    path = exp / "config.yml"
-    path.write_text(yaml.safe_dump(conf))
-    return path
-
-
-def submit_req(plan):
-    return {
-        "request": plan["request"],
-        "scripts_sha256": plan["scripts_sha256"],
-        "config_sha256": plan["config_sha256"],
-        "created_by": "mcp",
-    }
-
-
-def make_run(env, save=None, jobs=(), scheduler="pbs"):
-    """Create a run directly through credit.runs (no scheduler involved)."""
-    cfg = make_config(env)
-    save = save or env["home"] / "exp" / "save"
-    run_id = runs.new_run_id("train")
-    target = {"scheduler": scheduler, "log_dir": str(save / "logs")}
-    record = runs.create_run(run_id, "train", str(cfg), str(save), target)
-    run_dir = runs.run_dir_for(str(save), run_id)
-    for i, jid in enumerate(jobs, 1):
-        runs.add_job(run_dir, record, {"index": i, "job_id": jid})
-    (save / "logs").mkdir(parents=True, exist_ok=True)
-    return run_id, run_dir, save
 
 
 def ev_line(type_, job="11", **data):
@@ -459,8 +354,7 @@ def test_sync_progress_modes_and_max_bytes(env):
     assert sorted(types) == ["checkpoint.saved", "train.progress", "train.vars"]
     assert [e["data"]["batch"] for e in latest["events"] if e["type"] == "train.progress"] == [49]
     assert latest["cursor"]["events"]["11.proc.jsonl"] == os.path.getsize(proc)
-    none = call("sync", {"runs": {run_id: None}, "progress": "none", "scheduler": False})["runs"][run_id]
-    assert [e["type"] for e in none["events"] if e["file"] == "11.proc.jsonl"] == ["checkpoint.saved"]
+    assert call("sync", {"progress": "none"}, check_ok=False)["error"]["code"] == "bad_request"
     # all + a small byte budget pages through without gaps or duplicates
     seen, cursor, pages = [], None, 0
     while True:
@@ -955,9 +849,9 @@ def test_local_lifecycle(env, monkeypatch):
     assert "Epoch 0: 5/5 loss 0.200\n" in log["text"] and "Epoch 0: 1/5" not in log["text"]
     assert "args train -c\n" in log["text"]
     assert job["job_id"] not in r["scheduler"]  # final per the markers
-    # backfill without progress lines
-    latest = call("sync", {"runs": {run_id: None}, "progress": "none", "scheduler": False})["runs"][run_id]
-    assert "train.progress" not in [e["type"] for e in latest["events"]]
+    # backfill with only the last progress line
+    latest = call("sync", {"runs": {run_id: None}, "progress": "latest", "scheduler": False})["runs"][run_id]
+    assert [e["type"] for e in latest["events"]].count("train.progress") == 1
     hist = call("history", {"run_id": run_id, "fields": ["loss.mean", "lr"], "buckets": 3})
     assert hist["points"] == 5 and len(hist["t"]) <= 3 and hist["fields"]["lr"]["max"][0] == 0.1
     logs = call("logs", {"run_id": run_id, "grep": "^args"})
@@ -1107,14 +1001,19 @@ def test_diagnose_and_outputs(env):
     assert out["forecast_dir"] is None and out["files"] == []
 
 
-def test_examples_and_docs(env):
+def test_examples_docs_and_unsupported_verbs(env):
     names = call("examples")["examples"]
-    assert "example-end-to-end" in names
-    assert "save_loc" in call("examples", {"name": "example-end-to-end"})["text"]
+    assert "example-end-to-end" in names and "example-v2026.2" in names
+    ex = call("examples", {"name": "example-v2026.2"})
+    assert ex["name"] == "example-v2026.2" and "save_loc" in ex["text"]
     pages = call("docs")["pages"]
     assert "cli" in pages and "remote" in pages
     assert "credit status" in call("docs", {"page": "cli"})["text"]
+    page = call("docs", {"page": "remote"})
+    assert page["page"] == "remote" and "credit.remote" in page["text"]
     assert call("docs", {"page": "../../README"}, check_ok=False)["error"]["code"] == "not_found"
+    for verb in ("convert", "render"):
+        assert call(verb, {}, check_ok=False)["error"]["code"] == "unsupported"
 
 
 def test_logs_returns_the_cursor_offset(env):
@@ -1471,27 +1370,10 @@ def test_build_config_verb(heavy_env):
     }
     out = heavy_env["home"] / "exp" / "built.yml"
     r = call("build_config", {"state": state, "path": str(out), "write": False})
-    assert yaml.safe_load(r["yaml"])["save_loc"] == str(save) and r["written"] is False and not out.exists()
-    r = call("build_config", {"state": state, "path": str(out), "write": True})
-    assert r["written"] and out.read_text() == r["yaml"] and r["path"] == os.path.realpath(out)
-    assert (
-        call("build_config", {"state": state, "path": str(out), "write": True}, check_ok=False)["error"]["code"]
-        == "conflict"
-    )
+    assert yaml.safe_load(r["yaml"])["save_loc"] == str(save) and not out.exists()
     assert call("build_config", {"state": {}}, check_ok=False)["error"]["code"] in ("config_error", "bad_request")
-
-
-def test_docs_examples_and_unsupported_verbs(heavy_env):
-    pages = call("docs")["pages"]
-    assert "cli" in pages and "remote" in pages
-    page = call("docs", {"page": "remote"})
-    assert page["page"] == "remote" and "credit.remote" in page["text"]
-    names = call("examples")["examples"]
-    assert "example-v2026.2" in names
-    ex = call("examples", {"name": "example-v2026.2"})
-    assert ex["name"] == "example-v2026.2" and "save_loc" in ex["text"]
-    for verb in ("convert", "render"):
-        assert call(verb, {}, check_ok=False)["error"]["code"] == "unsupported"
+    refused = call("build_config", {"state": state, "path": str(out), "write": True}, check_ok=False)
+    assert refused["error"]["code"] == "bad_request" and not out.exists()
 
 
 def test_internal_errors_are_bounded(env):
@@ -1612,6 +1494,6 @@ def test_jobs_survive_a_crash_between_submitted_and_run_json(env, monkeypatch):
     ],
 )
 def test_system_name(hostname, expected):
-    from credit.remote import system_name
+    from credit.runs import system_name
 
     assert system_name(hostname) == expected

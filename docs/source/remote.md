@@ -53,11 +53,14 @@ events:
 
 ## Safety
 
-`read`, `ls`, `logs` and `write` only touch paths whose real path lies under
-`$HOME`, `$SCRATCH`, `$WORK`, `$PSCRATCH`, `/glade/work/$USER`,
-`/glade/derecho/scratch/$USER`, a run's directories, or an entry of
-`CREDIT_REMOTE_ALLOW` (colon-separated).  Hidden directories are refused, except
-inside `.credit/runs/`.  `write` only writes `.yml`/`.yaml` files, never inside a
+`read`, `ls`, `logs` and `write` only touch paths whose real path lies under a
+root.  The roots are the folders listed in `~/.credit/remote.yaml` (written by
+`credit remote-setup`) or, without that file, the entries of
+`CREDIT_REMOTE_ALLOW` (colon-separated); nothing in the home, work or scratch
+areas is served until one of them names it.  A ledger run's directories are
+roots too (with a policy, only those inside its roots; never `/`, the home
+directory or above it).  Hidden directories are refused, except inside
+`.credit/runs/`.  `write` only writes `.yml`/`.yaml` files, never inside a
 run directory or `$CREDIT_HOME`, and refuses to overwrite a file whose hash
 changed since it was read.
 

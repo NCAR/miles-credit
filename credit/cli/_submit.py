@@ -81,51 +81,45 @@ def _realtime(args: argparse.Namespace) -> None:
 class SubmitError(Exception):
     """A submission problem the user must fix (bad config section, queue/cluster mismatch, ...).
 
-    The library paths used by ``credit.remote`` raise it; the CLI wrappers below
-    print the message and exit 1, as they always have.
+    The library paths used by ``credit.remote`` raise it; the CLI wrapper
+    :func:`_resolve_pbs_opts` prints the message and exits 1, as it always has.
     """
 
 
-def _exit_on_submit_error(fn, *args, **kwargs):
-    """Call *fn*; on :class:`SubmitError` print ``ERROR: <msg>`` and exit 1 (CLI behaviour)."""
-    try:
-        return fn(*args, **kwargs)
-    except SubmitError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _read_pbs_section(config_path: str) -> dict:
-    """Return the ``pbs:`` section from a YAML config file, raising :class:`SubmitError`."""
+def _load_pbs_config(config_path: str) -> dict:
+    """Return the ``pbs:`` section from a YAML config file."""
     with open(config_path) as f:
         conf = yaml.safe_load(f)
 
     pbs = conf.get("pbs") or {}
     if not pbs:
-        raise SubmitError(
-            f"config '{config_path}' is missing a required 'pbs:' section.\n"
-            "Add a pbs: block — see config/example-v2026.1.0.yml for reference."
+        print(
+            f"ERROR: config '{config_path}' is missing a required 'pbs:' section.\n"
+            "Add a pbs: block — see config/example-v2026.1.0.yml for reference.",
+            file=sys.stderr,
         )
+        sys.exit(1)
 
     if not (pbs.get("conda") or pbs.get("conda_env")):
-        raise SubmitError(
-            "pbs.conda is required but not set in the config.\n"
+        print(
+            "ERROR: pbs.conda is required but not set in the config.\n"
             "Specify the conda environment name or full path, e.g.:\n"
             "  pbs:\n"
-            "    conda: /glade/u/home/$USER/.conda/envs/credit-casper"
+            "    conda: /glade/u/home/$USER/.conda/envs/credit-casper",
+            file=sys.stderr,
         )
+        sys.exit(1)
 
     return pbs
 
 
-def _load_pbs_config(config_path: str) -> dict:
-    """Return the ``pbs:`` section from a YAML config file (exits 1 if it is missing or incomplete)."""
-    return _exit_on_submit_error(_read_pbs_section, config_path)
-
-
 def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
-    """Return a copy of *args* with None fields filled from *pbs_cfg* then cluster defaults (exits 1 on error)."""
-    return _exit_on_submit_error(_resolve_pbs, args, pbs_cfg)
+    """Return a copy of *args* with None fields filled from *pbs_cfg* then cluster defaults."""
+    try:
+        return _resolve_pbs(args, pbs_cfg)
+    except SubmitError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 def _resolve_pbs(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
@@ -216,32 +210,31 @@ def _auto_mem_request(args: argparse.Namespace, r: argparse.Namespace) -> str | 
 # ---------------------------------------------------------------------------
 
 
-def _read_slurm_section(config_path: str) -> dict:
-    """Return the ``slurm:`` section from a YAML config, falling back to ``pbs:``; raises :class:`SubmitError`."""
+def _load_slurm_config(config_path: str) -> dict:
+    """Return the ``slurm:`` section from a YAML config, falling back to ``pbs:``."""
     with open(config_path) as f:
         conf = yaml.safe_load(f)
 
     slurm = conf.get("slurm") or conf.get("pbs") or {}
     if not slurm:
-        raise SubmitError(
-            f"config '{config_path}' is missing a required 'slurm:' (or 'pbs:') section.\n"
-            "Add a slurm: block with at least a conda env and partition."
+        print(
+            f"ERROR: config '{config_path}' is missing a required 'slurm:' (or 'pbs:') section.\n"
+            "Add a slurm: block with at least a conda env and partition.",
+            file=sys.stderr,
         )
+        sys.exit(1)
 
     if not (slurm.get("conda") or slurm.get("conda_env")):
-        raise SubmitError(
-            "slurm.conda is required but not set in the config.\n"
+        print(
+            "ERROR: slurm.conda is required but not set in the config.\n"
             "Specify the conda environment name or full path, e.g.:\n"
             "  slurm:\n"
-            "    conda: /home/$USER/.conda/envs/credit"
+            "    conda: /home/$USER/.conda/envs/credit",
+            file=sys.stderr,
         )
+        sys.exit(1)
 
     return slurm
-
-
-def _load_slurm_config(config_path: str) -> dict:
-    """Return the ``slurm:`` section from a YAML config, falling back to ``pbs:`` (exits 1 if unusable)."""
-    return _exit_on_submit_error(_read_slurm_section, config_path)
 
 
 def _logs_dir(save_loc: str) -> str:
@@ -1798,18 +1791,6 @@ def _check_plan_options(options, scheduler: str) -> None:
             )
 
 
-def _last_csv_epoch(save_loc: str) -> int | None:
-    """Return the last ``epoch`` in ``<save_loc>/training_log.csv``, or None."""
-    import csv
-
-    try:
-        with open(os.path.join(save_loc, "training_log.csv"), newline="") as f:
-            rows = list(csv.DictReader(f))
-        return int(float(rows[-1]["epoch"])) if rows else None
-    except (OSError, KeyError, ValueError, IndexError):
-        return None
-
-
 def _load_plan_config(request: dict) -> tuple:
     """Return ``(config_path, config_bytes, conf, parent_entry)`` for a plan request.
 
@@ -1942,11 +1923,11 @@ def _plan(request: dict) -> dict:
         elif epochs_total and epochs_per_job:
             done = 0
             if parent is not None:
-                last = _last_csv_epoch(save_loc)
+                last = runs.csv_last_epoch(save_loc)
                 done = 0 if last is None else last + 1  # CSV epochs are 0-based
             n_jobs = max(1, math.ceil((int(epochs_total) - done) / int(epochs_per_job)))
         if parent is not None and epochs_total:
-            last = _last_csv_epoch(save_loc)
+            last = runs.csv_last_epoch(save_loc)
             if last is not None and last + 1 >= int(epochs_total):
                 raise SubmitError(f"nothing left to train: {last + 1} of {epochs_total} epochs are done")
     if kind == "realtime" and not options["init_time"]:

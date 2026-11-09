@@ -119,6 +119,33 @@ def sha256_file(path: str) -> str:
     return h.hexdigest()
 
 
+def credit_version() -> str | None:
+    try:
+        from importlib.metadata import version
+
+        return version("miles-credit")
+    except Exception:  # noqa: BLE001 — not installed as a distribution
+        return None
+
+
+# Casper's hosts: casper-login* and casper<NN> compute nodes, and since January 2026 the crlogin* login nodes
+# and crhtc* nodes, whose names don't contain "casper".
+CASPER_NAMES = ("casper", "crlogin", "crhtc")
+
+
+def system_name(hostname: str) -> str:
+    """Classify a host as casper / derecho / perlmutter / ncar / local."""
+    hostname = hostname.lower()
+    # Compute nodes are matched with anchored digit patterns (dec0123, nid001234)
+    # rather than bare substrings, so ordinary hostnames that merely contain
+    # "dec"/"nid" (e.g. "decode-box", "unidata") are not misread as HPC systems.
+    if any(n in hostname for n in ("derecho", *CASPER_NAMES)) or re.match(r"dec\d+", hostname):
+        return "derecho" if "derecho" in hostname else "casper" if any(n in hostname for n in CASPER_NAMES) else "ncar"
+    if "perlmutter" in hostname or re.match(r"nid\d+", hostname):
+        return "perlmutter"
+    return "local"
+
+
 def _nonfinite(value: float):
     if math.isnan(value):
         return "NaN"
@@ -306,6 +333,13 @@ def read_run(run_dir: str) -> dict:
         return json.load(f)
 
 
+def load_run(run_dir: str) -> dict:
+    """``run.json`` with ``jobs`` merged from ``submit.jsonl``, which is authoritative (see :func:`jobs_of`)."""
+    record = read_run(run_dir)
+    record["jobs"] = jobs_of(run_dir, record)
+    return record
+
+
 def write_run(run_dir: str, record: dict) -> None:
     atomic_write(os.path.join(run_dir, "run.json"), json.dumps(jsonable(record), indent=2) + "\n")
 
@@ -419,6 +453,11 @@ def csv_marker(path: str) -> dict | None:
             data = f.read()
     except OSError:
         return None
+    return csv_data_marker(data)
+
+
+def csv_data_marker(data: bytes) -> dict | None:
+    """:func:`csv_marker` of a CSV's bytes (a final line without a newline counts as a row)."""
     lines = data.split(b"\n")
     if data.endswith(b"\n"):
         lines = lines[:-1]
@@ -429,6 +468,20 @@ def csv_marker(path: str) -> dict | None:
         "header_sha": hashlib.sha256(lines[0]).hexdigest(),
         "first_row_sha": hashlib.sha256(lines[1]).hexdigest() if len(lines) > 1 else None,
     }
+
+
+def csv_last_epoch(save_loc: str | None) -> int | None:
+    """Return the last ``epoch`` in ``<save_loc>/training_log.csv`` (0-based), or None."""
+    import csv
+
+    if not save_loc:
+        return None
+    try:
+        with open(os.path.join(save_loc, "training_log.csv"), newline="") as f:
+            rows = list(csv.DictReader(f))
+        return int(float(rows[-1]["epoch"])) if rows else None
+    except (OSError, KeyError, ValueError, IndexError):
+        return None
 
 
 def write_script(run_dir: str, index: int, text: str) -> str:

@@ -155,18 +155,12 @@ class EventSink:
                 gpus = torch.cuda.device_count()
             except Exception:  # noqa: BLE001
                 gpus = None
-        try:
-            from importlib.metadata import version
-
-            credit_version = version("miles-credit")
-        except Exception:  # noqa: BLE001
-            credit_version = None
         self.emit(
             "process.started",
             {
                 "pid": os.getpid(),
                 "world_size": world_size,
-                "credit_version": credit_version,
+                "credit_version": runs.credit_version(),
                 "torch_version": getattr(torch, "__version__", None),
                 "gpus": gpus,
             },

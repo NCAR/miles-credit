@@ -1,9 +1,10 @@
 """Policy, secret redaction and the audit log for ``credit.remote`` (stdlib + yaml only).
 
-The policy lives in ``remote.yaml`` files that can only *narrow* what the
-remote serves::
+The policy lives in ``remote.yaml`` files (written by ``credit remote-setup``)
+that say what the remote may serve; without one, only ``$CREDIT_REMOTE_ALLOW``
+and the ledger's own runs are served::
 
-    roots:            # replaces the default roots (home, work, scratch)
+    roots:            # the folders that may be served
       - /glade/work/$USER/CREDIT_runs
       - /glade/work/$USER/configs
     redact: true      # mask secrets in text sent back (default true)

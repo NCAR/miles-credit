@@ -10,7 +10,7 @@ import pytest
 import yaml
 
 from credit import runs
-from tests.test_remote import REPO, call, env  # noqa: F401 — `env` is a fixture
+from tests.conftest import REPO, call
 
 # credit.cli re-exports the `_remote_setup` handler function under the module's own name.
 setup = importlib.import_module("credit.cli._remote_setup")
@@ -27,7 +27,7 @@ def run_cli(*argv):
     )
 
 
-def test_root_problem(env):  # noqa: F811
+def test_root_problem(env):
     home = env["home"]
     (home / "CREDIT_runs").mkdir()
     (home / ".hidden").mkdir()
@@ -39,7 +39,7 @@ def test_root_problem(env):  # noqa: F811
     assert "not an existing" in setup.root_problem(str(home / "nope"))
 
 
-def test_cli_writes_a_private_policy_that_remote_honours(env):  # noqa: F811
+def test_cli_writes_a_private_policy_that_remote_honours(env):
     runs_dir = env["home"] / "CREDIT_runs"
     runs_dir.mkdir()
     (env["home"] / "notes.txt").write_text("private\n")
@@ -55,14 +55,14 @@ def test_cli_writes_a_private_policy_that_remote_honours(env):  # noqa: F811
     assert resp["error"]["code"] == "forbidden_path"
 
 
-def test_cli_refuses_broad_roots(env):  # noqa: F811
+def test_cli_refuses_broad_roots(env):
     policy = env["tmp"] / "p" / "remote.yaml"
     r = run_cli("--root", str(env["home"]), "--yes", "--policy-file", str(policy))
     assert r.returncode == 1 and "too broad" in r.stderr
     assert not policy.exists()
 
 
-def test_suggestions_come_from_the_ledger(env, monkeypatch):  # noqa: F811
+def test_suggestions_come_from_the_ledger(env, monkeypatch):
     exp = env["home"] / "CREDIT_runs" / "exp"
     exp.mkdir(parents=True)
     runs.append_ledger({"run_id": "train-a", "run_dir": str(exp / ".credit/runs/train-a"), "save_loc": str(exp)})
@@ -75,7 +75,7 @@ def test_suggestions_come_from_the_ledger(env, monkeypatch):  # noqa: F811
     assert setup.suggest_roots() == [str((env["home"] / "CREDIT_runs").resolve())]
 
 
-def test_no_policy_error_explains_setup(env, monkeypatch):  # noqa: F811
+def test_no_policy_error_explains_setup(env, monkeypatch):
     monkeypatch.delenv("CREDIT_REMOTE_ALLOW")
     (env["home"] / "notes.txt").write_text("private\n")
     resp = call("read", {"path": str(env["home"] / "notes.txt")}, check_ok=False)
@@ -85,7 +85,7 @@ def test_no_policy_error_explains_setup(env, monkeypatch):  # noqa: F811
 
 
 @pytest.mark.parametrize("flag", ["--no-redact", "--no-audit"])
-def test_flags_turn_features_off(env, flag):  # noqa: F811
+def test_flags_turn_features_off(env, flag):
     d = env["home"] / "CREDIT_runs"
     d.mkdir()
     policy = env["tmp"] / "q" / "remote.yaml"
@@ -94,7 +94,7 @@ def test_flags_turn_features_off(env, flag):  # noqa: F811
     assert data["redact"] is (flag != "--no-redact") and data["audit"] is (flag != "--no-audit")
 
 
-def test_budget_flags_write_a_budgets_block_that_survives_reruns(env):  # noqa: F811
+def test_budget_flags_write_a_budgets_block_that_survives_reruns(env):
     d = env["home"] / "CREDIT_runs"
     d.mkdir()
     policy = env["home"] / ".credit" / "remote.yaml"

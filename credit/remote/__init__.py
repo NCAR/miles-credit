@@ -120,30 +120,6 @@ def _repo_root() -> str:
     return os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".."))
 
 
-def _credit_version() -> str | None:
-    try:
-        from importlib.metadata import version
-
-        return version("miles-credit")
-    except Exception:  # noqa: BLE001 — not installed as a distribution
-        return None
-
-
-# Casper's hosts: casper-login* and casper<NN> compute nodes, and since January 2026 the crlogin* login nodes
-# and crhtc* nodes, whose names don't contain "casper".
-CASPER_NAMES = ("casper", "crlogin", "crhtc")
-
-
-def system_name(hostname: str) -> str:
-    """Classify a host as casper / derecho / perlmutter / ncar / local (the rules of ``_begin._detect_system``)."""
-    hostname = hostname.lower()
-    if any(n in hostname for n in ("derecho", "casper", "crhtc", "crlogin")) or re.match(r"dec\d+", hostname):
-        return "derecho" if "derecho" in hostname else "casper" if any(n in hostname for n in CASPER_NAMES) else "ncar"
-    if "perlmutter" in hostname or re.match(r"nid\d+", hostname):
-        return "perlmutter"
-    return "local"
-
-
 def _require(req: dict, key: str, kind=str):
     value = req.get(key)
     if value is None or not isinstance(value, kind):
@@ -158,10 +134,9 @@ def _run_entry(req: dict) -> tuple:
     if entry is None:
         raise RemoteError("not_found", f"no run {run_id!r} in the ledger")
     try:
-        record = runs.read_run(entry["run_dir"])
+        record = runs.load_run(entry["run_dir"])
     except (OSError, ValueError) as exc:
         raise RemoteError("not_found", f"run {run_id}: cannot read run.json ({exc})") from exc
-    record["jobs"] = runs.jobs_of(entry["run_dir"], record)
     return entry, record
 
 
@@ -212,13 +187,12 @@ def hello(req: dict) -> dict:
     pol = _guard.policy()
     return {
         "protocol": PROTOCOL,
-        "credit_version": _credit_version(),
+        "credit_version": runs.credit_version(),
         "python": platform.python_version(),
         "host": socket.gethostname(),
         "user": getpass.getuser(),
-        "system": system_name(socket.gethostname()),
+        "system": runs.system_name(socket.gethostname()),
         "schedulers": {"pbs": bool(pbs), "slurm": bool(shutil.which(runs.scheduler_bin("sbatch", "slurm")))},
-        "pbs_bin": os.path.dirname(pbs) if pbs else None,
         "credit_home": runs.credit_home(),
         "allowed_roots": runs.allowed_roots(),
         "repo_root": _repo_root(),
@@ -245,8 +219,8 @@ def _used_gpu_hours() -> float | None:
 def sync(req: dict) -> dict:
     as_of = runs.now_ts()
     progress = req.get("progress", "all")
-    if progress not in ("all", "latest", "none"):
-        raise RemoteError("bad_request", "progress must be all, latest or none")
+    if progress not in ("all", "latest"):
+        raise RemoteError("bad_request", "progress must be all or latest")
     budget = [int(req.get("max_bytes") or 4 << 20)]
     log_tail = int(req.get("log_tail_bytes") or 65536)
     lines, new_offset, reset = runs.read_ledger(int(req.get("ledger_offset") or 0))
@@ -274,9 +248,7 @@ def sync(req: dict) -> dict:
         delta, record = _delta.run_delta(entry, cursor, progress, log_tail, budget)
         out[run_id] = delta
         scheduler = ((record or {}).get("target") or {}).get("scheduler") or "pbs"
-        for job in (record or {}).get("jobs") or []:
-            if job.get("job_id") and not _delta.job_finished(entry["run_dir"], job.get("job_key")):
-                jobs.append((scheduler, job["job_id"], entry["run_dir"]))
+        jobs += [(scheduler, j["job_id"], entry["run_dir"]) for j in _sched.unfinished_jobs(entry["run_dir"], record)]
 
     states, errors = _sched.query(jobs) if req.get("scheduler", True) else ({}, {})
     result = {
@@ -310,12 +282,14 @@ def follow(out: _Out, stdin) -> None:
     cursors, entries = {}, {}
     state = {"interval": 2.0, "log_tail": 16384}
 
+    def send_error(run_id: str | None, code: str, message: str) -> None:
+        out.send({"type": "error", "run_id": run_id, "error": {"code": code, "message": message, "fix": None}})
+
     def add(run_cursors: dict) -> None:
         index = runs.ledger_index()
         for run_id, cursor in (run_cursors or {}).items():
             if run_id not in index:
-                err = {"code": "not_found", "message": f"no run {run_id!r} in the ledger", "fix": None}
-                out.send({"type": "error", "run_id": run_id, "error": err})
+                send_error(run_id, "not_found", f"no run {run_id!r} in the ledger")
                 continue
             entries[run_id], cursors[run_id] = index[run_id], cursor
 
@@ -323,13 +297,7 @@ def follow(out: _Out, stdin) -> None:
         if msg is None:
             return False
         if not isinstance(msg, dict) or "_bad" in msg:
-            out.send(
-                {
-                    "type": "error",
-                    "run_id": None,
-                    "error": {"code": "bad_request", "message": "bad control message", "fix": None},
-                }
-            )
+            send_error(None, "bad_request", "bad control message")
             return True
         add(msg.get("runs") or {})
         add(msg.get("add") or {})
@@ -351,8 +319,7 @@ def follow(out: _Out, stdin) -> None:
             try:
                 delta, _ = _delta.run_delta(entries[run_id], cursors[run_id], "all", state["log_tail"], [4 << 20])
             except Exception as exc:  # noqa: BLE001 — one bad run must not end the stream
-                err = {"code": "internal", "message": f"{type(exc).__name__}: {exc}", "fix": None}
-                out.send({"type": "error", "run_id": run_id, "error": err})
+                send_error(run_id, "internal", f"{type(exc).__name__}: {exc}")
                 continue
             cursors[run_id] = delta["cursor"]
             if _delta.delta_changed(delta):
@@ -557,9 +524,7 @@ def cancel(req: dict) -> dict:
         raise RemoteError("bad_request", "scope must be all or pending")
     run_dir = entry["run_dir"]
     scheduler = (record.get("target") or {}).get("scheduler") or "pbs"
-    active = [
-        j for j in record.get("jobs") or [] if j.get("job_id") and not _delta.job_finished(run_dir, j.get("job_key"))
-    ]
+    active = _sched.unfinished_jobs(run_dir, record)
     states, sched_errors = _sched.query([(scheduler, j["job_id"], run_dir) for j in active])
     if scope == "pending" and sched_errors:
         raise RemoteError("scheduler_error", "; ".join(sched_errors.values()))
@@ -582,8 +547,7 @@ def cancel(req: dict) -> dict:
             runs.SUBMIT_EVENTS,
             runs.make_event("run.cancelled", {"scope": scope, "job_ids": cancelled}, "submit"),
         )
-        record = runs.read_run(run_dir)
-        record["jobs"] = runs.jobs_of(run_dir, record)
+        record = runs.load_run(run_dir)
         record["cancelled"] = {"at": runs.now_ts(), "scope": scope, "job_ids": cancelled}
         runs.write_run(run_dir, record)
     return {"cancelled": cancelled, "errors": errors}
@@ -738,7 +702,7 @@ def adopt(req: dict) -> dict:
     servers = {j.split(".", 1)[1] for j in job_ids if scheduler == "pbs" and "." in j}
     target = {
         "scheduler": scheduler,
-        "cluster": system_name(socket.gethostname()),
+        "cluster": runs.system_name(socket.gethostname()),
         "server": servers.pop() if len(servers) == 1 else None,
         "queue": None,
         "account": None,
@@ -995,21 +959,15 @@ def build_config(req: dict) -> dict:
     state = req.get("state")
     if not isinstance(state, dict):
         raise RemoteError("bad_request", "'state' (a credit begin state dict) is required")
+    if req.get("write"):
+        raise RemoteError("bad_request", "build_config only returns the yaml; save it with the write verb")
     try:
         text = _dump_config(_build_config(state))
     except (KeyError, TypeError, ValueError) as exc:
         raise RemoteError(
             "config_error", f"cannot build a config from this state: {type(exc).__name__}: {exc}"
         ) from exc
-    path, written = req.get("path"), False
-    if req.get("write"):
-        real = runs.resolve_in_scope(_require(req, "path"))
-        runs.check_writable(real)
-        if os.path.exists(real):
-            raise RemoteError("conflict", f"{real} already exists", fix="pick a new path or edit it with write")
-        runs.atomic_write(real, text)
-        path, written = real, True
-    return {"yaml": text, "path": path, "written": written}
+    return {"yaml": text}
 
 
 VERBS = {

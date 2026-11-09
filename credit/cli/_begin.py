@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from credit import runs
+
 from ._common import (
     _CASPER_GPU_NODES,
     _DEFAULT_LEVELS_16,
@@ -85,23 +87,10 @@ def _represent_quoted_variable(dumper, value):
 _BeginDumper.add_representer(_QuotedVariable, _represent_quoted_variable)
 
 
-# Casper's hosts: casper-login* and casper<NN> compute nodes, and since January 2026 the crlogin* login nodes
-# and crhtc* nodes, whose names don't contain "casper".
-CASPER_NAMES = ("casper", "crlogin", "crhtc")
-
-
 def _detect_system() -> dict:
     """Return a friendly summary of the current host, environment, and GPUs."""
     hostname = socket.gethostname().lower()
-    # Compute nodes are matched with anchored digit patterns (dec0123, nid001234)
-    # rather than bare substrings, so ordinary hostnames that merely contain
-    # "dec"/"nid" (e.g. "decode-box", "unidata") are not misread as HPC systems.
-    if any(name in hostname for name in ("derecho", "casper", "crhtc", "crlogin")) or re.match(r"dec\d+", hostname):
-        system = "derecho" if "derecho" in hostname else "casper" if any(n in hostname for n in CASPER_NAMES) else "ncar"
-    elif "perlmutter" in hostname or re.match(r"nid\d+", hostname):
-        system = "perlmutter"
-    else:
-        system = "local"
+    system = runs.system_name(hostname)
 
     gpu_count = 0
     gpu_names = []

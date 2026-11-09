@@ -12,7 +12,6 @@ A cursor is a public, mergeable JSON object (CONTRACTS A1.3)::
 
 import csv
 import glob
-import hashlib
 import io
 import os
 import time
@@ -197,9 +196,8 @@ def read_csv_delta(path: str, cur: dict | None, now: float | None = None) -> tup
         data = f.read()
     if not data or not data.endswith(b"\n"):
         return None, cur or None, True
-    raw_lines = data.split(b"\n")
-    header_sha = hashlib.sha256(raw_lines[0]).hexdigest()
-    first_row_sha = hashlib.sha256(raw_lines[1]).hexdigest() if len(raw_lines) > 2 else None
+    marker = runs.csv_data_marker(data)
+    header_sha, first_row_sha = marker["header_sha"], marker["first_row_sha"]
     table = list(csv.reader(io.StringIO(data.decode("utf-8", errors="replace"))))
     columns, rows = (table[0], table[1:]) if table else ([], [])
     seen = int(cur.get("rows") or 0)
@@ -237,9 +235,8 @@ def read_events(run_dir: str, cur: dict, progress: str = "all", budget: list | N
 
     Each event gets ``file`` and ``off`` (where its line starts) and the list is
     sorted by ``ts``.  *progress* is ``all`` (every line, up to ``budget[0]``
-    bytes, which is decremented), ``latest`` (only the last ``train.progress``
-    and ``train.vars`` per file) or ``none`` (neither); ``latest`` and ``none``
-    still advance the cursor to the end.
+    bytes, which is decremented) or ``latest`` (only the last ``train.progress``
+    and ``train.vars`` per file, still advancing the cursor to the end).
     """
     cur = dict(cur or {})
     events, more = [], False
@@ -267,13 +264,12 @@ def read_events(run_dir: str, cur: dict, progress: str = "all", budget: list | N
             budget[0] -= new_off - (0 if reset else off)
             if new_off < size and _has_complete_line(path, new_off, size):
                 more = True
-        if progress in ("latest", "none"):
+        if progress == "latest":
             keep = set()
-            if progress == "latest":
-                for t in PROGRESS_TYPES:
-                    idx = [i for i, (_, _, ev) in enumerate(lines) if ev.get("type") == t]
-                    if idx:
-                        keep.add(idx[-1])
+            for t in PROGRESS_TYPES:
+                idx = [i for i, (_, _, ev) in enumerate(lines) if ev.get("type") == t]
+                if idx:
+                    keep.add(idx[-1])
             lines = [ln for i, ln in enumerate(lines) if ln[2].get("type") not in PROGRESS_TYPES or i in keep]
         for line_off, _, ev in lines:
             ev = _guard.redact_event(ev)
@@ -350,8 +346,7 @@ def run_delta(
         if cached and cached[0] == (run_cur, submit_size):
             record = cached[1]
         else:
-            record = runs.read_run(run_dir)
-            record["jobs"] = runs.jobs_of(run_dir, record)  # submit.jsonl is authoritative
+            record = runs.load_run(run_dir)
             _RECORDS[run_dir] = ((run_cur, submit_size), record)
         if cursor.get("run") != run_cur:
             delta["run"] = record

@@ -291,11 +291,20 @@ def _local_job(job_id: str, run_dir: str) -> tuple:
     """Return ``(pid, run_id, submitted)`` for a local job from its run.json."""
     pid = _int(job_id.split("-", 1)[1]) if job_id.startswith("local-") else None
     try:
-        record = runs.read_run(run_dir)
+        record = runs.load_run(run_dir)
     except (OSError, ValueError):
         return pid, None, None
-    job = next((j for j in runs.jobs_of(run_dir, record) if j.get("job_id") == job_id), {})
+    job = next((j for j in record["jobs"] if j.get("job_id") == job_id), {})
     return pid, record.get("run_id"), job.get("submitted")
+
+
+def unfinished_jobs(run_dir: str, record: dict | None) -> list:
+    """The run's jobs with a job id and no exit marker yet: the ones to ask the scheduler about."""
+    from credit.remote._delta import job_finished
+
+    return [
+        j for j in (record or {}).get("jobs") or [] if j.get("job_id") and not job_finished(run_dir, j.get("job_key"))
+    ]
 
 
 def query_local(jobs: list) -> dict:
