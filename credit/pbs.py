@@ -10,6 +10,7 @@ from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
 
+
 def launch_script(config_file, script_path, launch=True, backend="nccl"):
     """Generates and optionally launches a PBS script for a single-node MPI job on Casper.
 
