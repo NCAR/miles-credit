@@ -41,6 +41,18 @@ def _preprocess(args: argparse.Namespace) -> None:
 
 
 def _rollout(args: argparse.Namespace) -> None:
+    from credit.rollout_args import check_rollout_flags
+
+    if getattr(args, "ensemble_size", None) is not None:
+        sys.exit(
+            "credit rollout: error: --ensemble-size is not supported by gen2 rollout yet. "
+            "Run members separately (e.g. with --noise-scale for SDL models)."
+        )
+    try:
+        check_rollout_flags(getattr(args, "run_mode", None), getattr(args, "init_time", None))
+    except ValueError as exc:
+        sys.exit(f"credit rollout: error: {exc}")
+
     print("Starting credit rollout: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.rollout_gen2 import main
 

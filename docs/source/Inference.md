@@ -101,7 +101,9 @@ Key behaviors:
 - **`run_mode`** selects `batch` (a schedule of init times from `batch_forecast`)
   or `single` (one init time from `single_forecast.start_datetime`). The CLI flags
   `--run-mode`, `--init-time`, `--save-dir`, and `-m/--mode` override the corresponding
-  config entries; `--init-time` implies `run_mode: single`.
+  config entries; `--init-time` implies `run_mode: single` (combining it with
+  `--run-mode batch` is an error). `--init-time` takes a naive UTC ISO 8601 time such as
+  `2020-06-01T00`; a `Z`/`+00:00` suffix is accepted, other offsets are rejected.
 - **`mode`** is the distributed backend (`none` | `ddp` | `fsdp`), independent of
   `run_mode`. `ddp`/`fsdp` need one process per GPU from a launcher (`torchrun` or
   `mpiexec`); a plain `credit rollout` is a single process, so pass `-m none` to run a
@@ -287,17 +289,14 @@ predict:
 #### Running locally
 
 ```bash
-# Deterministic rollout (reads ensemble_size from config)
+# Rollout using the inference: settings from the config
 credit rollout -c config.yml
-
-# Ensemble rollout — override ensemble_size from the CLI
-credit rollout -c config.yml --ensemble-size 50
 
 # Single process, even if the config sets inference.mode: ddp
 credit rollout -c config.yml -m none
 
-# Multi-GPU on a single node (one process per GPU via torchrun; run from the repo root)
-torchrun --standalone --nproc-per-node=4 credit/applications/rollout_gen2.py -c config.yml
+# Multi-GPU on a single node (one process per GPU via torchrun)
+torchrun --standalone --nproc-per-node=4 -m credit.applications.rollout_gen2 -c config.yml
 ```
 
 On Casper/Derecho, `credit submit --mode rollout` (below) generates this launch for you.
@@ -308,7 +307,7 @@ Use `credit submit` to submit rollout jobs to the cluster. `--mode rollout` swit
 training submission to rollout submission (rollout jobs are independent — no afterok chain).
 
 ```bash
-# Submit a rollout job on Casper (deterministic or ensemble — set by config)
+# Submit a rollout job on Casper
 credit submit --cluster casper -c config.yml --mode rollout
 
 # Set GPU count at submission time
@@ -321,8 +320,7 @@ credit submit --cluster casper -c config.yml --mode rollout --dry-run
 `--jobs N` submits N parallel PBS rollout jobs, but per-job init-time subsetting is not yet
 implemented for gen2 configs: each job currently runs the full set of init times, so `N > 1`
 submits N redundant copies rather than splitting the work. Leave it at the default (`--jobs 1`)
-for now. `ensemble_size` in the config (or `--ensemble-size` at the CLI) is independent and
-controls how many ensemble members are run per init time.
+for now. Ensemble rollout (`ensemble_size` / `--ensemble-size`) is not yet supported for gen2.
 
 #### Multi-node rollout (MPI)
 

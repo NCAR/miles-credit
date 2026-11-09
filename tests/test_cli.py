@@ -1138,7 +1138,7 @@ class TestBuildParser:
             "--run-mode",
             "single",
             "--init-time",
-            "2020-06-01T00",
+            "2020-06-01T00:00:00",
             "--save-dir",
             "/out",
             "--mode",
@@ -1148,6 +1148,40 @@ class TestBuildParser:
     def test_rollout_rejects_unknown_run_mode(self):
         with pytest.raises(SystemExit):
             _build_parser().parse_args(["rollout", "-c", "cfg.yml", "--run-mode", "hindcast"])
+
+    def test_rollout_rejects_unknown_mode(self):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["rollout", "-c", "cfg.yml", "-m", "mpi"])
+
+    @pytest.mark.parametrize("bad", ["2020060100", "not-a-date", "2020-06-01T00-07:00"])
+    def test_rollout_rejects_bad_init_time(self, bad):
+        with pytest.raises(SystemExit):
+            _build_parser().parse_args(["rollout", "-c", "cfg.yml", "--init-time", bad])
+
+    def _forwarded_argv(self, monkeypatch, cli_args):
+        import credit.applications.rollout_gen2 as rollout_gen2
+        from credit.cli._submit import _rollout
+
+        seen = {}
+        monkeypatch.setattr(rollout_gen2, "main", lambda: seen.setdefault("argv", list(sys.argv)))
+        monkeypatch.setattr(sys, "argv", sys.argv)
+        _rollout(_build_parser().parse_args(["rollout", "-c", "cfg.yml", *cli_args]))
+        return seen.get("argv")
+
+    def test_rollout_unset_flags_not_forwarded(self, monkeypatch):
+        assert self._forwarded_argv(monkeypatch, []) == ["credit-rollout", "-c", "cfg.yml", "-p", "4"]
+
+    def test_rollout_utc_init_time_normalized(self, monkeypatch):
+        argv = self._forwarded_argv(monkeypatch, ["--init-time", "2020-06-01T06Z"])
+        assert argv[-2:] == ["--init-time", "2020-06-01T06:00:00"]
+
+    def test_rollout_ensemble_size_rejected(self, monkeypatch):
+        with pytest.raises(SystemExit, match="ensemble-size"):
+            self._forwarded_argv(monkeypatch, ["--ensemble-size", "50"])
+
+    def test_rollout_init_time_conflicts_with_batch(self, monkeypatch):
+        with pytest.raises(SystemExit, match="conflicts with --run-mode batch"):
+            self._forwarded_argv(monkeypatch, ["--run-mode", "batch", "--init-time", "2020-06-01T00"])
 
     def test_realtime_required_init_time(self):
         parser = _build_parser()

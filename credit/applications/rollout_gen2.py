@@ -27,7 +27,7 @@ Usage
     python rollout_gen2.py -c config.yml --noise-scale 0.5
 
 # Multi-GPU DDP:
-    torchrun --standalone --nproc-per-node=4 rollout_gen2.py -c config.yml
+    torchrun --standalone --nproc-per-node=4 -m credit.applications.rollout_gen2 -c config.yml
 """
 
 import logging
@@ -49,6 +49,7 @@ from credit.distributed import get_rank_info, select_device, setup
 from credit.models.wxformer.stochastic_decomposition_layer import scale_sdl_noise
 from credit.output_gen2 import ForecastWriter
 from credit.postblock import build_postblocks
+from credit.rollout_args import apply_cli_overrides, check_rollout_flags, init_time_arg
 from credit.preblock import attach_channel_schema, build_preblocks
 from credit.seed import seed_everything
 from credit.trainers.rollout_utils import (
@@ -86,7 +87,7 @@ Examples:
       python rollout_gen2.py -c config.yml --run-mode single --init-time 2020-06-01T00
 
   # Multi-GPU DDP:
-      torchrun --standalone --nproc-per-node=4 rollout_gen2.py -c config.yml
+      torchrun --standalone --nproc-per-node=4 -m credit.applications.rollout_gen2 -c config.yml
         """,
     )
     parser.add_argument("-c", "--config", dest="model_config", required=True, help="Path to Gen2 YAML config.")
@@ -99,10 +100,10 @@ Examples:
     )
     parser.add_argument(
         "--init-time",
-        type=str,
+        type=init_time_arg,
         default=None,
-        help="Single-forecast init time (ISO 8601, e.g. 2020-06-01T00). "
-        "Overrides inference.single_forecast.start_datetime.",
+        help="Single-forecast init time in naive UTC (ISO 8601, e.g. 2020-06-01T00). "
+        "Overrides inference.single_forecast.start_datetime and implies --run-mode single.",
     )
     parser.add_argument(
         "--save-dir", type=str, default=None, help="Output directory. Overrides inference.save_forecast."
@@ -112,7 +113,8 @@ Examples:
         type=str,
         default=None,
         choices=["none", "ddp", "fsdp"],
-        help="Distributed mode. Overrides inference.mode (use 'none' for a single process without torchrun).",
+        help="Distributed backend. Overrides inference.mode (use 'none' for a single process without "
+        "torchrun). Unrelated to --run-mode, which picks batch vs single forecasts.",
     )
     parser.add_argument(
         "--noise-scale",
@@ -131,6 +133,10 @@ Examples:
         help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
     )
     args = parser.parse_args()
+    try:
+        check_rollout_flags(args.run_mode, args.init_time)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     # ── Load config ──────────────────────────────────────────────────────────
     try:
@@ -149,23 +155,12 @@ Examples:
     conf["save_loc"] = os.path.expandvars(conf["save_loc"])
 
     # ── CLI overrides ─────────────────────────────────────────────────────────
-    inf_conf = conf["inference"]
-    if args.run_mode is not None:
-        inf_conf["run_mode"] = args.run_mode
-    if args.save_dir is not None:
-        inf_conf["save_forecast"] = args.save_dir
-    if args.init_time is not None:
-        inf_conf.setdefault("single_forecast", {})["start_datetime"] = args.init_time
-        inf_conf["run_mode"] = "single"  # --init-time implies single mode
-    if args.mode is not None:
-        inf_conf["mode"] = args.mode
-    if args.noise_scale is not None:
-        inf_conf["noise_scale"] = args.noise_scale
+    inf_conf = apply_cli_overrides(conf["inference"], args)
 
     run_mode = inf_conf.get("run_mode", "batch")
     assert run_mode in ("batch", "single"), f"inference.run_mode must be 'batch' or 'single', got {run_mode!r}"
 
-    save_dir = os.path.expandvars(inf_conf["save_forecast"])
+    save_dir = os.path.expanduser(os.path.expandvars(inf_conf["save_forecast"]))
     os.makedirs(save_dir, exist_ok=True)
 
     # ── Inference-scoped data/preblocks/postblocks overrides ────────────────────

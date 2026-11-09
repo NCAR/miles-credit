@@ -122,7 +122,6 @@ use `credit submit --mode train` instead so the job goes through the scheduler.
 
 ```bash
 credit rollout -c my_run.yml
-credit rollout -c my_run.yml --ensemble-size 10
 credit rollout -c my_run.yml --init-time 2020-06-01T00 --save-dir /scratch/$USER/fcst
 ```
 
@@ -135,9 +134,15 @@ These flags override the config for a single run:
 | Flag | Overrides | Notes |
 |---|---|---|
 | `--run-mode {batch,single}` | `inference.run_mode` | |
-| `--init-time ISO8601` | `inference.single_forecast.start_datetime` | Implies `--run-mode single` |
+| `--init-time ISO8601` | `inference.single_forecast.start_datetime` | Implies `--run-mode single`; an error with `--run-mode batch` |
 | `--save-dir DIR` | `inference.save_forecast` | |
-| `-m, --mode {none,ddp,fsdp}` | `inference.mode` | Use `none` to run without `torchrun` |
+| `-m, --mode {none,ddp,fsdp}` | `inference.mode` | Distributed backend; use `none` to run without `torchrun` |
+
+`--init-time` takes a naive UTC time in ISO 8601 (`2020-06-01T00`, `2020-06-01 06:00`). A `Z` or
+`+00:00` suffix is accepted; other offsets are rejected. Invalid times fail before any model loads.
+`-m/--mode` (distributed backend), `--run-mode` (batch vs single forecasts) and
+`credit submit --mode` (job type) are unrelated settings. Ensemble rollout (`--ensemble-size`)
+is not yet supported for gen2.
 
 **When to use it:** after training is complete and you want forecast fields for
 evaluation or downstream analysis.
