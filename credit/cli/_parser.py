@@ -328,7 +328,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sample-date", default=None, metavar="YYYY-MM-DDTHH", dest="sample_date", help="Validation sample init time"
     )
     p.add_argument("--output-dir", default=None, metavar="DIR", dest="output_dir", help="Where to save plots")
-    p.add_argument("--denorm", action="store_true", help="Inverse-normalise output to physical units")
+    p.add_argument(
+        "--denorm",
+        action="store_true",
+        help="Convert output to physical units by running postblocks.per_step (reconstruct + inverse scaler); needs an inverse bridgescaler_transform",
+    )
 
     # ---- ask ----
     p = sub.add_parser(

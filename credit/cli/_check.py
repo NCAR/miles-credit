@@ -828,6 +828,31 @@ def _check_channel_counts(conf: dict, rep: _Report) -> None:
             )
 
 
+def _check_plot_denorm_ready(conf: dict, rep: _Report) -> None:
+    """Warn when ``credit plot --denorm`` would have nothing to denormalize with.
+
+    ``--denorm`` runs the prediction-side ``postblocks.per_step`` chain, so it needs a
+    ``bridgescaler_transform`` doing ``inverse_transform`` on the prediction (``y_processed``).
+    """
+    per_step = _get(conf, "postblocks", "per_step", default={}) or {}
+    for block in per_step.values():
+        if not isinstance(block, dict) or block.get("type") != "bridgescaler_transform":
+            continue
+        args = block.get("args") or {}
+        if args.get("method", "inverse_transform") == "inverse_transform" and _block_output_key(block) == "y_processed":
+            return
+    rep.warn(
+        "postblocks.per_step",
+        "No bridgescaler_transform with method: inverse_transform acts on y_processed, so "
+        "`credit plot --denorm` cannot convert model output to physical units.",
+        fix=(
+            "scaler:\n"
+            "  type: bridgescaler_transform\n"
+            "  args: {scaler_path: /path/to/scaler.json, variables: [], method: inverse_transform}"
+        ),
+    )
+
+
 def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
     """Check the postblock chain against what BaseLoss needs to score.
 
@@ -1510,6 +1535,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_plot_denorm_ready,
             _check_log_variance_weights,
             _check_trainer,
             _check_channel_schema,

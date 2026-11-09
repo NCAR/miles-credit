@@ -33,62 +33,75 @@ def _build_channel_map(conf):
     return channel_map
 
 
-def _build_denorm_stats(conf):
-    """Return (mean_arr, std_arr) aligned with ERA5Dataset target channel order."""
-    import numpy as np
-    import xarray as xr
+# Postblocks that turn flat model output into physical-unit variables.  Physics fixers and
+# diagnostics are deliberately excluded: they need inputs a quick-look plot does not have.
+_DENORM_BLOCK_TYPES = frozenset({"reconstruct", "bridgescaler_transform", "exp_transform", "square_transform"})
 
-    src = conf["data"]["source"]["ERA5"]
-    levels = src.get("levels")  # None/[] -> "all levels" (loaded straight from the norm file)
-    level_coord = src["level_coord"]
-    n_levels = resolve_num_levels(src, conf)
-    v = src["variables"]
-    prog = v.get("prognostic") or {}
-    diag = v.get("diagnostic") or {}
 
-    # Support both v1 (preblocks.norm.args) and v2 (preblocks.per_step.norm.args) schemas
-    preblocks_cfg = conf.get("preblocks", {})
-    norm_args = (
-        preblocks_cfg.get("per_step", {}).get("norm", {}).get("args") or preblocks_cfg.get("norm", {}).get("args") or {}
+def _denorm_block_confs(conf):
+    """Return the ``postblocks.per_step`` entries that map model output to physical units.
+
+    Keeps only the prediction-side ``reconstruct`` / scaler / transform blocks. The target-twin
+    chain (anything reading ``y`` or writing ``y_target_processed``) is dropped, because
+    ``credit plot`` pushes the truth through the prediction chain itself.
+
+    Raises:
+        ValueError: if the config has no inverse ``bridgescaler_transform`` to denormalize with.
+    """
+    per_step = (conf.get("postblocks") or {}).get("per_step") or {}
+    blocks = {}
+    for name, block in per_step.items():
+        if not isinstance(block, dict) or block.get("type") not in _DENORM_BLOCK_TYPES:
+            continue
+        args = block.get("args") or {}
+        if (args.get("out_key") or args.get("key") or "y_processed") != "y_processed":
+            continue  # target twin
+        if block["type"] == "reconstruct" and args.get("in_key", "y_pred") != "y_pred":
+            continue  # target twin
+        blocks[name] = block
+
+    has_inverse = any(
+        b["type"] == "bridgescaler_transform"
+        and (b.get("args") or {}).get("method", "inverse_transform") == "inverse_transform"
+        for b in blocks.values()
     )
-    if not norm_args.get("mean_path") or not norm_args.get("std_path"):
-        raise KeyError(
-            "preblocks norm mean_path/std_path not found in config. "
-            "Set preblocks.per_step.norm.args.mean_path and std_path, or omit --denorm."
+    if not has_inverse:
+        raise ValueError(
+            "--denorm needs an inverse scaler in postblocks.per_step, e.g.\n"
+            "  scaler:\n"
+            "    type: bridgescaler_transform\n"
+            "    args: {scaler_path: /path/to/scaler.json, variables: [], method: inverse_transform}\n"
+            "Add it (after `reconstruct`), or omit --denorm to plot normalised values."
         )
-    mean_ds = xr.open_dataset(norm_args["mean_path"]).load()
-    std_ds = xr.open_dataset(norm_args["std_path"]).load()
+    return blocks
 
-    def _stats(varname, is_3d):
-        if varname not in mean_ds or varname not in std_ds:
-            n = n_levels if is_3d else 1
-            return np.zeros(n, dtype=np.float32), np.ones(n, dtype=np.float32)
-        if is_3d:
-            # Explicit level subset -> select it; else take every level in file order.
-            m_da = mean_ds[varname].sel({level_coord: levels}) if levels else mean_ds[varname]
-            s_da = std_ds[varname].sel({level_coord: levels}) if levels else std_ds[varname]
-            m = m_da.values.astype(np.float32)
-            s = s_da.values.astype(np.float32)
-        else:
-            m = np.array([float(mean_ds[varname].values)], dtype=np.float32)
-            s = np.array([float(std_ds[varname].values)], dtype=np.float32)
-        return m, s
 
-    means, stds = [], []
-    for vn in prog.get("vars_3D", []):
-        m, s = _stats(vn, True)
-        means.append(m)
-        stds.append(s)
-    for vn in prog.get("vars_2D", []):
-        m, s = _stats(vn, False)
-        means.append(m)
-        stds.append(s)
-    for vn in diag.get("vars_2D", []):
-        m, s = _stats(vn, False)
-        means.append(m)
-        stds.append(s)
+def _build_denorm_postblocks(conf):
+    """Instantiate the denormalisation postblock chain (see ``_denorm_block_confs``)."""
+    from credit.postblock import _build_postblock_section
 
-    return __import__("numpy").concatenate(means), __import__("numpy").concatenate(stds)
+    return _build_postblock_section(_denorm_block_confs(conf))
+
+
+def _denormalize(chain, metadata, tensor):
+    """Run flat model-space ``tensor`` through ``chain``; return ``{var_key: (B, n_lev, n_time, H, W)}``."""
+    import torch
+
+    from credit.postblock import apply_postblocks
+
+    with torch.no_grad():
+        out = apply_postblocks(chain, {"y_pred": tensor, "metadata": metadata})
+    return {var_key: t for source in out["y_processed"].values() for var_key, t in source.items()}
+
+
+def _resolve_field(field, var_keys):
+    """Match ``field`` to a variable key: exact key first, else the unique short name (last path segment)."""
+    if field in var_keys:
+        return field
+    for key in var_keys:
+        if key.split("/")[-1] == field:
+            return key
+    return None
 
 
 def _plot(args) -> None:
@@ -118,6 +131,14 @@ def _plot(args) -> None:
 
     with open(args.config) as f:
         conf = yaml.safe_load(f)
+
+    denorm_chain = None
+    if args.denorm:  # fail fast, before the slow model/data loading
+        try:
+            denorm_chain = _build_denorm_postblocks(conf)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            sys.exit(1)
 
     save_loc = os.path.expandvars(conf.get("save_loc", "."))
     ckpt_path = args.checkpoint or os.path.join(save_loc, "checkpoint.pt")
@@ -192,33 +213,47 @@ def _plot(args) -> None:
             t = t[:, 0]
         return t
 
-    y_true_np = _squeeze(y).numpy()
-    y_pred_np = _squeeze(y_pred).numpy()
-
-    unit_label = "normalised"
     if args.denorm:
-        mean_arr, std_arr = _build_denorm_stats(conf)
-        mean_arr = mean_arr[:, None, None]
-        std_arr = std_arr[:, None, None]
-        y_true_np = y_true_np * std_arr + mean_arr
-        y_pred_np = y_pred_np * std_arr + mean_arr
+        metadata = _batch["metadata"]
+        pred_vars = _denormalize(denorm_chain, metadata, y_pred)
+        true_vars = _denormalize(denorm_chain, metadata, y)
         unit_label = "physical units"
-        logger.info("Inverse-normalised outputs to physical units")
+        logger.info("Inverse-normalised outputs to physical units via postblocks.per_step")
 
-    channel_map = _build_channel_map(conf)
+        def _get_field(field):
+            key = _resolve_field(field, pred_vars)
+            if key is None:
+                return None
+            # (B, n_levels, n_time, H, W) -> (n_levels, H, W) for the first sample and time step
+            return true_vars[key][0, :, 0].cpu().float().numpy(), pred_vars[key][0, :, 0].cpu().float().numpy()
+
+        available_fields = sorted({k.split("/")[-1] for k in pred_vars})
+    else:
+        y_true_np = _squeeze(y).numpy()
+        y_pred_np = _squeeze(y_pred).numpy()
+        unit_label = "normalised"
+        channel_map = _build_channel_map(conf)
+
+        def _get_field(field):
+            if field not in channel_map:
+                return None
+            chans = channel_map[field]
+            return y_true_np[chans], y_pred_np[chans]
+
+        available_fields = sorted(channel_map.keys())
 
     for field in args.field:
-        if field not in channel_map:
-            available = ", ".join(sorted(channel_map.keys()))
-            print(f"Field '{field}' not found. Available: {available}", file=sys.stderr)
+        got = _get_field(field)
+        if got is None:
+            print(f"Field '{field}' not found. Available: {', '.join(available_fields)}", file=sys.stderr)
             continue
 
-        chans = channel_map[field]
-        level_idx = min(args.level, len(chans) - 1)
-        c = chans[level_idx]
+        truth_levels, pred_levels = got
+        n_chans = truth_levels.shape[0]
+        level_idx = min(args.level, n_chans - 1)
 
-        truth = y_true_np[c]
-        pred = y_pred_np[c]
+        truth = truth_levels[level_idx]
+        pred = pred_levels[level_idx]
         diff = pred - truth
 
         H, W = truth.shape
@@ -229,7 +264,7 @@ def _plot(args) -> None:
         vmax = float(np.percentile(truth, 98))
         dabs = float(np.percentile(np.abs(diff), 98))
 
-        title_suffix = f"  level {level_idx}" if len(chans) > 1 else ""
+        title_suffix = f"  level {level_idx}" if n_chans > 1 else ""
         ckpt_epoch = ckpt.get("epoch", "?")
         fig_title = f"{field}{title_suffix}  |  epoch {ckpt_epoch}  |  {unit_label}"
 

@@ -145,7 +145,9 @@ tensorboard --logdir /path/to/save_loc/tensorboard
 credit plot -c my_run.yml --field VAR_2T --denorm
 ```
 
-Plots are saved to `<save_loc>/plots/`. No GPU required.
+`--denorm` uses the inverse scaler in your `postblocks.per_step` to show physical units
+(K, Pa, ...); drop it to plot normalised values. Plots are saved to `<save_loc>/plots/`.
+No GPU required.
 
 ---
 

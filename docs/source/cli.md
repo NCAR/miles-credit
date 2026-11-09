@@ -221,6 +221,13 @@ Loads a checkpoint, runs one forward pass on a validation sample, and produces
 a 3-panel global map (truth | prediction | difference).  Runs on CPU — no GPU
 required.
 
+`--denorm` converts to physical units by running the prediction-side blocks of
+`postblocks.per_step` (`reconstruct`, the inverse `bridgescaler_transform`, and any
+`exp_transform`/`square_transform`); physics fixers and diagnostics are skipped.  The
+config therefore needs an inverse scaler in `postblocks.per_step`, which every gen2
+training config already has (`credit check` warns if it is missing).  Without
+`--denorm` the plot shows normalised values.
+
 **When to use it:** to eyeball whether the model is producing realistic
 weather patterns after a few epochs of training.
 

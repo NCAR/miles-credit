@@ -835,6 +835,20 @@ def test_checks_do_not_mutate_the_config(conf):
     assert conf == before
 
 
+def test_plot_denorm_ready_clean_config_is_silent(conf):
+    rep = _run(conf)
+    assert not any("credit plot --denorm" in f.message for f in rep.findings), _text(rep, "warning")
+
+
+def test_plot_denorm_warns_without_inverse_scaler(conf):
+    per_step = conf["postblocks"]["per_step"]
+    for name in [n for n, b in per_step.items() if b["type"] == "bridgescaler_transform"]:
+        del per_step[name]
+    rep = _run(conf)
+    msgs = [f for f in rep.findings if f.severity == "warning" and "credit plot --denorm" in f.message]
+    assert len(msgs) == 1 and msgs[0].where == "postblocks.per_step", _text(rep, "warning")
+
+
 # ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================
