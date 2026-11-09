@@ -223,6 +223,7 @@ def test_pbs_config_derecho():
     result = _pbs_config("ncar", "exp", nodes=2, gpus=4)
     assert result["nodes"] == 2 and result["ngpus"] == 4
     assert {"queue", "walltime", "mem", "job_name"} <= set(result)
+    assert result["mem"] == "auto"
 
 
 @pytest.mark.parametrize(

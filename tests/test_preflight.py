@@ -59,14 +59,15 @@ class TestEstimateDataloaderMemoryGb:
         assert estimate_dataloader_memory_gib({}) == 0.0
 
     def test_scales_with_workers(self):
+        # workers x prefetch buffered batches, plus the one the main process holds.
         base = estimate_dataloader_memory_gib(_conf(workers=1))
         doubled = estimate_dataloader_memory_gib(_conf(workers=2))
-        assert abs(doubled / base - 2.0) < 1e-6
+        assert abs(doubled / base - (2 * 4 + 1) / (1 * 4 + 1)) < 1e-6
 
     def test_scales_with_prefetch(self):
         base = estimate_dataloader_memory_gib(_conf(prefetch=1))
         quad = estimate_dataloader_memory_gib(_conf(prefetch=4))
-        assert abs(quad / base - 4.0) < 1e-6
+        assert abs(quad / base - (4 * 4 + 1) / (4 * 1 + 1)) < 1e-6
 
     def test_scales_with_batch(self):
         base = estimate_dataloader_memory_gib(_conf(batch=1))
@@ -93,8 +94,8 @@ class TestEstimateDataloaderMemoryGb:
         )
         print(conf)
         total_ch = len(vars_3d) * n_levels + len(vars_2d)  # 40
-        bytes_per_sample = h * w * total_ch * 4 * 2
-        expected_gb = (4 * 4 * 1 * bytes_per_sample) / 2**30
+        bytes_per_sample = h * w * total_ch * 4 * 2  # prognostic in the input and the target
+        expected_gb = ((4 * 4 + 1) * 1 * bytes_per_sample) / 2**30
         predicted_gb = estimate_dataloader_memory_gib(conf)
         print(expected_gb)
         print(predicted_gb)
@@ -177,6 +178,49 @@ class TestEstimateDataloaderMemoryGb:
         }
         # 1 3D var * 8 levels + 1 2D var = 9 channels -> nonzero estimate
         assert estimate_dataloader_memory_gib(conf) > 0.0
+
+    @staticmethod
+    def _one_source(variables, history_len=None, **trainer):
+        """One source on a grid where each float32 channel is exactly 1 GiB, no workers."""
+        src = {"levels": [1, 2], "variables": variables}
+        if history_len is not None:
+            src["history_len"] = history_len
+        return {
+            "trainer": {"thread_workers": 0, **trainer},
+            "model": {"image_height": 1, "image_width": 2**28},
+            "data": {"source": {"ERA5": src}},
+        }
+
+    def test_channels_by_field_type_and_source(self):
+        """Input: prognostic + static + dynamic_forcing; target: prognostic + diagnostic; all sources."""
+        conf = self._one_source(
+            {
+                "prognostic": {"vars_3D": ["T"], "vars_2D": ["SP"]},  # 3 channels
+                "diagnostic": {"vars_2D": ["TP"]},
+                "static": {"vars_2D": ["lsm", "z"]},
+                "dynamic_forcing": {"vars_2D": ["tisr"]},
+            }
+        )
+        conf["data"]["source"]["SOLAR"] = {"variables": {"dynamic_forcing": {"vars_2D": ["tsi"]}}}
+        # input 3 + 2 + 1 + 1, target 3 + 1
+        assert estimate_dataloader_memory_gib(conf) == pytest.approx(11.0)
+
+    def test_history_len_multiplies_the_input(self):
+        variables = {"prognostic": {"vars_2D": ["SP"]}, "static": {"vars_2D": ["lsm"]}}
+        # source-level history_len: 3 x (1 + 1) input + 1 target
+        assert estimate_dataloader_memory_gib(self._one_source(variables, history_len=3)) == pytest.approx(7.0)
+        # data-level history_len is the fallback
+        conf = self._one_source(variables)
+        conf["data"]["history_len"] = 2
+        assert estimate_dataloader_memory_gib(conf) == pytest.approx(5.0)
+
+    def test_validation_uses_valid_settings_and_validation_data(self):
+        conf = self._one_source({"prognostic": {"vars_2D": ["SP"]}}, valid_batch_size=4, valid_thread_workers=0)
+        # validation_data without its own source falls back to data's
+        conf["validation_data"] = {"start_datetime": "2020-01-01"}
+        assert estimate_dataloader_memory_gib(conf, validation=True) == pytest.approx(8.0)
+        conf["validation_data"]["source"] = {"V": {"variables": {"prognostic": {"vars_2D": ["SP", "T2"]}}}}
+        assert estimate_dataloader_memory_gib(conf, validation=True) == pytest.approx(16.0)
 
 
 # ---------------------------------------------------------------------------
