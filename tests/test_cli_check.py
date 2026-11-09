@@ -929,6 +929,46 @@ def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
     assert not _log_variance_warnings(_run(conf))
 
 
+def _square_transform_q(conf):
+    for name, key in (("square", "y_processed"), ("square_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "square_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def test_sqrt_variance_weight_warns_without_physical_stats(conf, tmp_path):
+    """A square_transformed variable without the sidecar is weighted by an estimate."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "square_transformed" in found[0].message
+    assert "zero-inflated" not in found[0].message
+    assert "variable_weights" in found[0].fix and "credit preprocess" in found[0].fix
+
+
+def test_sqrt_variance_weight_flags_zero_inflated_fields(conf, tmp_path):
+    """A sqrt-space spread larger than the mean marks the estimate as least reliable."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [0.01, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and "zero-inflated" in found[0].message, found
+
+
+def test_sqrt_variance_weight_silent_with_exact_physical_stats(conf, tmp_path):
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    _write_standard_scaler(tmp_path / "scaler_physical.json", [9.0, 16.0], [9.0, 32.0])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_sqrt_variance_weight_skipped_without_square_transform(conf, tmp_path):
+    """A sqrt-space loss scores in sqrt units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    assert not _log_variance_warnings(_run(conf))
+
+
 # ===========================================================================
 # Gradient clipping
 # ===========================================================================

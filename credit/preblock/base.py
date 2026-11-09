@@ -9,6 +9,14 @@ class BasePreblock(nn.Module):
 
     VALID_DATA_TYPES = ("input", "target")
 
+    # True for a preblock that changes the variance of the variables it transforms
+    # (log, sqrt, ...) and is undone by a postblock, so the loss scores them in
+    # physical units. ``credit preprocess`` then records the physical-unit
+    # statistics of its target variables (``fit_physical_target_stats``); such a
+    # block must expose ``variables`` and ``data_types``. The inverse postblock is
+    # listed in ``credit.losses.base.UNIT_TRANSFORMS``.
+    changes_units = False
+
     def _copy_batch(self, batch: dict) -> dict:
         """Shallow-copy the batch so forward() never mutates the caller's dict.
 

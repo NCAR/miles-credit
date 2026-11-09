@@ -17,9 +17,10 @@ def physical_stats_path(scaler_path: str) -> str:
     """Sidecar file holding physical-unit target statistics for a scaler file.
 
     ``credit preprocess`` writes it next to ``scaler_path`` (``scaler.json`` ->
-    ``scaler_physical.json``) when log-transformed target variables are scaled
-    there: a standard scaler fit on their values *before* the ``log_transform``
-    preblock, so the loss and metrics can weight them by their exact
+    ``scaler_physical.json``) when log- or sqrt-transformed target variables are
+    scaled there: a standard scaler fit on their values *before* the
+    ``log_transform`` / ``sqrt_transform`` preblock (any preblock with
+    ``changes_units = True``), so the loss and metrics can weight them by their exact
     physical-unit variance (see ``credit.losses.base._load_target_variances``).
     """
     root, ext = splitext(expandvars(scaler_path))
@@ -27,21 +28,22 @@ def physical_stats_path(scaler_path: str) -> str:
 
 
 def fit_physical_target_stats(
-    log_block, batch: dict, accumulated: dict | None = None, spatial_variables: list | None = None
+    unit_block, batch: dict, accumulated: dict | None = None, spatial_variables: list | None = None
 ) -> dict | None:
-    """Fit standard scalers on the target variables a ``LogTransform`` block log-transforms.
+    """Fit standard scalers on the target variables a unit-changing preblock transforms.
 
-    ``batch`` is the batch as it reaches ``log_block`` (still in physical units).
-    ``spatial_variables`` are the full keys a scaler preblock scales per grid point;
-    those are fit per grid point here too, so their level-mean variance is the mean
-    of each point's variance over time, as for their log-space scaler, rather than
-    a variance pooled over the whole map.
+    ``unit_block`` is a preblock with ``changes_units = True`` (``LogTransform``,
+    ``SqrtTransform``); ``batch`` is the batch as it reaches it (still in physical
+    units). ``spatial_variables`` are the full keys a scaler preblock scales per
+    grid point; those are fit per grid point here too, so their level-mean variance
+    is the mean of each point's variance over time, as for their transformed-space
+    scaler, rather than a variance pooled over the whole map.
     Returns ``{"target": {source: {var_key: scaler}}}`` merged into ``accumulated``,
     or ``accumulated`` unchanged when the block transforms no target variables.
     """
-    if "target" not in log_block.data_types or "target" not in batch:
+    if "target" not in unit_block.data_types or "target" not in batch:
         return accumulated
-    variables = _parse_variable_selection(log_block.variables, batch, ["target"])
+    variables = _parse_variable_selection(unit_block.variables, batch, ["target"])
     fit_batch, _ = _flatten_spatial_tensors({"target": batch["target"]}, spatial_variables or [])
     fitted = scale_var_dict(fit_batch, DStandardScalerTensor(channels_last=False), "fit", variables)
     fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
