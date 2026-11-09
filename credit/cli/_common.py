@@ -3,6 +3,7 @@
 import logging
 import os
 import pathlib
+from typing import NamedTuple
 
 from credit.conda_env import torchrun_path
 
@@ -72,6 +73,110 @@ def casper_mem(gpus: int, gpu_type: str = None) -> str:
     return f"{min(full, int(-(-mem // 16) * 16))}GB"
 
 
+# ``pbs.mem: auto`` (train / preprocess jobs): size the request from the config.
+# Per process (one per GPU) the job holds the DataLoader's buffered batches, the
+# PyTorch/CUDA runtime and model copies, and one spawned process per DataLoader
+# worker (each imports torch).  The overheads and safety factor are rough,
+# uncalibrated allowances, so ``auto`` never asks for less than the site default
+# (``casper_mem`` / Derecho's 480GB) — it only raises a request the config needs.
+# PBS reads "GB" as 1024-based, matching GiB.
+_AUTO_MEM_OVERHEAD_GIB = 4
+_AUTO_MEM_WORKER_GIB = 1
+_AUTO_MEM_SAFETY = 1.3
+_AUTO_MEM_STEP_GB = 32
+
+# Casper multi-GPU node types as (gpu_type, GPUs per node, node memory in GB);
+# V100 nodes come in two sizes.  An unset gpu_type can land on any of them.
+_CASPER_MULTI_GPU_NODES = [
+    ("v100", 4, 768),
+    ("v100", 8, 1152),
+    ("a100_80gb", 4, 1024),
+    ("h100", 4, 1024),
+]
+
+
+class AutoMem(NamedTuple):
+    """Result of :func:`auto_mem`."""
+
+    mem: str  # the per-node request, e.g. "512GB"
+    need_gb: float  # the config-derived estimate before the site-default floor, rounding and cap
+    explanation: str
+    exceeds_node: bool  # the estimate is more than the cap, so the request was capped
+
+
+def site_default_mem(cluster: str, gpus: int, gpu_type: str = None) -> str:
+    """The memory ``credit submit`` requests per node when ``mem`` is unset."""
+    if cluster == "casper":
+        return casper_mem(gpus, gpu_type)
+    return _PBS_DEFAULTS[cluster]["mem"]
+
+
+def node_mem_cap_gb(cluster: str, gpu_type: str = None, gpus: int = 1) -> int:
+    """Largest memory request (GB, a multiple of 32) that fits every node a job can land on.
+
+    On Casper that is the smallest node of *gpu_type* (any multi-GPU type when unset)
+    with at least *gpus* GPUs, so a large request never silently rules out some of
+    the nodes the job could otherwise run on.
+    """
+    if cluster != "casper":
+        return int(_PBS_DEFAULTS[cluster]["mem"].rstrip("GB"))
+    gpu_type = (gpu_type or "").lower() or None
+    nodes = [(n, mem) for t, n, mem in _CASPER_MULTI_GPU_NODES if gpu_type in (None, t)]
+    if nodes:
+        fitting = [mem for n, mem in nodes if n >= gpus]
+        node_mem = min(fitting) if fitting else max(mem for _, mem in nodes)
+    else:
+        node_mem = _CASPER_GPU_NODES.get(gpu_type, _CASPER_GPU_NODES[None])[1]
+    return int(node_mem * _CASPER_MEM_NODE_FRACTION) // _AUTO_MEM_STEP_GB * _AUTO_MEM_STEP_GB
+
+
+def auto_mem(
+    conf: dict, cluster: str, gpus: int, gpu_type: str = None, include_validation: bool = True
+) -> AutoMem | None:
+    """Config-derived per-node memory request for ``pbs.mem: auto``.
+
+    Returns an :class:`AutoMem`, or None when the config gives nothing to
+    estimate from. The training DataLoader is always counted; the validation
+    DataLoader is added when *include_validation* is set (train jobs) and the
+    config does not set ``trainer.skip_validation`` — the trainer leaves each
+    loader's iterator suspended between epochs, so both keep their prefetched
+    batches and persistent workers. The estimate is rounded up to a multiple of
+    32 GB, never below the site default, and capped at what one node offers;
+    ``exceeds_node`` flags a capped request.
+    """
+    from credit.trainers.preflight import estimate_dataloader_memory_gib
+
+    train_gib = estimate_dataloader_memory_gib(conf)
+    if train_gib <= 0:
+        return None
+    trainer = conf.get("trainer") or {}
+    loaders = f"{train_gib:.1f} GiB training DataLoader"
+    loader_gib = train_gib
+    workers = trainer.get("thread_workers", 4)
+    if include_validation and not trainer.get("skip_validation", False):
+        valid_gib = estimate_dataloader_memory_gib(conf, validation=True)
+        loader_gib += valid_gib
+        workers += trainer.get("valid_thread_workers", 4)
+        loaders += f" + {valid_gib:.1f} GiB validation DataLoader"
+    gpus = max(1, int(gpus))
+    per_process = loader_gib + _AUTO_MEM_OVERHEAD_GIB + _AUTO_MEM_WORKER_GIB * workers
+    need = per_process * gpus * _AUTO_MEM_SAFETY
+    floor = site_default_mem(cluster, gpus, gpu_type)
+    floor_gb = int(floor.rstrip("GB"))
+    rounded = int(-(-need // _AUTO_MEM_STEP_GB) * _AUTO_MEM_STEP_GB)
+    cap = node_mem_cap_gb(cluster, gpu_type, gpus)
+    explanation = (
+        f"per process: {loaders} + {_AUTO_MEM_OVERHEAD_GIB} GiB runtime + {workers} worker(s) x "
+        f"{_AUTO_MEM_WORKER_GIB} GiB = {per_process:.1f} GiB; x {gpus} process(es) x {_AUTO_MEM_SAFETY} "
+        f"safety = {need:.0f} GB, assuming float32 (4-byte) data values"
+    )
+    if rounded > cap:
+        return AutoMem(f"{cap}GB", need, explanation + f"; capped at the ~{cap} GB a {cluster} node offers", True)
+    if rounded <= floor_gb:
+        return AutoMem(floor, need, explanation + f"; the {cluster} default of {floor} covers it", False)
+    return AutoMem(f"{rounded}GB", need, explanation + f", rounded up to a multiple of {_AUTO_MEM_STEP_GB} GB", False)
+
+
 # PBS queues by cluster.  A ``pbs:`` block written for one NCAR machine is often
 # reused against the other (``credit submit --cluster casper`` with a Derecho
 # config, say), and the only symptom is a qsub rejection *after* the script has
@@ -82,6 +187,20 @@ _PBS_QUEUES = {
     "casper": {"casper", "cpu", "gpgpu", "gpudev", "largemem", "vis", "htc", "rda", "l40"},
     "derecho": {"main", "preempt", "develop", "cpudev", "gpudev"},
 }
+
+
+def torchrun_args_error(val) -> str:
+    """Return an error message if *val* is not a valid ``torchrun_args`` value.
+
+    ``torchrun_args`` (in a ``pbs:`` or ``slurm:`` block) is either a string, inserted
+    verbatim into the ``torchrun`` line, or a list of strings, one argument each.
+    Returns ``""`` for a valid or unset value.
+    """
+    if val is None or isinstance(val, str):
+        return ""
+    if isinstance(val, list) and all(isinstance(x, str) for x in val):
+        return ""
+    return f"torchrun_args must be a string or a list of strings, not {type(val).__name__}: {val!r}"
 
 
 def queue_cluster_error(queue: str, cluster: str) -> str:
@@ -135,6 +254,9 @@ _PBS_DEFAULTS = {
         "job_name": "credit_gen2",
     },
 }
+
+# ERA5 model levels (1 = top, 137 = lowest) of the 16-level WXFormer v1 / arXiv 2024 data.
+_DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
 
 # SLURM defaults are cluster-agnostic — SLURM sites vary too much to enumerate,
 # so module loads / partitions come from the config's ``slurm:`` section.  A

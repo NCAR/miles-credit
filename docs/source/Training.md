@@ -113,7 +113,8 @@ trainer:
 
 `activation_checkpoint: True` checkpoints every block that opts in through a
 `_fsdp2_shard = True` attribute (the CrossFormer/WXFormer `Transformer` and
-`UpBlock` blocks do by default). For a model whose blocks do not opt in, list the
+`UpBlock` blocks, and CrossFormer's final full-resolution pixel-shuffle
+`up_block4`, do by default). For a model whose blocks do not opt in, list the
 block class names instead. Names must match exactly, so `Block` does not also
 catch `UpBlock`, and `Layer` does not catch `LayerNorm`:
 
@@ -160,7 +161,18 @@ comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
 instead of manual autocast — the trainer disables autocast and the GradScaler
 automatically because the policy replaces both. With spectral norm the policy
 is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
-explicitly.
+explicitly. `output_dtype` applies to the model's final output only; the
+per-block shards keep their outputs in `param_dtype`, so `output_dtype: float32`
+gives a full-precision `y_pred` for the postblocks while the blocks compute in bf16.
+
+```yaml
+trainer:
+  amp: True
+  fsdp2_mp_policy:
+    param_dtype: bfloat16
+    reduce_dtype: float32
+    output_dtype: float32
+```
 
 **Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
 `tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
@@ -322,6 +334,35 @@ fully-resolved conda/module environment into a per-node script, because pbsdsh's
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
 libfabric for inter-node communication. Use `--dry-run` to compare the two scripts.
 
+### Extra torchrun flags
+
+`torchrun_args` in the `pbs:` or `slurm:` block (a string or a list of flags) is appended
+to every `torchrun` line `credit submit` generates, single- and multi-node, in every
+`--mode`. The `--torchrun-args` flag overrides it; write it with `=` because the value
+starts with `--`. For example, to bind each rank to its GPU's CPU socket:
+
+```yaml
+slurm:
+  torchrun_args: "--numa-binding=node"
+```
+
+```bash
+credit submit --cluster horizon --scheduler slurm -c config.yml --torchrun-args=--numa-binding=node --dry-run
+```
+
+A string is inserted as written, so it can hold several flags. In a list, each element
+is shell-quoted and stays one argument, even with spaces or shell metacharacters:
+
+```yaml
+pbs:
+  torchrun_args: ["--numa-binding=node", "--log-dir=/glade/derecho/scratch/me/my logs"]
+```
+
+The `pbsdsh` launcher passes the flags to each node's `torchrun`. Its per-node script is
+written through an unquoted heredoc, so a `$` in the flags expands when that script is
+written. The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
+`torchrun_args`; `credit submit` and `credit check` both warn when that happens.
+
 ### Derecho: `import torch` fails with `libcudart.so.13`
 
 Since the November 2026 Derecho maintenance, the Cray MPICH libraries in `/opt/cray/pe/lib64`
@@ -372,6 +413,48 @@ credit submit --cluster casper -c config.yml
 ```
 
 See `credit submit --help` for the full option list.
+
+### Memory requests (`mem: auto`)
+
+`credit begin` writes `mem: 'auto'` in the `pbs:` block. For train and preprocess jobs,
+`credit submit` then sizes the per-node host-memory request from the config:
+
+```text
+need = GPUs/node × (training DataLoader + validation DataLoader
+                    + 4 GiB runtime + 1 GiB × DataLoader workers) × 1.3
+DataLoader = (workers × prefetch_factor + 1) × batch_size × H × W × channels × 4 bytes
+```
+
+- **Channels** are summed over every data source. A sample's input holds the prognostic,
+  static and dynamic_forcing channels over `history_len` steps; its target holds the
+  prognostic and diagnostic channels at one step. Every value is assumed to be float32,
+  which is what the gen2 datasets produce.
+- **Training** uses `thread_workers` / `train_batch_size`; **validation** uses
+  `valid_thread_workers` / `valid_batch_size` and the `validation_data` sources. Both
+  loaders are counted because the trainer keeps both sets of workers and prefetched
+  batches alive. Validation is left out for preprocess jobs and when
+  `trainer.skip_validation` is set.
+- **The request** is `need` rounded up to a multiple of 32GB, but **never less than the
+  site default** (Casper's GPU-scaled default, Derecho's 480GB), so `auto` only raises a
+  request a large config needs. It is capped at what one node offers; on Casper that is
+  the smallest node that the job's `gpu_type` and GPU count can land on (704GB for up
+  to 4 GPUs with `gpu_type` unset, because 4x V100 nodes have 768GB). A capped request
+  is logged as a warning: reduce batch sizes, workers or `prefetch_factor`, use fewer
+  levels, or on Casper set `gpu_type` to a larger node.
+- `--mem auto` on the command line works the same way. An explicit `--mem 200GB` or a
+  numeric `mem` always wins. Rollout and realtime jobs treat `auto` as unset and keep
+  their own default, and SLURM (`slurm.mem: auto`) uses the site default.
+
+The overheads and the 1.3 safety factor are rough allowances, not yet calibrated
+against measured job memory. Treat the estimate as a sanity check, and compare it with
+`qstat -fx <jobid> | grep resources_used.mem` for your own runs.
+
+`credit check` reports the request `auto` will make, using `pbs.ngpus` (a
+`credit submit --gpus` override changes it). With a numeric or unset `mem` it warns when
+the request is below the estimate, and it always warns when the estimate exceeds a node.
+When `pbs.queue` does not name a single cluster, it shows the request for both Casper and
+Derecho. `credit submit` logs the calculation, and the job plan shows the resolved
+`Memory` line.
 
 ## Resuming training
 
