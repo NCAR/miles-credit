@@ -559,6 +559,116 @@ def test_pbs_plan_is_pure_and_submit_chains_on_command_line(env):
     assert len(env["calls"].read_text().splitlines()) == 2
 
 
+_CLI_VS_REMOTE = [
+    ("train", "pbs", "derecho", [], {}),
+    ("train", "pbs", "derecho", ["--reload", "--chain", "1", "--gpus", "2"], {"reload": True, "chain": 1, "gpus": 2}),
+    ("train", "slurm", "perlmutter", ["--nodes", "2"], {"nodes": 2}),
+    ("preprocess", "pbs", "derecho", ["--walltime", "01:00:00"], {"walltime": "01:00:00"}),
+    ("rollout", "pbs", "derecho", ["--jobs", "2"], {"jobs": 2}),
+    ("realtime", "slurm", "horizon", ["--init-time", "2024-01-15T00", "--steps", "8"], {"init_time": "2024-01-15T00", "steps": 8}),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("kind, scheduler, cluster, argv, options", _CLI_VS_REMOTE)
+def test_cli_submit_and_remote_submit_write_the_same_run(env, kind, scheduler, cluster, argv, options):
+    """``credit submit`` and ``credit.remote plan`` + ``submit`` of one config give the same scripts and run record.
+
+    What differs is only what the CLI has always done on top: it submits a copy of each
+    script from ``<save_loc>/pbs_scripts/`` (``slurm_scripts/``) with the ``afterok``
+    dependency written into the script and the job name the script sets, where
+    ``credit.remote`` puts both on the ``qsub``/``sbatch`` command line.
+    """
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import _submit
+
+    cfg = make_config(env)
+    save = env["home"] / "exp" / "save"
+    cli_argv = ["submit", "--cluster", cluster, "--scheduler", scheduler, "--mode", kind, "-c", str(cfg), *argv]
+    _submit(_build_parser().parse_args(cli_argv))
+    cli_calls = env["calls"].read_text().splitlines()
+    env["calls"].unlink()
+    (cli_entry,) = runs.ledger_index().values()
+
+    req = {"kind": kind, "config": str(cfg), "scheduler": scheduler, "cluster": cluster, "options": options}
+    plan = call("plan", req)["plan"]
+    out = call("submit", submit_req(plan))
+    assert out["errors"] == []
+
+    cli_dir, remote_dir = cli_entry["run_dir"], plan["run_dir"]
+    cli_rec, remote_rec = runs.read_run(cli_dir), runs.read_run(remote_dir)
+    assert len(cli_rec["jobs"]) == len(remote_rec["jobs"]) == len(plan["jobs"])
+
+    def same(text):
+        return text.replace(cli_rec["run_id"], remote_rec["run_id"])
+
+    depend = "#SBATCH --dependency=afterok:" if scheduler == "slurm" else "#PBS -W depend=afterok:"
+    for cli_job, remote_job, planned in zip(cli_rec["jobs"], remote_rec["jobs"], plan["jobs"]):
+        cli_script = open(os.path.join(cli_dir, cli_job["script"])).read()
+        remote_script = open(os.path.join(remote_dir, remote_job["script"])).read()
+        assert remote_script == planned["script"]
+        if cli_job["depends_on"]:
+            assert f"{depend}{cli_job['depends_on']}\n" in cli_script
+        assert same("".join(ln for ln in cli_script.splitlines(True) if not ln.startswith(depend))) == remote_script
+        assert set(cli_job) == set(remote_job)
+        assert same(cli_job["config"]) == remote_job["config"]
+        assert bool(cli_job["depends_on"]) == bool(remote_job["depends_on"]) == bool(planned["depends_on_index"])
+
+    assert set(cli_rec) == set(remote_rec)
+    for key in ("kind", "name", "save_loc", "target", "epochs_total", "epochs_per_job", "config_sha256", "cancelled"):
+        assert cli_rec[key] == remote_rec[key], key
+    assert os.path.realpath(cli_rec["config"]) == os.path.realpath(remote_rec["config"])
+    assert (cli_rec["created_by"], remote_rec["created_by"]) == ("cli", "mcp")
+
+    def events(run_dir):
+        return [ev for _, _, ev in runs.read_lines(os.path.join(run_dir, "events", runs.SUBMIT_EVENTS))[0]]
+
+    cli_events, remote_events = events(cli_dir), events(remote_dir)
+    assert [e["type"] for e in cli_events] == [e["type"] for e in remote_events]
+    assert [e["data"]["job_name"] for e in remote_events if e["type"] == "job.submitting"] == [
+        f"{remote_rec['run_id']}-{j['index']}" for j in plan["jobs"]
+    ]
+    assert [e["data"]["job_name"] for e in cli_events if e["type"] == "job.submitting"] == [
+        j["job_name"] for j in _cli_plan_jobs(cli_argv, cli_rec["run_id"])
+    ]
+    assert os.path.exists(os.path.join(os.path.dirname(cli_dir), f"{cli_rec['run_id']}.submit.lock"))
+
+    copies = "slurm_scripts" if scheduler == "slurm" else "pbs_scripts"
+    tool = "sbatch --parsable" if scheduler == "slurm" else "qsub"
+    assert all(line.startswith(f"{tool} {save}/{copies}/submit_") for line in cli_calls)
+    assert len(cli_calls) == len(plan["jobs"])
+    assert all(f"{remote_dir}/scripts/job-" in line for line in env["calls"].read_text().splitlines())
+
+
+def _cli_plan_jobs(cli_argv, run_id):
+    """The jobs ``credit submit`` planned for *cli_argv* (re-planned with the same run id)."""
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import _cli_request, _plan
+
+    args = _build_parser().parse_args(cli_argv)
+    return _plan({**_cli_request(args), "run_id": run_id}, cli=args)["jobs"]
+
+
+def test_cli_plan_keeps_cli_only_behaviour(env, tmp_path):
+    """``_plan(..., cli=args)`` accepts what the CLI always has and a remote plan refuses."""
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import SubmitError, _cli_request, _plan
+
+    outside = tmp_path / "elsewhere"  # outside CREDIT_REMOTE_ALLOW
+    outside.mkdir()
+    cfg = outside / "config.yml"
+    cfg.write_text(yaml.safe_dump({"save_loc": str(outside / "save"), "pbs": {"conda": "/env", "queue": "main"}}))
+    argv = ["submit", "--cluster", "derecho", "-c", str(cfg), "--conda-env", "~/envs/my-env", "--chain", "2"]
+    args = _build_parser().parse_args([*argv, "--torchrun-args=--numa-binding=node"])
+    request = _cli_request(args)
+    with pytest.raises((SubmitError, runs.PathScopeError)):
+        _plan(request)
+    jobs = _plan(request, cli=args)["jobs"]
+    assert "conda activate ~/envs/my-env" in jobs[0]["script"]
+    assert "--numa-binding=node" in jobs[0]["script"]
+    assert "#PBS -W depend=afterok:<job_1_id>\n" in jobs[1]["script"] and jobs[1]["depend_placeholder"] == "<job_1_id>"
+    assert [j["job_name"] for j in jobs] == ["credit_gen2", "credit_gen2"]  # the script's #PBS -N
+
+
 def test_submit_conflicts(env):
     cfg = make_config(env)
     req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 1}}

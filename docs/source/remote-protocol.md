@@ -836,6 +836,13 @@ skipped, and `errors` says what happened.  An error is a string, or
 `{"code": "partial_submit", "index", "job_name", "message"}` for a job that
 may or may not be queued.
 
+`credit submit` builds the same plan and runs steps 3–5 (it has no budget
+check), keeping what the CLI has always done: each script is also copied to
+`<save_loc>/pbs_scripts/` (`slurm_scripts/`) and submitted from there with a
+plain `qsub`/`sbatch`, so a job keeps the name its script sets (`pbs.job_name`,
+which `job.submitting` records as `job_name`) and a chained job's `afterok`
+dependency is written into its script.  The first scheduler error stops it.
+
 ### Recovery and idempotency
 
 Submitting the same plan again when the run directory exists returns

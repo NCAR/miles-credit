@@ -56,8 +56,6 @@ from ._submit import (
     _build_rollout_slurm_script,
     _build_slurm_script,
     _compute_chain,
-    _do_submit_realtime,
-    _do_submit_rollout,
     _load_pbs_config,
     _load_slurm_config,
     _print_ensemble_rollout_plan,

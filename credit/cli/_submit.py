@@ -524,11 +524,16 @@ def _build_preprocess_slurm_script(
     )
 
 
+def _rollout_job_name(job_name: str, subset: int, n_subsets: int) -> str:
+    """Return the scheduler job name of one rollout subset job (``<job_name[:10]>-01of04``)."""
+    return f"{job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+
+
 def _build_rollout_slurm_script(
     args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int, save_loc: str = None
 ) -> str:
     """Return a SLURM script for one subset of an ensemble rollout."""
-    job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+    job_name = _rollout_job_name(args.job_name, subset, n_subsets)
     directives = _slurm_directives(args, job_name, save_loc=save_loc)
     env = _slurm_env(args)
     torchrun = _slurm_torchrun(args)
@@ -567,13 +572,13 @@ def _write_submit_script(script: str, save_loc: str | None, subdir: str) -> tupl
 
 
 def _sbatch(script: str, save_loc: str | None = None) -> str:
-    """Write *script*, call ``sbatch``, and return the numeric job ID string (exits 1 on failure)."""
+    """Write *script* to save_loc/slurm_scripts/, call ``sbatch``, and return the numeric job ID string.
+
+    Raises :class:`credit.runs.SchedulerError`; ``credit submit`` prints it and exits 1.
+    """
     script_path, delete_after = _write_submit_script(script, save_loc, "slurm_scripts")
     try:
         return submit_job("slurm", script_path)
-    except SchedulerError as exc:
-        print(f"sbatch failed:\n{exc}", file=sys.stderr)
-        sys.exit(1)
     finally:
         if delete_after:
             os.unlink(script_path)
@@ -585,7 +590,6 @@ def _scheduler_ctx(args: argparse.Namespace) -> dict:
         return {
             "name": "SLURM",
             "load": _load_slurm_config,
-            "resolve": _resolve_slurm_opts,
             "submit": _sbatch,
             "build_train": _build_slurm_script,
             "build_realtime": _build_realtime_slurm_script,
@@ -595,7 +599,6 @@ def _scheduler_ctx(args: argparse.Namespace) -> dict:
     return {
         "name": "PBS",
         "load": _load_pbs_config,
-        "resolve": _resolve_pbs_opts,
         "submit": _qsub,
         "build_train": _build_pbs_script,
         "build_realtime": _build_realtime_pbs_script,
@@ -823,13 +826,13 @@ def _build_pbs_script(
 
 
 def _qsub(script: str, save_loc: str | None = None) -> str:
-    """Write *script* to save_loc/pbs_scripts/, call qsub, and return the job ID string (exits 1 on failure)."""
+    """Write *script* to save_loc/pbs_scripts/, call qsub, and return the job ID string.
+
+    Raises :class:`credit.runs.SchedulerError`; ``credit submit`` prints it and exits 1.
+    """
     script_path, delete_after = _write_submit_script(script, save_loc, "pbs_scripts")
     try:
         return submit_job("pbs", script_path)
-    except SchedulerError as exc:
-        print(f"qsub failed:\n{exc}", file=sys.stderr)
-        sys.exit(1)
     finally:
         if delete_after:
             os.unlink(script_path)
@@ -932,10 +935,6 @@ def _with_run_record(script: str, run: dict | None, scheduler: str) -> str:
     return f"{header}\n\n{preamble}{body}\n{_RUN_RECORD_EPILOGUE}"
 
 
-def _scheduler_key(args: argparse.Namespace) -> str:
-    return getattr(args, "scheduler", None) or "pbs"
-
-
 def _target(args: argparse.Namespace, scheduler: str, save_loc: str) -> dict:
     """Return the ``run.json`` ``target`` block for resolved *args*."""
     queue = getattr(args, "queue", None)
@@ -955,69 +954,21 @@ def _target(args: argparse.Namespace, scheduler: str, save_loc: str) -> dict:
     }
 
 
-def _train_epochs(config_path: str) -> tuple:
-    """Return ``(trainer.epochs, trainer.num_epoch)`` from a config, ``None`` where unset."""
-    try:
-        with open(config_path) as f:
-            trainer = (yaml.safe_load(f) or {}).get("trainer") or {}
-    except (OSError, yaml.YAMLError):
-        return None, None
-    return trainer.get("epochs"), trainer.get("num_epoch")
+def _compute_chain(args: argparse.Namespace, conf: dict | None = None, done: int = 0) -> int:
+    """Return the number of jobs to chain: ``args.chain``, else ``ceil((epochs - done) / num_epoch)``.
 
-
-def _new_run(kind: str, save_loc: str) -> dict:
-    run_id = runs.new_run_id(kind)
-    return {"run_id": run_id, "run_dir": runs.run_dir_for(save_loc, run_id)}
-
-
-def _start_run(run: dict, kind: str, args: argparse.Namespace, config: str, save_loc: str) -> dict:
-    """Create the log dir, the run directory (with its config snapshot) and the ledger entry.
-
-    The batch scripts run the snapshot, so this must succeed before anything is
-    submitted; on failure it prints the error and exits 1.
+    ``epochs`` / ``num_epoch`` come from the ``trainer`` block of *conf* (read from
+    ``args.config`` when None); *done* is the epochs a resumed run already trained.
+    Anything missing or unreadable means one job.
     """
-    epochs_total, epochs_per_job = _train_epochs(config) if kind == "train" else (None, None)
-    try:
-        os.makedirs(_logs_dir(save_loc), exist_ok=True)
-        return runs.create_run(
-            run["run_id"],
-            kind,
-            config,
-            save_loc,
-            _target(args, _scheduler_key(args), save_loc),
-            created_by="cli",
-            epochs_total=epochs_total,
-            epochs_per_job=epochs_per_job,
-            run_dir=run["run_dir"],
-        )
-    except OSError as exc:
-        print(f"ERROR: could not create the run record in {run['run_dir']}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-
-def _record_job(
-    run: dict, record: dict, index: int, job_id: str, script: str, config: str, depends_on: str = None
-) -> None:
-    """Add a submitted job to the run record; a failure only warns, since the job is already queued."""
-    try:
-        rel = runs.write_script(run["run_dir"], index, script)
-        job = {"index": index, "job_id": job_id, "depends_on": depends_on, "config": config, "script": rel}
-        runs.add_job(run["run_dir"], record, job)
-    except OSError as exc:
-        logger.warning("Could not record job %s in run %s (%s).", job_id, run["run_id"], exc)
-
-
-def _compute_chain(args: argparse.Namespace) -> int:
-    """Return the number of jobs to chain."""
     if args.chain is not None:
-        return args.chain
+        return max(1, int(args.chain))
     try:
-        with open(args.config) as f:
-            conf = yaml.safe_load(f)
+        if conf is None:
+            with open(args.config) as f:
+                conf = yaml.safe_load(f)
         trainer = conf.get("trainer", {})
-        epochs = int(trainer["epochs"])
-        num_epoch = int(trainer["num_epoch"])
-        return math.ceil(epochs / num_epoch)
+        return max(1, math.ceil((int(trainer["epochs"]) - done) / int(trainer["num_epoch"])))
     except Exception:
         return 1
 
@@ -1235,207 +1186,11 @@ def _build_preprocess_pbs_script(
         return header + _derecho_launch(args, repo, "preprocess.py")
 
 
-def _do_submit_preprocess(args: argparse.Namespace) -> None:
-    """Submit a single job for preprocessing / scaler fitting."""
-    repo = _repo_root()
-    ctx = _scheduler_ctx(args)
-    sched_cfg = ctx["load"](args.config)
-
-    if not hasattr(args, "nodes"):
-        args.nodes = None
-    if not hasattr(args, "torchrun"):
-        args.torchrun = None
-
-    args = ctx["resolve"](args, sched_cfg)
-
-    with open(args.config) as f:
-        conf = yaml.safe_load(f)
-    save_loc = os.path.expandvars(conf.get("save_loc", "."))
-    config_abs = os.path.abspath(args.config)
-
-    sep = "=" * 52
-    logger.info(
-        "\n%s\n  Preprocess job plan\n%s\n"
-        "  Scheduler : %s\n"
-        "  Cluster   : %s\n"
-        "  Account   : %s\n"
-        "  Config    : %s\n"
-        "  Nodes     : %s\n"
-        "  GPUs      : %s per node  (%s total)\n"
-        "  Memory    : %s per node\n"
-        "  Walltime  : %s\n"
-        "%s",
-        sep,
-        sep,
-        ctx["name"],
-        args.cluster,
-        args.account,
-        args.config,
-        args.nodes,
-        args.gpus,
-        args.nodes * args.gpus,
-        getattr(args, "mem", None) or "site default",
-        args.walltime,
-        sep,
-    )
-
-    run = _new_run("preprocess", save_loc)
-    run_config = os.path.join(run["run_dir"], "config.yml")
-    script = _with_run_record(
-        ctx["build_preprocess"](args, run_config, repo, save_loc=save_loc), run, _scheduler_key(args)
-    )
-
-    if args.dry_run:
-        print(script)
-        return
-
-    record = _start_run(run, "preprocess", args, config_abs, save_loc)
-    job_id = ctx["submit"](script, save_loc=save_loc)
-    _record_job(run, record, 1, job_id, script, run_config)
-    logger.info("Submitted: %s", job_id)
-    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc, run_id=run["run_id"])
-
-
-def _do_submit_realtime(args: argparse.Namespace) -> None:
-    """Submit a single job for a realtime forecast."""
-    repo = _repo_root()
-    ctx = _scheduler_ctx(args)
-    sched_cfg = ctx["load"](args.config)
-
-    if not hasattr(args, "nodes"):
-        args.nodes = None
-    if not hasattr(args, "torchrun"):
-        args.torchrun = None
-
-    args = ctx["resolve"](args, sched_cfg)
-
-    with open(args.config) as f:
-        conf = yaml.safe_load(f)
-    save_loc = os.path.expandvars(conf.get("save_loc", "."))
-    config_abs = os.path.abspath(args.config)
-
-    init_time = args.init_time
-    steps = getattr(args, "steps", 40)
-
-    sep = "=" * 52
-    logger.info(
-        "\n%s\n  Realtime job plan\n%s\n"
-        "  Scheduler : %s\n"
-        "  Cluster   : %s\n"
-        "  Account   : %s\n"
-        "  Config    : %s\n"
-        "  Init time : %s\n"
-        "  Steps     : %s\n"
-        "  Nodes     : %s\n"
-        "  GPUs      : %s per node  (%s total)\n"
-        "  Walltime  : %s\n"
-        "%s",
-        sep,
-        sep,
-        ctx["name"],
-        args.cluster,
-        args.account,
-        args.config,
-        init_time,
-        steps,
-        args.nodes,
-        args.gpus,
-        args.nodes * args.gpus,
-        args.walltime,
-        sep,
-    )
-
-    run = _new_run("realtime", save_loc)
-    run_config = os.path.join(run["run_dir"], "config.yml")
-    script = _with_run_record(
-        ctx["build_realtime"](args, run_config, repo, init_time, steps, save_loc=save_loc), run, _scheduler_key(args)
-    )
-
-    if args.dry_run:
-        print(script)
-        return
-
-    record = _start_run(run, "realtime", args, config_abs, save_loc)
-    job_id = ctx["submit"](script, save_loc=save_loc)
-    _record_job(run, record, 1, job_id, script, run_config)
-    logger.info("Submitted: %s", job_id)
-    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc, run_id=run["run_id"])
-
-
-def _submit(args: argparse.Namespace) -> None:
-    """Generate and optionally submit PBS batch scripts, with optional chaining."""
-    mode = getattr(args, "submit_mode", "train")
-    if mode == "preprocess":
-        _do_submit_preprocess(args)
-        return
-    if mode == "rollout":
-        _do_submit_rollout(args)
-        return
-    if mode == "realtime":
-        _do_submit_realtime(args)
-        return
-
-    repo = _repo_root()
-    ctx = _scheduler_ctx(args)
-    sched_cfg = ctx["load"](args.config)
-    args = ctx["resolve"](args, sched_cfg)
-    build = ctx["build_train"]
-    submit = ctx["submit"]
-    with open(args.config) as f:
-        _full_conf = yaml.safe_load(f)
-    save_loc = os.path.expandvars(_full_conf.get("save_loc", "."))
-    n_jobs = _compute_chain(args)
-
-    _print_job_plan(args, n_jobs)
-
-    # Every job runs the run directory's snapshot of the config (or its reload
-    # copy), so editing the original mid-chain cannot change a queued job.
-    config_abs = os.path.abspath(args.config)
-    run = _new_run("train", save_loc)
-    sched = _scheduler_key(args)
-    run_config = os.path.join(run["run_dir"], "config.yml")
-    reload_config = os.path.join(run["run_dir"], "config_reload.yml")
-    first_config = reload_config if args.reload else run_config
-
-    if args.dry_run:
-        script = _with_run_record(build(args, first_config, repo, depend_on=None, save_loc=save_loc), run, sched)
-        print(f"# --- Job 1/{n_jobs} ---")
-        print(script)
-        if n_jobs > 1:
-            script2 = _with_run_record(
-                build(args, reload_config, repo, depend_on="<job_1_id>", save_loc=save_loc), run, sched
-            )
-            print(f"# --- Jobs 2..{n_jobs}/{n_jobs} (afterok chained, reload config) ---")
-            print(script2)
-        return
-
-    record = _start_run(run, "train", args, config_abs, save_loc)
-    if args.reload or n_jobs > 1:
-        _write_reload_config(run_config, reload_config)
-        logger.info("Reload config written: %s", reload_config)
-
-    script = _with_run_record(build(args, first_config, repo, depend_on=None, save_loc=save_loc), run, sched)
-    job_id = submit(script, save_loc=save_loc)
-    _record_job(run, record, 1, job_id, script, first_config)
-    logger.info("[1/%d] %s  %s", n_jobs, job_id, first_config)
-    job_ids = [job_id]
-
-    for i in range(2, n_jobs + 1):
-        script = _with_run_record(build(args, reload_config, repo, depend_on=job_id, save_loc=save_loc), run, sched)
-        prev, job_id = job_id, submit(script, save_loc=save_loc)
-        _record_job(run, record, i, job_id, script, reload_config, depends_on=prev)
-        logger.info("[%d/%d] %s  afterok  (reload)", i, n_jobs, job_id)
-        job_ids.append(job_id)
-
-    shown_config = reload_config if args.reload else config_abs
-    _print_submitted(job_ids, args.cluster, ctx["name"], shown_config, save_loc, run_id=run["run_id"])
-
-
 def _build_rollout_pbs_script(
     args: argparse.Namespace, config: str, repo: str, subset: int, n_subsets: int, save_loc: str = None
 ) -> str:
     """Return a PBS script for one subset of an ensemble rollout."""
-    job_name = f"{args.job_name[:10]}-{subset:02d}of{n_subsets:02d}"
+    job_name = _rollout_job_name(args.job_name, subset, n_subsets)
     if save_loc:
         logs_dir = _logs_dir(save_loc)
         output_line = f"#PBS -o {logs_dir}"
@@ -1581,90 +1336,6 @@ def _rollout_sched_cfg(cluster: str, sched_cfg: dict) -> dict:
         **defaults,
         **{k: v for k, v in sched_cfg.items() if v is not None and not (k == "mem" and _is_auto(v))},
     }
-
-
-def _do_submit_rollout(args: argparse.Namespace) -> None:
-    """Submit N parallel rollout jobs to cover all init times."""
-    repo = _repo_root()
-    ctx = _scheduler_ctx(args)
-    sched_cfg = ctx["load"](args.config)
-
-    merged_cfg = _rollout_sched_cfg(args.cluster, sched_cfg)
-
-    if not hasattr(args, "nodes"):
-        args.nodes = None
-    if not hasattr(args, "torchrun"):
-        args.torchrun = None
-
-    args = ctx["resolve"](args, merged_cfg)
-
-    n_jobs = args.jobs
-
-    conf = {}
-    try:
-        with open(args.config) as f:
-            conf = yaml.safe_load(f)
-
-        if "inference" in conf:
-            inf_conf = conf["inference"]
-            if inf_conf.get("run_mode", "batch") == "single":
-                n_forecasts = 1
-            else:
-                from credit.trainers.rollout_utils import batch_init_times
-
-                n_forecasts = len(batch_init_times(inf_conf["batch_forecast"]))
-            ensemble_size = inf_conf.get("ensemble_size", 1)
-        else:
-            from credit.forecast import load_forecasts
-
-            n_forecasts = len(load_forecasts(conf))
-            ensemble_size = conf.get("predict", {}).get("ensemble_size", 1)
-    except Exception:
-        n_forecasts = "?"
-        ensemble_size = "?"
-
-    _print_ensemble_rollout_plan(args, n_jobs, n_forecasts, ensemble_size)
-
-    config_abs = os.path.abspath(args.config)
-    rollout_save_loc = os.path.expandvars(conf.get("save_loc", "."))
-
-    run = _new_run("rollout", rollout_save_loc)
-    run_config = os.path.join(run["run_dir"], "config.yml")
-    sched = _scheduler_key(args)
-
-    def _script(i):
-        return _with_run_record(
-            ctx["build_rollout"](args, run_config, repo, i, n_jobs, save_loc=rollout_save_loc), run, sched
-        )
-
-    if args.dry_run:
-        for i in range(1, n_jobs + 1):
-            print(f"# {'=' * 50}")
-            print(f"# Job {i}/{n_jobs}  (subset {i} of {n_jobs})")
-            print(f"# {'=' * 50}")
-            print(_script(i))
-        return
-
-    record = _start_run(run, "rollout", args, config_abs, rollout_save_loc)
-    job_ids = []
-    for i in range(1, n_jobs + 1):
-        script = _script(i)
-        job_id = ctx["submit"](script, save_loc=rollout_save_loc)
-        _record_job(run, record, i, job_id, script, run_config)
-        job_ids.append(job_id)
-        logger.info("[%2d/%d] %s", i, n_jobs, job_id)
-
-    save_forecast = conf.get("inference", {}).get("save_forecast") or conf.get("predict", {}).get(
-        "save_forecast", "<save_forecast in config>"
-    )
-    monitor = "squeue -u $USER" if ctx["name"] == "SLURM" else "qstat -u $USER"
-    logger.info(
-        "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  %s",
-        n_jobs,
-        save_forecast,
-        monitor,
-    )
-    _print_submitted(job_ids, args.cluster, ctx["name"], config_abs, rollout_save_loc, run_id=run["run_id"])
 
 
 # ---------------------------------------------------------------------------
@@ -1886,15 +1557,24 @@ def _plan_cli(kind: str, request: dict, config: str, options: dict, n_jobs: int)
     return " ".join(shlex.quote(p) for p in parts)
 
 
-def _plan(request: dict) -> dict:
+def _plan(request: dict, cli: argparse.Namespace | None = None) -> dict:
     """Return the full submission plan for a ``credit.remote plan`` request, writing nothing.
 
-    Same option resolution and script builders as ``credit submit``, but it
-    raises :class:`SubmitError` instead of exiting, and it is deterministic: the
+    It raises :class:`SubmitError` instead of exiting, and it is deterministic: the
     same request (with the same ``run_id``) and the same config bytes give the
     same scripts.  The scripts run the run directory's config snapshot (and
     ``config_reload.yml`` for chained or resumed jobs); chain dependencies are
     not in the scripts but go on the ``qsub``/``sbatch`` command line at submit.
+
+    *cli* is ``credit submit``'s parsed arguments (see :func:`_submit`); it is never
+    part of a remote request.  It keeps what the CLI has always done: the config
+    may be any YAML file (no path scope; ``save_loc`` defaults to ``.`` with only
+    ``$VARS`` expanded), option values are the user's own and are not restricted,
+    ``--torchrun`` / ``--torchrun-args`` apply, ``mem: auto`` is sized for the
+    job's mode, and each job carries ``job_name`` (the name its script sets,
+    which the CLI keeps) and, after the first in a chain, ``depend_placeholder``:
+    the ``<job_N_id>`` that stands for the job it depends on in the script's own
+    ``afterok`` directive, replaced with the real id at submit.
     """
     kind = request.get("kind") or "train"
     if kind not in runs.KINDS:
@@ -1902,14 +1582,22 @@ def _plan(request: dict) -> dict:
     scheduler = request.get("scheduler") or "pbs"
     if scheduler not in ("pbs", "slurm", "local"):
         raise SubmitError(f"unknown scheduler {scheduler!r}; expected pbs, slurm or local")
-    _check_plan_options(request.get("options") or {}, scheduler)
-    if request.get("cluster") is not None and not re.fullmatch(r"[a-z][a-z0-9_-]*", str(request["cluster"])):
-        raise SubmitError(f"unknown cluster {str(request['cluster'])[:40]!r}")
+    if cli is None:
+        _check_plan_options(request.get("options") or {}, scheduler)
+        if request.get("cluster") is not None and not re.fullmatch(r"[a-z][a-z0-9_-]*", str(request["cluster"])):
+            raise SubmitError(f"unknown cluster {str(request['cluster'])[:40]!r}")
     options = {**_PLAN_OPTION_DEFAULTS, **(request.get("options") or {})}
-    source_config, data, conf, parent = _load_plan_config(request)
+    if cli is None:
+        source_config, data, conf, parent = _load_plan_config(request)
+        save_loc = runs.expand(conf["save_loc"])
+    else:
+        source_config, parent = os.path.abspath(request["config"]), None
+        with open(source_config, "rb") as f:
+            data = f.read()
+        conf = yaml.safe_load(data) or {}
+        save_loc = os.path.expandvars(conf.get("save_loc", "."))
     if parent is not None and kind != "train":
         raise SubmitError("resume_from applies to train runs only")
-    save_loc = runs.expand(conf["save_loc"])
     run_id = request.get("run_id") or runs.new_run_id(kind)
     if not re.fullmatch(rf"{kind}-\d{{8}}T\d{{6}}-[0-9a-f]{{4}}", str(run_id)):
         raise SubmitError(f"run_id {run_id!r} is not a {kind} run id (<kind>-<YYYYmmddTHHMMSS>-<4 hex>)")
@@ -1919,27 +1607,6 @@ def _plan(request: dict) -> dict:
     log_dir = _logs_dir(save_loc)
     warnings = []
 
-    trainer = conf.get("trainer") or {}
-    epochs_total = epochs_per_job = None
-    n_jobs = 1
-    reload = bool(options["reload"]) or parent is not None
-    if kind == "train":
-        epochs_total, epochs_per_job = trainer.get("epochs"), trainer.get("num_epoch")
-        if options["chain"] is not None:
-            n_jobs = max(1, int(options["chain"]))
-        elif epochs_total and epochs_per_job:
-            done = 0
-            if parent is not None:
-                last = runs.csv_last_epoch(save_loc)
-                done = 0 if last is None else last + 1  # CSV epochs are 0-based
-            n_jobs = max(1, math.ceil((int(epochs_total) - done) / int(epochs_per_job)))
-        if parent is not None and epochs_total:
-            last = runs.csv_last_epoch(save_loc)
-            if last is not None and last + 1 >= int(epochs_total):
-                raise SubmitError(f"nothing left to train: {last + 1} of {epochs_total} epochs are done")
-    if kind == "realtime" and not options["init_time"]:
-        raise SubmitError("realtime runs need options.init_time")
-
     args = argparse.Namespace(
         config=source_config,
         cluster=request.get("cluster") or ("local" if scheduler == "local" else None),
@@ -1948,6 +1615,23 @@ def _plan(request: dict) -> dict:
         dry_run=False,
         **{k: v for k, v in options.items() if k not in _NOT_OPTIONS},
     )
+    if cli is not None:
+        args.torchrun = getattr(cli, "torchrun", None)
+        args.torchrun_args = getattr(cli, "torchrun_args", None)
+        args.submit_mode = kind  # mem: auto sizes train / preprocess only
+
+    trainer = conf.get("trainer") or {}
+    epochs_total = epochs_per_job = None
+    n_jobs = 1
+    reload = bool(options["reload"]) or parent is not None
+    if kind == "train":
+        epochs_total, epochs_per_job = trainer.get("epochs"), trainer.get("num_epoch")
+        last = runs.csv_last_epoch(save_loc) if parent is not None else None
+        n_jobs = _compute_chain(args, conf, done=0 if last is None else last + 1)  # CSV epochs are 0-based
+        if last is not None and epochs_total and last + 1 >= int(epochs_total):
+            raise SubmitError(f"nothing left to train: {last + 1} of {epochs_total} epochs are done")
+    if kind == "realtime" and not options["init_time"] and cli is None:
+        raise SubmitError("realtime runs need options.init_time")
     if scheduler == "local":
         if n_jobs > 1:
             warnings.append(f"the local scheduler runs one job; the {n_jobs}-job chain is not submitted")
@@ -1982,8 +1666,11 @@ def _plan(request: dict) -> dict:
             first = reload_config if reload else run_config
             for i in range(1, n_jobs + 1):
                 cfg = first if i == 1 else reload_config
-                script = ctx["build_train"](args, cfg, repo, depend_on=None, save_loc=save_loc)
+                dep = f"<job_{i - 1}_id>" if cli is not None and i > 1 else None
+                script = ctx["build_train"](args, cfg, repo, depend_on=dep, save_loc=save_loc)
                 jobs.append({"index": i, "script": script, "config": cfg, "depends_on_index": i - 1 or None})
+                if dep:
+                    jobs[-1]["depend_placeholder"] = dep
         elif kind == "preprocess":
             script = ctx["build_preprocess"](args, run_config, repo, save_loc=save_loc)
             jobs.append({"index": 1, "script": script, "config": run_config, "depends_on_index": None})
@@ -2002,6 +1689,9 @@ def _plan(request: dict) -> dict:
                 jobs.append({"index": i, "script": script, "config": run_config, "depends_on_index": None})
         for job in jobs:
             job["script"] = _with_run_record(job["script"], run, scheduler)
+            if cli is not None:
+                name = args.job_name
+                job["job_name"] = _rollout_job_name(name, job["index"], len(jobs)) if kind == "rollout" else name
 
     hours = _walltime_hours(target.get("walltime"), scheduler)
     gpu_hours = None
@@ -2015,7 +1705,7 @@ def _plan(request: dict) -> dict:
         "config": source_config,
         "config_sha256": hashlib.sha256(data).hexdigest(),
         "save_loc": save_loc,
-        "name": os.path.basename(save_loc.rstrip(os.sep)) or run_id,
+        "name": os.path.basename(runs.expand(save_loc).rstrip(os.sep)) or run_id,
         "target": target,
         "epochs_total": epochs_total,
         "epochs_per_job": epochs_per_job,
@@ -2082,7 +1772,19 @@ def _submit_plan(request: dict, scripts_sha256: list, config_sha256: str, create
     _, data, _, _ = _load_plan_config(request)
     if hashlib.sha256(data).hexdigest() != plan["config_sha256"]:
         raise SubmitConflict(f"config {plan['config']} changed while submitting")
+    return _submit_planned(plan, data, created_by)
 
+
+def _submit_planned(plan: dict, data: bytes | None, created_by: str, submit=None) -> dict:
+    """Submit *plan* (from :func:`_plan`) while holding the run's submit lock; see :func:`_submit_plan`.
+
+    *data* is the config content to snapshot (None copies ``plan["config"]``).
+    ``credit submit`` passes *submit*, called as ``submit(job, script)`` in place
+    of :func:`credit.runs.submit_job` (``qsub``/``sbatch`` with no ``-N`` or
+    dependency flags: the script sets both); its first
+    :class:`credit.runs.SchedulerError` is raised after ``job.submit_failed`` is
+    logged, instead of being reported in ``errors``.
+    """
     run_id, run_dir = plan["run_id"], plan["run_dir"]
     # One submit per run at a time: a retry racing a submit that is still
     # running (a client timeout, two clients) must not queue the jobs twice.
@@ -2095,13 +1797,13 @@ def _submit_plan(request: dict, scripts_sha256: list, config_sha256: str, create
             fcntl.lockf(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             raise SubmitConflict("submit in progress; sync the run and retry") from None
-        return _submit_locked(plan, data, created_by)
+        return _submit_locked(plan, data, created_by, submit)
     finally:
         os.close(lock_fd)  # releases the lock
 
 
-def _submit_locked(plan: dict, data: bytes, created_by: str) -> dict:
-    """The body of :func:`_submit_plan`, run while holding the run's submit lock."""
+def _submit_locked(plan: dict, data: bytes | None, created_by: str, submit=None) -> dict:
+    """The body of :func:`_submit_planned`, run while holding the run's submit lock."""
     run_id, run_dir = plan["run_id"], plan["run_dir"]
     scheduler = plan["target"]["scheduler"]
     create = dict(
@@ -2128,7 +1830,7 @@ def _submit_locked(plan: dict, data: bytes, created_by: str) -> dict:
     errors = []
     for job in plan["jobs"]:
         index = job["index"]
-        name = f"{run_id}-{index}"
+        name = job.get("job_name") or f"{run_id}-{index}"
         if index in submitted:
             continue
         if index in intents:
@@ -2146,22 +1848,30 @@ def _submit_locked(plan: dict, data: bytes, created_by: str) -> dict:
         if dep_index and depend_on is None:
             errors.append(f"job {index} not submitted: job {dep_index} it depends on was not submitted")
             continue
-        rel = runs.write_script(run_dir, index, job["script"])
+        script = job["script"]
+        if depend_on and job.get("depend_placeholder"):
+            script = script.replace(job["depend_placeholder"], depend_on)
+        rel = runs.write_script(run_dir, index, script)
         intent = runs.make_event("job.submitting", {"index": index, "job_name": name}, "submit")
         runs.append_event(run_dir, runs.SUBMIT_EVENTS, intent)
         try:
-            job_id = submit_job(
-                scheduler,
-                os.path.join(run_dir, rel),
-                depend_on=depend_on,
-                log_dir=plan["log_dir"],
-                job_name=name,
-                env={"CREDIT_RUN_ID": run_id},
-            )
+            if submit is not None:
+                job_id = submit(job, script)
+            else:
+                job_id = submit_job(
+                    scheduler,
+                    os.path.join(run_dir, rel),
+                    depend_on=depend_on,
+                    log_dir=plan["log_dir"],
+                    job_name=name,
+                    env={"CREDIT_RUN_ID": run_id},
+                )
         except SchedulerError as exc:
             if not isinstance(exc, runs.SchedulerTimeout):  # a timeout may still have queued the job
                 failed = runs.make_event("job.submit_failed", {"index": index, "error": str(exc)[:500]}, "submit")
                 runs.append_event(run_dir, runs.SUBMIT_EVENTS, failed)
+            if submit is not None:
+                raise
             errors.append(f"job {index}: {exc}")
             continue
         job_rec = {"index": index, "job_id": job_id, "depends_on": depend_on, "config": job["config"], "script": rel}
@@ -2171,3 +1881,204 @@ def _submit_locked(plan: dict, data: bytes, created_by: str) -> dict:
     if already:
         result["already_submitted"] = True
     return result
+
+
+# ---------------------------------------------------------------------------
+# credit submit: the plan path above, with the CLI's messages
+# ---------------------------------------------------------------------------
+
+
+def _cli_request(args: argparse.Namespace) -> dict:
+    """Return the :func:`_plan` request for ``credit submit`` (or ``credit rollout-ensemble``) *args*."""
+    keys = ("gpus", "nodes", "cpus", "mem", "walltime", "account", "queue", "gpu_type", "constraint", "qos")
+    options = {k: getattr(args, k, None) for k in (*keys, "chain", "init_time", "conda_env")}
+    options.update(
+        reload=bool(getattr(args, "reload", False)),
+        jobs=getattr(args, "jobs", 1),
+        steps=getattr(args, "steps", 40),
+        launcher=getattr(args, "launcher", None) or "mpiexec",
+    )
+    return {
+        "kind": getattr(args, "submit_mode", None) or "train",
+        "config": args.config,
+        "cluster": args.cluster,
+        "scheduler": getattr(args, "scheduler", None) or "pbs",
+        "options": options,
+    }
+
+
+def _rollout_counts(conf: dict) -> tuple:
+    """Return ``(n_forecasts, ensemble_size)`` for a rollout config, ``"?"`` where they can't be worked out."""
+    try:
+        if "inference" in conf:
+            inf_conf = conf["inference"]
+            if inf_conf.get("run_mode", "batch") == "single":
+                n_forecasts = 1
+            else:
+                from credit.trainers.rollout_utils import batch_init_times
+
+                n_forecasts = len(batch_init_times(inf_conf["batch_forecast"]))
+            return n_forecasts, inf_conf.get("ensemble_size", 1)
+        from credit.forecast import load_forecasts
+
+        return len(load_forecasts(conf)), conf.get("predict", {}).get("ensemble_size", 1)
+    except Exception:
+        return "?", "?"
+
+
+def _log_plan(kind: str, shown: argparse.Namespace, n_jobs: int, sched_name: str, args, conf: dict) -> None:
+    """Log the human-readable job plan; *shown* holds the resolved target plus the config as given."""
+    if kind == "train":
+        _print_job_plan(shown, n_jobs)
+        return
+    if kind == "rollout":
+        _print_ensemble_rollout_plan(shown, n_jobs, *_rollout_counts(conf))
+        return
+    sep = "=" * 52
+    if kind == "preprocess":
+        logger.info(
+            "\n%s\n  Preprocess job plan\n%s\n"
+            "  Scheduler : %s\n"
+            "  Cluster   : %s\n"
+            "  Account   : %s\n"
+            "  Config    : %s\n"
+            "  Nodes     : %s\n"
+            "  GPUs      : %s per node  (%s total)\n"
+            "  Memory    : %s per node\n"
+            "  Walltime  : %s\n"
+            "%s",
+            sep,
+            sep,
+            sched_name,
+            shown.cluster,
+            shown.account,
+            shown.config,
+            shown.nodes,
+            shown.gpus,
+            shown.nodes * shown.gpus,
+            shown.mem or "site default",
+            shown.walltime,
+            sep,
+        )
+        return
+    logger.info(
+        "\n%s\n  Realtime job plan\n%s\n"
+        "  Scheduler : %s\n"
+        "  Cluster   : %s\n"
+        "  Account   : %s\n"
+        "  Config    : %s\n"
+        "  Init time : %s\n"
+        "  Steps     : %s\n"
+        "  Nodes     : %s\n"
+        "  GPUs      : %s per node  (%s total)\n"
+        "  Walltime  : %s\n"
+        "%s",
+        sep,
+        sep,
+        sched_name,
+        shown.cluster,
+        shown.account,
+        shown.config,
+        args.init_time,
+        getattr(args, "steps", 40),
+        shown.nodes,
+        shown.gpus,
+        shown.nodes * shown.gpus,
+        shown.walltime,
+        sep,
+    )
+
+
+def _print_dry_run(kind: str, jobs: list) -> None:
+    """Print the planned scripts (``--dry-run``): every rollout job, else the first job and a chained one."""
+    n = len(jobs)
+    if kind == "rollout":
+        for job in jobs:
+            print(f"# {'=' * 50}")
+            print(f"# Job {job['index']}/{n}  (subset {job['index']} of {n})")
+            print(f"# {'=' * 50}")
+            print(job["script"])
+    elif kind == "train":
+        print(f"# --- Job 1/{n} ---")
+        print(jobs[0]["script"])
+        if n > 1:
+            print(f"# --- Jobs 2..{n}/{n} (afterok chained, reload config) ---")
+            print(jobs[1]["script"])
+    else:
+        print(jobs[0]["script"])
+
+
+def _log_submitted(kind: str, job: dict, job_id: str, n_jobs: int) -> None:
+    if kind == "train" and job["index"] == 1:
+        logger.info("[1/%d] %s  %s", n_jobs, job_id, job["config"])
+    elif kind == "train":
+        logger.info("[%d/%d] %s  afterok  (reload)", job["index"], n_jobs, job_id)
+    elif kind == "rollout":
+        logger.info("[%2d/%d] %s", job["index"], n_jobs, job_id)
+    else:
+        logger.info("Submitted: %s", job_id)
+
+
+def _submit(args: argparse.Namespace) -> None:
+    """``credit submit``: plan the jobs with :func:`_plan`, then print (``--dry-run``) or submit them.
+
+    The plan and the submit are those of ``credit.remote plan`` / ``submit``
+    (:func:`_plan`, :func:`_submit_planned`: the same scripts, run record, submit
+    events and lock), with ``cli=args`` for what only the CLI does.  Each script
+    is also copied to ``<save_loc>/pbs_scripts/`` (``slurm_scripts/``) and
+    submitted from there, as ``credit submit`` always has.
+    """
+    request = _cli_request(args)
+    kind = request["kind"]
+    ctx = _scheduler_ctx(args)
+    ctx["load"](args.config)  # exits with the CLI's message if the pbs:/slurm: block or its conda env is missing
+    try:
+        plan = _plan(request, cli=args)
+    except SubmitError as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        sys.exit(1)
+    with open(args.config) as f:
+        conf = yaml.safe_load(f) or {}
+    jobs = plan["jobs"]
+    shown = argparse.Namespace(**plan["target"], config=args.config)
+    _log_plan(kind, shown, len(jobs), ctx["name"], args, conf)
+    if args.dry_run:
+        _print_dry_run(kind, jobs)
+        return
+
+    reload_config = os.path.join(plan["run_dir"], "config_reload.yml")
+    if kind == "train" and (getattr(args, "reload", False) or len(jobs) > 1):
+        logger.info("Reload config written: %s", reload_config)
+
+    def submit(job: dict, script: str) -> str:
+        job_id = ctx["submit"](script, save_loc=plan["save_loc"])
+        _log_submitted(kind, job, job_id, len(jobs))
+        return job_id
+
+    try:
+        result = _submit_planned(plan, None, "cli", submit=submit)
+    except SchedulerError as exc:
+        print(f"{'sbatch' if ctx['name'] == 'SLURM' else 'qsub'} failed:\n{exc}", file=sys.stderr)
+        sys.exit(1)
+    except (OSError, SubmitError) as exc:
+        print(f"ERROR: could not create the run record in {plan['run_dir']}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    if result["errors"]:  # not expected: a fresh run, and the first scheduler error stops the CLI
+        for err in result["errors"]:
+            print(f"ERROR: {err}", file=sys.stderr)
+        sys.exit(1)
+
+    job_ids = [job["job_id"] for job in result["jobs"]]
+    if kind == "rollout":
+        save_forecast = conf.get("inference", {}).get("save_forecast") or conf.get("predict", {}).get(
+            "save_forecast", "<save_forecast in config>"
+        )
+        monitor = "squeue -u $USER" if ctx["name"] == "SLURM" else "qstat -u $USER"
+        logger.info(
+            "\nSubmitted %d parallel rollout jobs.\nOutput will be written to: %s\nMonitor with:\n  %s",
+            len(jobs),
+            save_forecast,
+            monitor,
+        )
+    shown_config = reload_config if kind == "train" and getattr(args, "reload", False) else plan["config"]
+    _print_submitted(job_ids, args.cluster, ctx["name"], shown_config, plan["save_loc"], run_id=plan["run_id"])

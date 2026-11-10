@@ -565,13 +565,16 @@ class TestQsub:
         )
         assert _qsub("script") == "99999.pbs"
 
-    def test_exits_on_failure(self, monkeypatch):
+    def test_raises_on_failure(self, monkeypatch):
+        # credit submit reports it ("qsub failed: ...") and exits 1; see test_submit_exits_when_qsub_fails.
+        from credit.runs import SchedulerError
+
         monkeypatch.setattr(
             subprocess,
             "run",
             lambda *a, **kw: mock.MagicMock(returncode=1, stdout="", stderr="qsub: bad script"),
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(SchedulerError, match="qsub: bad script"):
             _qsub("script")
 
 
@@ -1496,7 +1499,7 @@ class TestSubmitReload:
         monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", lambda script, save_loc=None: "1.pbs")
         with _inject_preflight(0.0):
             cli._submit(args)
-        (run_dir,) = (tmp_path / "save" / ".credit" / "runs").iterdir()
+        (run_dir,) = [p for p in (tmp_path / "save" / ".credit" / "runs").iterdir() if p.is_dir()]
         assert (run_dir / "config_reload.yml").exists()
         assert (run_dir / "config.yml").exists()
 
@@ -1560,9 +1563,43 @@ class TestSubmitReload:
         assert f"CONFIG={run_dir}/config.yml" in scripts[0]
         assert f"CONFIG={run_dir}/config_reload.yml" in scripts[1]
         assert open(os.path.join(run_dir, "scripts", "job-2.sh")).read() == scripts[1]
+        # The script copy that was qsub'ed carries the dependency, as it always has.
+        assert "#PBS -W depend=afterok:11.casper-pbs" in scripts[1] and "depend=" not in scripts[0]
         with open(os.path.join(run_dir, "events", "submit.jsonl")) as f:
-            assert [json.loads(line)["type"] for line in f] == ["run.created", "job.submitted", "job.submitted"]
+            events = [json.loads(line) for line in f]
+        assert [e["type"] for e in events] == [
+            "run.created",
+            "job.submitting",
+            "job.submitted",
+            "job.submitting",
+            "job.submitted",
+        ]
+        assert events[1]["data"] == {"index": 1, "job_name": "test_job"}  # the name the script sets
         assert f"  Run:    {record['run_id']}  (credit status {record['run_id']})\n" in capsys.readouterr().out
+
+    def test_submit_exits_when_qsub_fails(self, tmp_path, capsys, monkeypatch):
+        """A refused qsub prints the scheduler's message, exits 1, and is logged as job.submit_failed."""
+        import json
+
+        from credit import runs
+        from credit.runs import SchedulerError
+
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=2, reload=False, torchrun="/usr/bin/torchrun")
+        calls = []
+
+        def fake_qsub(script, save_loc=None):
+            calls.append(script)
+            raise SchedulerError("qsub: Unknown queue")
+
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", fake_qsub)
+        with _inject_preflight(0.0), pytest.raises(SystemExit) as exc:
+            cli._submit(args)
+        assert exc.value.code == 1 and len(calls) == 1
+        assert "qsub failed:\nqsub: Unknown queue\n" in capsys.readouterr().err
+        (entry,) = runs.ledger_index().values()
+        with open(os.path.join(entry["run_dir"], "events", "submit.jsonl")) as f:
+            assert [json.loads(line)["type"] for line in f] == ["run.created", "job.submitting", "job.submit_failed"]
 
     def test_submit_chain_calls_qsub_multiple(self, tmp_path, capsys, monkeypatch):
         """Chain=3 should call _qsub 3 times."""
@@ -2043,21 +2080,15 @@ class TestResolveAutoMem:
         args = self._args(tmp_path, _mem_conf(50), mem="auto", submit_mode="rollout")
         assert _resolve_pbs_opts(args, {"mem": "128GB"}).mem == "128GB"
 
+        # A config's pbs.mem: auto is sized for training, so a rollout keeps its own default.
         submit = sys.modules["credit.cli._submit"]  # credit.cli re-exports a _submit function
-        seen = {}
-
-        class _Stop(Exception):
-            pass
-
-        def _resolve(args, cfg):
-            seen.update(cfg)
-            raise _Stop
-
-        ctx = {"load": lambda path: {"mem": "Auto"}, "resolve": _resolve}
-        monkeypatch.setattr(submit, "_scheduler_ctx", lambda args: ctx)
-        with pytest.raises(_Stop):
-            submit._do_submit_rollout(argparse.Namespace(cluster="casper", config="unused.yml"))
-        assert seen["mem"] == "128GB"
+        assert submit._rollout_sched_cfg("casper", {"mem": "Auto"})["mem"] == "128GB"
+        conf = {**_mem_conf(50), "save_loc": str(tmp_path / "save"), "pbs": {"conda": "/env", "mem": "auto"}}
+        path = tmp_path / "rollout.yml"
+        path.write_text(yaml.safe_dump(conf))
+        cli_args = argparse.Namespace(cluster="casper", config=str(path), submit_mode="rollout", jobs=1)
+        plan = submit._plan(submit._cli_request(cli_args), cli=cli_args)
+        assert plan["target"]["mem"] == "128GB"
 
     def test_slurm_treats_auto_as_unset(self, tmp_path):
         from credit.cli._common import _SLURM_DEFAULTS
