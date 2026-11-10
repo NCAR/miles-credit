@@ -4,7 +4,13 @@ from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScal
 from credit.preblock.base import BasePreblock
 from os.path import exists, expandvars, splitext
 from os import makedirs
-from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
+from ._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+    _any_mps,
+    _to_cpu,
+)
 
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,
@@ -43,6 +49,10 @@ def fit_physical_target_stats(
         return accumulated
     variables = _parse_variable_selection(log_block.variables, batch, ["target"])
     fit_batch, _ = _flatten_spatial_tensors({"target": batch["target"]}, spatial_variables or [])
+    if _any_mps(fit_batch):
+        # bridgescaler accumulates stats in float64, which MPS (e.g., on macOS system)
+        # doesn't support, so move to CPU. For more details see issue #548.
+        fit_batch = _to_cpu(fit_batch)
     fitted = scale_var_dict(fit_batch, DStandardScalerTensor(channels_last=False), "fit", variables)
     fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
     if not fitted["target"]:

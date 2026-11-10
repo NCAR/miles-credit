@@ -1,3 +1,6 @@
+import torch
+
+
 def _parse_variable_selection(variable_list: list, state_dict: dict, data_types: list = None) -> list:
     """
     The goal of this function is to expand partial variables in `variable_list` based on the keys in `state_dict`.
@@ -114,3 +117,25 @@ def _unflatten_spatial_tensors(state_dict: dict, original_shapes: dict) -> dict:
         return new_d
 
     return _walk(state_dict)
+
+
+def _any_mps(obj) -> bool:
+    """True if any tensor in a (possibly nested) container lives on an MPS device."""
+    if isinstance(obj, dict):
+        return any(_any_mps(v) for v in obj.values())
+    if isinstance(obj, (list, tuple)):
+        return any(_any_mps(v) for v in obj)
+    return torch.is_tensor(obj) and obj.device.type == "mps"
+
+
+def _to_cpu(obj):
+    """Recursively move tensors in a (possibly nested) container to CPU."""
+    if isinstance(obj, dict):
+        return {k: _to_cpu(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_to_cpu(v) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(_to_cpu(v) for v in obj)
+    if torch.is_tensor(obj):
+        return obj.detach().cpu()
+    return obj
