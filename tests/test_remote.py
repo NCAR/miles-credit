@@ -628,6 +628,7 @@ def test_plan_refuses_unsafe_option_values(env, key, values):
         with pytest.raises(remote.RemoteError) as exc:
             remote.plan(req)
         assert exc.value.code == "config_error" and f"options.{key}" in exc.value.message, (key, value)
+        assert exc.value.data == {"field": key}, (key, value)
 
 
 @pytest.mark.parametrize("key", ["env_setup", "modules", "torchrun", "select", "config"])
@@ -637,8 +638,21 @@ def test_plan_refuses_unknown_option_keys(env, key):
     err = call("plan", req, check_ok=False)["error"]
     assert err["code"] == "config_error" and f"unknown option {key!r}" in err["message"]
     assert "config file" in err["message"]
+    assert err["data"] == {"field": key}
     req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho\nqsub x", "options": {}}
     assert call("plan", req, check_ok=False)["error"]["code"] == "config_error"
+
+
+def test_plan_option_errors_name_their_field(env):
+    """``error.data.field`` names the bad option on the wire, so a form can mark it; other config errors have none."""
+    cfg = make_config(env)
+    base = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho"}
+    err = call("plan", {**base, "options": {"walltime": "12h"}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] == {"field": "walltime"}
+    err = call("plan", {**base, "options": {"walltime": "01:00:00", "bogus": 1}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] == {"field": "bogus"}
+    err = call("plan", {**base, "config": None, "options": {}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] is None
 
 
 def test_plan_accepts_ordinary_option_values(env):

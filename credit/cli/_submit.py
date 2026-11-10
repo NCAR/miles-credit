@@ -83,7 +83,12 @@ class SubmitError(Exception):
 
     The library paths used by ``credit.remote`` raise it; the CLI wrapper
     :func:`_resolve_pbs_opts` prints the message and exits 1, as it always has.
+    *field* names the plan option at fault (``walltime``, or an unknown key), when there is one.
     """
+
+    def __init__(self, message: str, field: str | None = None):
+        super().__init__(message)
+        self.field = field
 
 
 def _load_pbs_config(config_path: str) -> dict:
@@ -1768,26 +1773,28 @@ def _check_plan_options(options, scheduler: str) -> None:
     if unknown:
         raise SubmitError(
             f"unknown option {unknown[0]!r}; expected one of {', '.join(sorted(_PLAN_OPTION_DEFAULTS))} "
-            "(anything else, such as env_setup or modules, goes in the config file)"
+            "(anything else, such as env_setup or modules, goes in the config file)",
+            field=unknown[0],
         )
     for key, value in options.items():
         if value is None:
             continue
         if key in _INT_OPTIONS:
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-                raise SubmitError(f"options.{key} must be a whole number of at least 1, not {value!r}")
+                raise SubmitError(f"options.{key} must be a whole number of at least 1, not {value!r}", field=key)
         elif key == "reload":
             if not isinstance(value, bool):
-                raise SubmitError(f"options.reload must be true or false, not {value!r}")
+                raise SubmitError(f"options.reload must be true or false, not {value!r}", field=key)
         elif key == "walltime":
             hours = None if isinstance(value, bool) else _walltime_hours(value, scheduler)
             if not isinstance(value, (str, int)) or hours is None:
                 form = "MM, MM:SS, HH:MM:SS or D-HH[:MM[:SS]]" if scheduler == "slurm" else "[[HH:]MM:]SS"
-                raise SubmitError(f"options.walltime must be a {scheduler} walltime ({form}), not {value!r}")
+                raise SubmitError(f"options.walltime must be a {scheduler} walltime ({form}), not {value!r}", field=key)
         elif not isinstance(value, str) or not _STRING_OPTIONS[key].fullmatch(value):
             raise SubmitError(
                 f"options.{key} {str(value)[:80]!r} is not allowed: it must be a plain {key.replace('_', ' ')} "
-                "(no spaces, newlines, shell characters or extra directives)"
+                "(no spaces, newlines, shell characters or extra directives)",
+                field=key,
             )
 
 

@@ -560,12 +560,18 @@ def _submit_module():
     return importlib.import_module("credit.cli._submit")
 
 
+def _config_error(exc) -> RemoteError:
+    """A :class:`credit.cli._submit.SubmitError` as a ``config_error``; ``data.field`` names the bad plan option."""
+    field = getattr(exc, "field", None)
+    return RemoteError("config_error", str(exc), data={"field": field} if field else None)
+
+
 def plan(req: dict) -> dict:
     _submit = _submit_module()
     try:
         return {"plan": _submit._plan(req)}
     except _submit.SubmitError as exc:
-        raise RemoteError("config_error", str(exc)) from exc
+        raise _config_error(exc) from exc
 
 
 def submit(req: dict) -> dict:
@@ -586,7 +592,7 @@ def submit(req: dict) -> dict:
     except _submit.SubmitConflict as exc:
         raise RemoteError("conflict", str(exc), fix="plan again and approve the new plan") from exc
     except _submit.SubmitError as exc:
-        raise RemoteError("config_error", str(exc)) from exc
+        raise _config_error(exc) from exc
 
 
 def _submit_within_budget(_submit, args: tuple, pol: dict, confirm) -> dict:
