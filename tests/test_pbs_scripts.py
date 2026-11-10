@@ -1461,10 +1461,13 @@ class TestTorchrunArgs:
         assert f"--nproc-per-node=${{NGPUS}} {NUMA} --max-restarts=0 \\" in script
 
     @pytest.mark.parametrize("bad", [{"numa-binding": "node"}, 3, [NUMA, 0]])
-    def test_bad_type_exits(self, bad, capsys):
-        with pytest.raises(SystemExit):
+    def test_bad_type_is_refused(self, bad, capsys):
+        from credit.cli._submit import SubmitError
+
+        # A SubmitError, so credit.remote answers config_error rather than exiting...
+        with pytest.raises(SubmitError, match="slurm.torchrun_args must be a string or a list of strings"):
             _slurm_args(slurm_cfg={**self.SLURM_CFG, "torchrun_args": bad})
-        assert "slurm.torchrun_args must be a string or a list of strings" in capsys.readouterr().err
+        # ...and the CLI wrapper still prints it and exits 1.
         with pytest.raises(SystemExit):
             self._pbs_args("casper", pbs_cfg={"torchrun_args": bad})
         assert "pbs.torchrun_args must be a string or a list of strings" in capsys.readouterr().err

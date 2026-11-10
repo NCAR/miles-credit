@@ -960,15 +960,17 @@ def components(req: dict) -> dict:
 
 
 def build_config(req: dict) -> dict:
-    from credit.cli._begin import _build_config, _dump_config
-
     state = req.get("state")
     if not isinstance(state, dict):
         raise RemoteError("bad_request", "'state' (a credit begin state dict) is required")
     if req.get("write"):
         raise RemoteError("bad_request", "build_config only returns the yaml; save it with the write verb")
     try:
+        from credit.cli._begin import _build_config, _dump_config
+
         text = _dump_config(_build_config(state))
+    except ImportError as exc:  # some model presets import the model zoo, and with it torch
+        raise RemoteError("needs_dependency", str(exc), fix="use an env with CREDIT installed") from exc
     except (KeyError, TypeError, ValueError) as exc:
         raise RemoteError(
             "config_error", f"cannot build a config from this state: {type(exc).__name__}: {exc}"

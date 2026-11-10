@@ -263,15 +263,14 @@ def _as_list(val) -> list:
 def _resolve_torchrun_args(args: argparse.Namespace, sched_cfg: dict, block: str):
     """Return ``--torchrun-args`` if given, else the config block's ``torchrun_args``.
 
-    Exits with an error when the config value is neither a string nor a list of strings.
+    Raises :class:`SubmitError` when the config value is neither a string nor a list of strings.
     """
     val = getattr(args, "torchrun_args", None)
     if val is None:
         val = sched_cfg.get("torchrun_args")
     err = torchrun_args_error(val)
     if err:
-        print(f"ERROR: {block}.{err}", file=sys.stderr)
-        sys.exit(1)
+        raise SubmitError(f"{block}.{err}")
     return val
 
 
@@ -1613,12 +1612,12 @@ def _plan(request: dict, cli: argparse.Namespace | None = None) -> dict:
         scheduler=scheduler,
         torchrun=None,
         dry_run=False,
+        submit_mode=kind,  # mem: auto sizes train / preprocess only
         **{k: v for k, v in options.items() if k not in _NOT_OPTIONS},
     )
     if cli is not None:
         args.torchrun = getattr(cli, "torchrun", None)
         args.torchrun_args = getattr(cli, "torchrun_args", None)
-        args.submit_mode = kind  # mem: auto sizes train / preprocess only
 
     trainer = conf.get("trainer") or {}
     epochs_total = epochs_per_job = None

@@ -765,6 +765,57 @@ def test_plan_option_errors_name_their_field(env):
     assert err["code"] == "config_error" and err["data"] is None
 
 
+def test_plan_refuses_bad_torchrun_args_cleanly(env):
+    """A malformed ``pbs.torchrun_args`` is a config_error, not an exit of the verb process."""
+    cfg = make_config(env, pbs={"conda": "/opt/envs/credit", "account": "NAML0001", "torchrun_args": 3})
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {}}
+    err = call("plan", req, check_ok=False)["error"]
+    assert err["code"] == "config_error" and "pbs.torchrun_args must be a string" in err["message"]
+    assert "ERROR:" not in err["message"]
+
+
+def test_remote_plans_size_mem_auto_per_kind(env):
+    """``pbs.mem: auto`` is sized per run kind on the remote path too: preprocess has no validation loader, and
+    realtime keeps the default request (as ``credit submit`` does)."""
+    from credit.cli._common import auto_mem
+
+    variables = {"prognostic": {"vars_2D": [f"v{i}" for i in range(20)]}}
+    sized = {
+        "trainer": {"epochs": 4, "num_epoch": 2, "train_batch_size": 1, "thread_workers": 0, "valid_thread_workers": 0},
+        "model": {"image_height": 1, "image_width": 2**28},
+        "data": {"source": {"ERA5": {"variables": variables}}},
+    }
+    cfg = make_config(env, pbs={"conda": "/opt/envs/credit", "account": "NAML0001", "mem": "auto"}, **sized)
+    conf = yaml.safe_load(cfg.read_text())
+    train, pre = (auto_mem(conf, "casper", 1, "a100", include_validation=v).mem for v in (True, False))
+    assert train != pre  # the case only means something if validation changes the estimate
+
+    def mem(kind, **options):
+        req = {"kind": kind, "config": str(cfg), "scheduler": "pbs", "cluster": "casper",
+               "options": {"gpus": 1, "gpu_type": "a100", "queue": "casper", **options}}  # fmt: skip
+        return call("plan", req)["plan"]["target"]["mem"]
+
+    assert mem("train") == train
+    assert mem("preprocess") == pre
+    assert mem("realtime", init_time="2024-01-01T00") == "64GB"  # the Casper default for one GPU
+
+
+def test_build_config_without_torch_needs_a_dependency(monkeypatch):
+    import importlib
+
+    from credit import remote
+
+    _begin = importlib.import_module("credit.cli._begin")  # credit.cli re-exports a _begin function
+
+    def needs_torch(state):
+        raise ModuleNotFoundError("No module named 'torch'")
+
+    monkeypatch.setattr(_begin, "_build_config", needs_torch)
+    with pytest.raises(remote.RemoteError) as exc:
+        remote.build_config({"state": {"preset": "wxformer"}})
+    assert exc.value.code == "needs_dependency"
+
+
 def test_plan_accepts_ordinary_option_values(env):
     from credit import remote
 
