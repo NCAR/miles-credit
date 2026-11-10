@@ -114,7 +114,7 @@ def test_create_run_add_job_and_exclusive(home):
 
 
 # ---------------------------------------------------------------------------
-# Path scope (CONTRACTS A1.1)
+# Path scope (docs/source/remote-protocol.md, "Path scope")
 # ---------------------------------------------------------------------------
 
 
@@ -227,7 +227,7 @@ def test_submit_job_puts_dependency_on_command_line(tmp_path, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# State derivation (CONTRACTS A1.8, A4.1, A5.2-A5.3), shared with the MCP core
+# State derivation (docs/source/remote-protocol.md, "Run state"), shared with the MCP core
 # ---------------------------------------------------------------------------
 
 STATE_CASES = os.path.join(os.path.dirname(__file__), "data", "state_cases.json")

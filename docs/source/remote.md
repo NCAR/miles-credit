@@ -1,4 +1,4 @@
-# Remote protocol (`credit.remote`)
+# Remote access (`credit.remote`)
 
 `credit.remote` is the HPC-side half of the CREDIT MCP server and CREDIT Studio.
 A laptop runs it over SSH, one short command per request, so nothing has to stay
@@ -10,9 +10,10 @@ echo '{}' | python -P -m credit.remote hello
 
 Each verb reads one JSON request on stdin and writes one JSON response line,
 prefixed with the bytes `\x1eCREDIT\x1e` so shell start-up noise can be ignored.
-`follow` streams frames instead, until its stdin closes.  The full contract
-(verbs, cursors, error codes, event types) lives in `CONTRACTS.md` in the
-credit-mcp project; this page summarizes what it reads and writes on the HPC side.
+`follow` streams frames instead, until its stdin closes.  This page summarizes
+what it reads and writes on the HPC side; the full specification (on-disk
+layout, events, run state, path scope, cursors, every verb and error code) is
+the [Remote protocol reference](remote-protocol.md).
 
 ## What it reads
 
@@ -66,7 +67,14 @@ changed since it was read.
 
 `plan` creates no files.  `submit` re-plans the request it is given and refuses
 if the config or any script changed since the plan was approved; submitting the
-same plan twice submits nothing the second time.
+same plan twice submits nothing the second time.  Optional GPU-hour budgets in
+`remote.yaml` (`credit remote-setup --max-gpu-hours-per-plan N
+--max-gpu-hours-per-day N`) cap what may be submitted: above the per-plan limit
+a person has to type the GPU-hours to confirm, and the daily limit has no
+override.  Secrets in returned text are masked, and every call is logged to
+`$CREDIT_HOME/audit.jsonl`, unless the policy turns that off.  See
+[Policy file](remote-protocol.md#policy-file) and
+[Path scope](remote-protocol.md#path-scope).
 
 ## Trying it without a cluster
 

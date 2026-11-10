@@ -11,7 +11,7 @@ goes to stderr: on entry, fd 1 is duplicated onto fd 2 and the response is
 written to the saved descriptor.  The exit code is 0 whenever a response was
 written.  ``follow`` instead streams one framed line per frame.
 
-The verbs are specified in ``cmd/credit-mcp/CONTRACTS.md`` §5 (as amended).
+The protocol and every verb are specified in ``docs/source/remote-protocol.md``.
 All but ``check``, ``components``, ``build_config``, ``docs`` and ``render``
 import only the stdlib, ``yaml`` and ``credit.runs``; ``plan`` and ``submit``
 also import the (torch-free) ``credit.cli`` script builders.
@@ -265,7 +265,7 @@ def sync(req: dict) -> dict:
 
 
 def follow(out: _Out, stdin) -> None:
-    """Stream frames for a changing set of runs until stdin reaches EOF (see CONTRACTS §5.4 ``follow``)."""
+    """Stream frames for a changing set of runs until stdin reaches EOF (docs/source/remote-protocol.md, "follow")."""
     out.send({"type": "hello", "protocol": PROTOCOL, "ts": runs.now_ts()})
     messages = queue.Queue()
 

@@ -1051,11 +1051,11 @@ def test_pbsdsh_jobs_read_rank0_node_log(env):
     node0.write_text("rank 0 says hi\n")
     d2 = call("sync", {"runs": {run_id: d1["cursor"]}, "scheduler": False})["runs"][run_id]
     assert d2["logs"]["11"]["path"] == str(node0) and d2["logs"]["11"]["text"] == "rank 0 says hi\n"
-    assert d2["logs"]["11"]["reset"]  # A5.7: a new log identity
+    assert d2["logs"]["11"]["reset"]  # a new log identity
 
 
 # ---------------------------------------------------------------------------
-# Fix round 1 (CONTRACTS A5)
+# Request paths, size caps, submit recovery and process identity
 # ---------------------------------------------------------------------------
 
 SECRET = "gho_SECRETTOKEN123"

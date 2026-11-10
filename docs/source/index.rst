@@ -35,7 +35,8 @@ If you encounter problems or have suggestions, please open an issue on our GitHu
 
    Get Started <quickstart.md>
    CLI <cli.md>
-   Remote Protocol <remote.md>
+   Remote Access <remote.md>
+   Remote Protocol Reference <remote-protocol.md>
 
 
 .. toctree::

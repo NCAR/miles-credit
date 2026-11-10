@@ -6,7 +6,7 @@ runs CREDIT, it exports ``CREDIT_RUN_DIR`` and ``CREDIT_JOB_KEY``.  The
 ``$CREDIT_RUN_DIR/events/<job_key>.proc.jsonl``: training progress windows,
 per-variable running means, epoch rows, checkpoints, the stop reason, warnings,
 a crash's traceback tail, and an ``alive`` heartbeat.  The event catalog is in
-``cmd/credit-mcp/CONTRACTS.md`` §4.
+``docs/source/remote-protocol.md``, section "Events".
 
 Without ``CREDIT_RUN_DIR`` (an interactive ``credit train``, a notebook, the
 tests) every call is a no-op.  The sink only ever writes on rank 0, flushes each
@@ -67,7 +67,7 @@ def _float(value) -> float | None:
 
 
 class EventSink:
-    """Appends CONTRACTS §4 events to ``events/<job_key>.proc.jsonl``; a no-op unless enabled.
+    """Appends run events (see the module docstring) to ``events/<job_key>.proc.jsonl``; a no-op unless enabled.
 
     Args:
         run_dir: Run directory (default ``$CREDIT_RUN_DIR``); the sink is disabled without one.

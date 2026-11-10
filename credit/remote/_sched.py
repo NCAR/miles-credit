@@ -16,7 +16,7 @@ import time
 
 from credit import runs
 
-# PBS job_state letters (CONTRACTS A1.10).
+# PBS job_state letters (docs/source/remote-protocol.md, "Scheduler queries").
 _PBS_STATES = {
     "Q": "queued",
     "W": "queued",

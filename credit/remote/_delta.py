@@ -2,7 +2,7 @@
 
 Shared by ``sync`` (one shot) and ``follow`` (streaming).  Stdlib only.
 
-A cursor is a public, mergeable JSON object (CONTRACTS A1.3)::
+A cursor is a public, mergeable JSON object (``docs/source/remote-protocol.md``, "Cursors")::
 
     {"run": {"mtime", "size"},
      "events": {"<file>": byte_offset},
@@ -374,7 +374,7 @@ def run_delta(
         path = _log_path(record, key, prev.get("path"))
         if not path:
             continue
-        moved = bool(prev.get("path")) and prev["path"] != path  # e.g. .o -> pbsdsh node_0.out (A5.7)
+        moved = bool(prev.get("path")) and prev["path"] != path  # e.g. .o -> pbsdsh node_0.out: a new log identity
         off = 0 if moved else int(prev.get("off") or 0)
         try:
             if not moved and prev.get("path") == path and os.path.getsize(path) == prev.get("size"):

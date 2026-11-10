@@ -494,7 +494,8 @@ def write_script(run_dir: str, index: int, text: str) -> str:
 def jobs_of(run_dir: str, record: dict) -> list:
     """Return the run's jobs: ``record["jobs"]`` merged with ``events/submit.jsonl``.
 
-    ``submit.jsonl`` is authoritative (CONTRACTS A1.2): a job whose
+    ``submit.jsonl`` is authoritative (``docs/source/remote-protocol.md``,
+    "Jobs: submit.jsonl is authoritative"): a job whose
     ``job.submitted`` was written but whose ``run.json`` update was lost (a crash
     in between) still appears, so ``cancel``, scheduler queries and ``credit
     status`` reach it.
@@ -534,7 +535,7 @@ def add_job(run_dir: str, record: dict, job: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Run state (CONTRACTS A1.8), shared by ``credit status`` and the MCP core
+# Run state (docs/source/remote-protocol.md, "Run state"), shared by ``credit status`` and the MCP core
 # ---------------------------------------------------------------------------
 
 
@@ -563,7 +564,7 @@ def derive_state(
 ) -> str:
     """Return ``cancelled | running | queued | completed | stopped | failed | unknown`` for a run.
 
-    The rules of CONTRACTS A1.8 as refined by A4.1 and A5.2-A5.3, shared with
+    The rules in ``docs/source/remote-protocol.md``, "Run state", shared with
     the MCP core through ``tests/data/state_cases.json``.
 
     Args:
@@ -615,7 +616,7 @@ def derive_state(
     exited = of(key, "script", "job.exited")
     code = (exited[-1].get("data") or {}).get("code") if exited else st.get("exit_status")
     signaled = bool(of(key, "script", "job.signaled"))
-    stops = of(key, "proc", "train.stopped")  # A5.2: only this job's own events
+    stops = of(key, "proc", "train.stopped")  # only this job's own events, never an earlier job's
     reason = (stops[-1].get("data") or {}).get("reason") if stops else None
     errors = of(key, "proc", "error")
 
@@ -626,7 +627,7 @@ def derive_state(
     if (code is not None and code != 0) or errors:
         return "failed"
     if code == 0 and kind == "train" and reason is None:
-        # CREDIT without the event sink (A4.1); never for a run that was resumed (A5.3).
+        # CREDIT without the event sink: judged by the CSV, but never a run that was resumed.
         if has_child:
             return "stopped"
         epochs_total = run.get("epochs_total")
