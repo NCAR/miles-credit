@@ -495,6 +495,37 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
 
     _check_scaler_paths_unique(conf, rep)
     _check_scaler_spatial_variables_consistent(conf, rep)
+    _check_conservation_units(conf, rep)
+
+
+# Conservation postblocks whose unit args take a fixed set of strings, as
+# {registry types: (class attribute holding the allowed values, unit args)}.
+_CONSERVATION_UNIT_ARGS = {
+    ("global_water_fixer", "GlobalWaterFixer"): ("GlobalWaterFixer", "_WATER_UNITS", ("precip_units", "evapor_units")),
+    ("global_energy_fixer_net", "GlobalNetEnergyFixer"): ("GlobalNetEnergyFixer", "_FLUX_UNITS", ("flux_units",)),
+}
+
+
+def _check_conservation_units(conf: dict, rep: _Report) -> None:
+    """Validate the unit strings of the conservation fixers.
+
+    A wrong unit silently rescales a budget term by a factor of ``N_seconds``
+    or ``RHO_WATER``, so the fixer "corrects" toward the wrong budget instead of
+    failing. The constructors reject unknown strings, but only ``--deep``
+    constructs blocks (and that needs the statics file), so check them here.
+    """
+    from credit.postblock import conservation
+
+    for types, (cls_name, attr, arg_names) in _CONSERVATION_UNIT_ARGS.items():
+        allowed = getattr(getattr(conservation, cls_name), attr)
+        for where, args in _iter_bridgescaler_blocks(conf, "postblocks", ("per_step", "post_rollout"), types):
+            for arg in arg_names:
+                if arg in args and args[arg] not in allowed:
+                    rep.error(
+                        f"{where}.args.{arg}",
+                        f"Unknown {arg} {args[arg]!r}.{_suggest(str(args[arg]), allowed)}",
+                        fix=f"Valid: {', '.join(repr(u) for u in allowed)}",
+                    )
 
 
 def _iter_bridgescaler_blocks(
