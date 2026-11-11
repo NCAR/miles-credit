@@ -241,12 +241,64 @@ def check_dataloader_startup(
 # ---------------------------------------------------------------------------
 
 
+def _cpu_copy(obj):
+    """A deep copy of a (nested) state dict with every tensor cloned to the CPU."""
+    import torch
+
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().to("cpu", copy=True)
+    if isinstance(obj, dict):
+        return {k: _cpu_copy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_cpu_copy(v) for v in obj)
+    return obj
+
+
+def synthetic_step(model, optimizer, x) -> None:
+    """Run one forward/backward/optimizer step on *x* and leave no trace of it.
+
+    The step allocates what a real one does (activations, gradients, optimizer
+    state), so peak memory is measured faithfully. But it runs on the real model
+    and optimizer, so everything it touches is put back: the learning rate is 0
+    during the step (the weights do not move), and afterwards the optimizer state
+    (Adam's moments and step count), the module buffers (spectral norm's power-
+    iteration vectors, norm statistics) and the train/eval mode are restored.
+
+    Without this, a resumed job's restored Adam moments were overwritten by the
+    gradient of ``mean(model(zeros))``; with the scheduler past its warmup, the
+    next real steps followed that bogus direction at full learning rate and
+    training diverged right after every resume.
+    """
+    import torch
+
+    saved_optimizer = _cpu_copy(optimizer.state_dict())
+    saved_buffers = {name: buf.detach().clone() for name, buf in model.named_buffers()}
+    was_training = model.training
+    lrs = [group["lr"] for group in optimizer.param_groups]
+    try:
+        for group in optimizer.param_groups:
+            group["lr"] = 0.0
+        model(x).mean().backward()
+        optimizer.step()
+    finally:
+        optimizer.zero_grad(set_to_none=True)
+        optimizer.load_state_dict(saved_optimizer)  # drops state the step created, restores the rest
+        for group, lr in zip(optimizer.param_groups, lrs):
+            group["lr"] = lr
+        with torch.no_grad():
+            for name, buf in model.named_buffers():
+                if name in saved_buffers:
+                    buf.copy_(saved_buffers[name])
+        model.train(was_training)
+
+
 def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
     """Run a synthetic forward/backward/optimizer step and log peak VRAM.
 
     Creates a zero-filled batch of the expected input shape, runs it through
-    the model, backprops, and steps the optimizer. Logs peak VRAM so users
-    can verify their model fits on the target GPU before a long training run.
+    the model, backprops, and steps the optimizer (see :func:`synthetic_step`,
+    which leaves the model and optimizer as it found them). Logs peak VRAM so
+    users can verify their model fits on the target GPU before a long training run.
 
     Input channel count is inferred from the model config:
         frames × (channels × levels + surface_channels + input_only_channels)
@@ -290,15 +342,9 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
         device = next(model.parameters()).device
         torch.cuda.reset_peak_memory_stats(device)
 
-        x = torch.zeros(B, C_in, H, W, device=device)
         # Unwrap DDP/FSDP so the synthetic pass runs on the inner module directly.
         # This avoids triggering NCCL collectives that non-zero ranks never join.
-        inner = getattr(model, "module", model)
-        y_hat = inner(x)
-        loss = y_hat.mean()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        synthetic_step(getattr(model, "module", model), optimizer, torch.zeros(B, C_in, H, W, device=device))
 
         peak_mib = torch.cuda.max_memory_allocated(device) / 2**20
         total_mib = torch.cuda.get_device_properties(device).total_memory / 2**20
@@ -313,7 +359,6 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
             C_in,
         )
 
-        del x, y_hat, loss
         torch.cuda.empty_cache()
 
     except Exception as e:
