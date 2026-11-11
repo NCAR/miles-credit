@@ -93,6 +93,7 @@ def _build_denorm_stats(conf):
 
 def _plot(args) -> None:
     """Load checkpoint, run one forward pass, produce global maps."""
+    print("Starting credit plot: loading imports ...", file=sys.stderr, flush=True)
     import numpy as np
 
     try:

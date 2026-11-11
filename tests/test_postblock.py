@@ -24,7 +24,7 @@ from credit.postblock.gen1 import (
 from credit.postblock.scaler import BridgeScalerTransform as PostScaler
 from credit.preblock._utils import _flatten_spatial_tensors
 from credit.postblock.exp import ExpTransform
-from credit.postblock.reconstruct import Reconstruct
+from credit.postblock.reconstruct import FlattenToTensor, Reconstruct
 from credit.postblock.square import SquareTransform
 from credit.preblock.log import LogTransform
 from credit.preblock.sqrt import SqrtTransform
@@ -336,6 +336,23 @@ class TestReconstruct:
         shape_5d = result_5d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
         assert shape_4d == shape_5d == (B, 4, 1, H, W)
 
+    def test_1d_spatial_grid_no_extra_dim(self):
+        """A cube-sphere/SE-grid model returns (B, C, 1, ncol) -- 4D, since its
+        spatial dim is 1D, not the 2D (H, W) of a lat-lon grid. The frame axis
+        at dim=2 must still be folded into channels, or it survives as a
+        spurious extra dimension (this broke SEToLatLonPostBlock + netCDF
+        writing for CubedWXFormer/WXFormerColumn, see PR #478 review)."""
+        B, ncol = 2, 100
+        y_pred_3d = torch.randn(B, 5, ncol)  # what a 2D-grid model of equal rank would give
+        y_pred_4d = y_pred_3d.unsqueeze(2)  # (B, 5, 1, ncol) -- what cube-sphere models return
+
+        result_3d = Reconstruct()(self._batch_dict(y_pred_3d))
+        result_4d = Reconstruct()(self._batch_dict(y_pred_4d))
+
+        shape_3d = result_3d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        shape_4d = result_4d["y_processed"]["Test_ARCOERA5"][self.KEY_3D].shape
+        assert shape_3d == shape_4d == (B, 4, 1, ncol)
+
     def test_values_match_input_channels(self):
         """Reconstructed tensors contain exactly the channels sliced from y_pred."""
         B, H, W = 1, 4, 4
@@ -366,6 +383,21 @@ class TestReconstruct:
         original_meta = batch["metadata"]
         result = Reconstruct()(batch)
         assert result["metadata"] is original_meta
+
+    @pytest.mark.parametrize("spatial_shape", [(8, 8), (100,)], ids=["2d_latlon", "1d_se_grid"])
+    def test_flatten_to_tensor_round_trips_reconstruct(self, spatial_shape):
+        """FlattenToTensor(Reconstruct(y_pred)) recovers the original flat tensor,
+        for both a 2D lat-lon grid and a 1D SE/cube-sphere grid -- the nested
+        y_processed dict always carries (n_levels, n_time) as dims 1 and 2
+        regardless of spatial rank, so FlattenToTensor's own flatten(1, 2) must
+        not be gated on a hardcoded total rank either."""
+        B = 2
+        y_pred = torch.randn(B, 5, *spatial_shape)
+        batch = self._batch_dict(y_pred)
+        reconstructed = Reconstruct()(batch)
+
+        flattened = FlattenToTensor()(reconstructed)
+        assert torch.equal(flattened["y_pred"], y_pred)
 
 
 # ---------------------------------------------------------------------------
@@ -535,6 +567,40 @@ def test_exp_transform_custom_key():
     y = logged["input"][_SOURCE][_VAR]
     result = ExpTransform(variables=[_VAR], key="my_output")({"my_output": {_SOURCE: {_VAR: y}}})
     assert torch.allclose(result["my_output"][_SOURCE][_VAR], x, atol=1e-5)
+
+
+def test_exp_transform_max_value_clamps():
+    """max_value caps the physical output; values under the cap round-trip unchanged."""
+    x = torch.tensor([1e-3, 0.02, 100.0]).reshape(1, 1, 1, 1, 3)
+    logged = LogTransform(variables=[_VAR])(_preblock_batch(x))
+    y = logged["input"][_SOURCE][_VAR]
+    result = ExpTransform(variables=[_VAR], max_value=0.05)(_postblock_batch_dict(y))["y_processed"][_SOURCE][_VAR]
+    assert torch.allclose(result.flatten(), torch.tensor([1e-3, 0.02, 0.05]), rtol=1e-5)
+
+
+def test_exp_transform_max_value_prevents_overflow():
+    """A huge log-space value is clamped before exp, so the output stays finite."""
+    result = ExpTransform(variables=[_VAR], max_value=0.05)(_postblock_batch_dict(torch.full((1, 1, 1, 2, 2), 1e4)))
+    out = result["y_processed"][_SOURCE][_VAR]
+    assert torch.isfinite(out).all()
+    assert torch.allclose(out, torch.full_like(out, 0.05), rtol=1e-5)
+
+
+def test_exp_transform_max_value_per_variable():
+    """A dict max_value clamps only the listed variables."""
+    other = "era5/prognostic/3d/OTHER"
+    y = torch.full((1, 1, 1, 2, 2), 30.0)
+    batch = {"y_processed": {_SOURCE: {_VAR: y.clone(), other: y.clone()}}}
+    result = ExpTransform(variables=[_VAR, other], max_value={_VAR: 0.05})(batch)["y_processed"][_SOURCE]
+    assert torch.allclose(result[_VAR], torch.full_like(y, 0.05), rtol=1e-5)
+    assert (result[other] > 1e4).all()
+
+
+def test_exp_transform_max_value_unknown_key():
+    """A max_value key that is not a selected variable raises (catches typos)."""
+    block = ExpTransform(variables=[_VAR], max_value={"era5/prognostic/3d/TYPO": 0.05})
+    with pytest.raises(ValueError, match="max_value"):
+        block(_postblock_batch_dict(torch.ones(1, 1, 1, 2, 2)))
 
 
 def test_square_transform_round_trip():

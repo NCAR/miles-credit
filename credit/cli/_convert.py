@@ -5,7 +5,7 @@ import os
 import sys
 import yaml
 
-from ._common import _prompt, _prompt_bool, _repo_root
+from ._common import _DEFAULT_LEVELS_16, _prompt, _prompt_bool, _repo_root
 
 
 def _build_bridgescaler_jsons(mean_path, std_path, var_groups, pre_out, post_out, source_name="ERA5"):
@@ -282,7 +282,6 @@ def _convert(args: argparse.Namespace) -> None:
         train_years = data.get("train_years") or [1979, 2018]
         valid_years = data.get("valid_years") or [2018, 2019]
         n_levels = conf.get("model", {}).get("levels", 16)
-        _DEFAULT_LEVELS_16 = [10, 30, 40, 50, 60, 70, 80, 90, 95, 100, 105, 110, 120, 130, 136, 137]
         levels = list(data["level_ids"]) if "level_ids" in data else _DEFAULT_LEVELS_16[:n_levels]
 
         era5_vars = {
@@ -518,7 +517,7 @@ def _convert(args: argparse.Namespace) -> None:
         _yaml_dump(conf, f)
 
     print()
-    print(f"  Saved → {out_path}")
+    print(f"[SUCCESS] Converted config saved at: {out_path}")
     print("=" * 62)
     print()
 
@@ -539,25 +538,25 @@ def _init(args: argparse.Namespace) -> None:
     template_rel = templates.get(key)
 
     if template_rel is None:
-        print(f"No template available for grid={args.grid}, model={args.model}", file=sys.stderr)
+        print(f"[ERROR] No template available for grid={args.grid}, model={args.model}", file=sys.stderr)
         sys.exit(1)
 
     template = os.path.join(repo, template_rel)
     if not os.path.exists(template):
-        print(f"Template not found: {template}", file=sys.stderr)
+        print(f"[ERROR] Template not found: {template}", file=sys.stderr)
         sys.exit(1)
 
     output = os.path.abspath(args.output)
     if os.path.exists(output) and not args.force:
-        print(f"File already exists: {output}  (use --force to overwrite)", file=sys.stderr)
+        print(f"[ERROR] File already exists: {output}  (use --force to overwrite)", file=sys.stderr)
         sys.exit(1)
 
     parent = os.path.dirname(output)
     if parent:
         os.makedirs(parent, exist_ok=True)
     shutil.copy(template, output)
-    print(f"Created  : {output}")
-    print(f"Template : {template_rel}")
+    print(f"[SUCCESS] Config file created at: {output}")
+    print(f"Template: {template_rel}")
     print()
     print("Next steps:")
     print("  1. Check 'save_loc' — defaults to /glade/derecho/scratch/$USER/CREDIT_runs/...")

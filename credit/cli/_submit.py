@@ -5,6 +5,7 @@ import copy
 import math
 import os
 import re
+import shlex
 import sys
 import textwrap
 
@@ -16,8 +17,10 @@ from ._common import (
     _SLURM_DEFAULTS,
     _repo_root,
     _resolve_torchrun,
+    auto_mem,
     casper_mem,
     queue_cluster_error,
+    torchrun_args_error,
 )
 from ._convert import _write_reload_config
 
@@ -25,6 +28,7 @@ logger = __import__("logging").getLogger(__name__)
 
 
 def _train(args: argparse.Namespace) -> None:
+    print("Starting credit train: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.train_gen2 import main_cli
 
     sys.argv = ["credit-train", "-c", args.config, "--backend", args.backend]
@@ -32,6 +36,7 @@ def _train(args: argparse.Namespace) -> None:
 
 
 def _preprocess(args: argparse.Namespace) -> None:
+    print("Starting credit preprocess: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.preprocess import main
 
     sys.argv = ["credit-preprocess", "-c", args.config, "--backend", args.backend]
@@ -39,6 +44,7 @@ def _preprocess(args: argparse.Namespace) -> None:
 
 
 def _rollout(args: argparse.Namespace) -> None:
+    print("Starting credit rollout: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.rollout_gen2 import main
 
     argv = ["credit-rollout", "-c", args.config, "-p", str(args.procs)]
@@ -47,6 +53,7 @@ def _rollout(args: argparse.Namespace) -> None:
 
 
 def _realtime(args: argparse.Namespace) -> None:
+    print("Starting credit realtime: loading imports ...", file=sys.stderr, flush=True)
     from credit.applications.rollout_realtime_gen2 import main
 
     argv = [
@@ -127,12 +134,56 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     r.gpu_type = _first(args.gpu_type, pbs_cfg.get("gpu_type"), d["gpu_type"])
     # On Casper the memory ask scales with the fraction of the node's GPUs in use
     # (64GB for one GPU up to the whole node's memory for all of them); an explicit
-    # --mem / pbs.mem always wins.
+    # --mem / pbs.mem always wins.  ``auto`` (from either) sizes it from the config instead.
     fallback_mem = casper_mem(r.gpus, r.gpu_type) if is_casper else d["mem"]
-    r.mem = _first(args.mem, pbs_cfg.get("mem"), fallback_mem)
+    cli_mem = None if _is_auto(args.mem) else args.mem
+    pbs_mem = None if _is_auto(pbs_cfg.get("mem")) else pbs_cfg.get("mem")
+    if cli_mem is None and (_is_auto(args.mem) or _is_auto(pbs_cfg.get("mem"))):
+        # Rollout / realtime (and an inestimable config) keep the configured or default request.
+        pbs_mem = _auto_mem_request(args, r) or pbs_mem
+    r.mem = _first(cli_mem, pbs_mem, fallback_mem)
     r.conda_env = _first(args.conda_env, pbs_cfg.get("conda") or pbs_cfg.get("conda_env"))
+    r.torchrun_args = _resolve_torchrun_args(args, pbs_cfg, "pbs")
     r.job_name = pbs_cfg.get("job_name", d["job_name"])
+    # Multi-node Derecho jobs under mpiexec run python directly, with no torchrun to take the flags.
+    if not is_casper and r.nodes > 1 and r.torchrun_args and not _use_pbsdsh(r):
+        logger.warning(
+            "torchrun_args (%s) is ignored: multi-node Derecho jobs launch with mpiexec, not torchrun. "
+            "Use --launcher pbsdsh to apply it.",
+            r.torchrun_args,
+        )
     return r
+
+
+def _is_auto(mem) -> bool:
+    return str(mem).strip().lower() == "auto"
+
+
+def _auto_mem_request(args: argparse.Namespace, r: argparse.Namespace) -> str | None:
+    """Resolve ``pbs.mem: auto`` from the config (train / preprocess); None means use the default."""
+    mode = getattr(args, "submit_mode", "train")
+    if mode not in ("train", "preprocess"):
+        return None
+    try:
+        with open(args.config) as f:
+            conf = yaml.safe_load(f) or {}
+    except Exception:  # noqa: BLE001 — an unreadable config is reported elsewhere
+        return None
+    # Preprocess only fits scalers on the training data, so it has no validation loader.
+    estimate = auto_mem(conf, args.cluster, r.gpus, r.gpu_type, include_validation=mode == "train")
+    if estimate is None:
+        logger.warning("mem: auto — nothing to estimate memory from in the config; using the default request.")
+        return None
+    if estimate.exceeds_node:
+        logger.warning(
+            "Memory (mem: auto): %s = %s. The job likely needs more than one node offers; "
+            "reduce trainer.train_batch_size, thread_workers or prefetch_factor, or use fewer levels.",
+            estimate.mem,
+            estimate.explanation,
+        )
+    else:
+        logger.info("Memory (mem: auto): %s = %s.", estimate.mem, estimate.explanation)
+    return estimate.mem
 
 
 # ---------------------------------------------------------------------------
@@ -176,6 +227,37 @@ def _as_list(val) -> list:
     return list(val)
 
 
+def _resolve_torchrun_args(args: argparse.Namespace, sched_cfg: dict, block: str):
+    """Return ``--torchrun-args`` if given, else the config block's ``torchrun_args``.
+
+    Exits with an error when the config value is neither a string nor a list of strings.
+    """
+    val = getattr(args, "torchrun_args", None)
+    if val is None:
+        val = sched_cfg.get("torchrun_args")
+    err = torchrun_args_error(val)
+    if err:
+        print(f"ERROR: {block}.{err}", file=sys.stderr)
+        sys.exit(1)
+    return val
+
+
+def _torchrun_extra(args: argparse.Namespace) -> str:
+    """Return the extra ``torchrun`` flags (``torchrun_args``) as a leading-space string, or ``""``.
+
+    ``torchrun_args`` comes from ``--torchrun-args`` or the ``slurm:`` / ``pbs:`` config block.
+    A string is inserted verbatim, so it can hold several flags (``"--numa-binding=node
+    --max-restarts=0"``). A list is shell-quoted, so each element stays one argument even
+    with spaces or shell metacharacters. The Derecho multi-node ``mpiexec`` path runs
+    python directly and ignores it.
+    """
+    val = getattr(args, "torchrun_args", None)
+    if not val:
+        return ""
+    flags = val.strip() if isinstance(val, str) else shlex.join(val)
+    return f" {flags}" if flags else ""
+
+
 def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.Namespace:
     """Return a copy of *args* with None fields filled from *slurm_cfg* then defaults."""
     r = copy.copy(args)
@@ -198,7 +280,9 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     r.gpus = int(_first(args.gpus, slurm_cfg.get("ngpus") or slurm_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, slurm_cfg.get("nodes"), d["nodes"]))
     r.cpus = int(_first(args.cpus, slurm_cfg.get("ncpus") or slurm_cfg.get("cpus"), d["cpus"]))
-    r.mem = _first(args.mem, slurm_cfg.get("mem"), d["mem"])
+    # ``auto`` is PBS-only; on SLURM it means the site default.
+    slurm_mem = slurm_cfg.get("mem")
+    r.mem = _first(*(None if _is_auto(m) else m for m in (args.mem, slurm_mem)), d["mem"])
     # --queue doubles as the SLURM partition selector.
     r.partition = _first(args.queue, slurm_cfg.get("partition") or slurm_cfg.get("queue"), d["partition"])
     r.queue = r.partition
@@ -206,6 +290,7 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     r.qos = _first(getattr(args, "qos", None), slurm_cfg.get("qos"), d["qos"])
     r.gpu_type = _first(args.gpu_type, slurm_cfg.get("gpu_type"), d["gpu_type"])
     r.conda_env = _first(args.conda_env, slurm_cfg.get("conda") or slurm_cfg.get("conda_env"))
+    r.torchrun_args = _resolve_torchrun_args(args, slurm_cfg, "slurm")
     r.job_name = slurm_cfg.get("job_name", d["job_name"])
     # ``modules`` falls back to the per-cluster default (e.g. Perlmutter's NCCL
     # module) when the config does not set it.  ``env_setup`` *extends* the
@@ -293,16 +378,17 @@ def _slurm_env(args: argparse.Namespace) -> str:
 
 
 def _slurm_torchrun(args: argparse.Namespace) -> str:
-    """Return the torchrun path, preferring the configured conda env."""
-    return _resolve_torchrun(getattr(args, "conda_env", None))
+    """Return the torchrun path: ``--torchrun`` if given, else the configured conda env's."""
+    return getattr(args, "torchrun", None) or _resolve_torchrun(getattr(args, "conda_env", None))
 
 
 def _slurm_launch(args: argparse.Namespace, torchrun: str, app: str, app_args: str = "") -> str:
     """Return the torchrun launch command for single- or multi-node SLURM jobs."""
     extra = f" {app_args}" if app_args else ""
+    tr_extra = _torchrun_extra(args)
     if args.nodes == 1:
         return textwrap.dedent(f"""\
-            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}}{tr_extra} \\
                 ${{REPO}}/{app} -c ${{CONFIG}}{extra}""")
     return textwrap.dedent(f"""\
         nodes_arr=( $( scontrol show hostnames "$SLURM_JOB_NODELIST" ) )
@@ -312,7 +398,7 @@ def _slurm_launch(args: argparse.Namespace, torchrun: str, app: str, app_args: s
 
         srun {torchrun} \\
             --nnodes={args.nodes} \\
-            --nproc-per-node=${{NGPUS}} \\
+            --nproc-per-node=${{NGPUS}}{tr_extra} \\
             --rdzv-id="$SLURM_JOB_ID" \\
             --rdzv-backend=c10d \\
             --rdzv-endpoint="${{head_node_ip}}:29500" \\
@@ -539,7 +625,7 @@ def _derecho_launch(args: argparse.Namespace, repo: str, app_relpath: str, app_a
             {torchrun} \\
                 --standalone \\
                 --nnodes=1 \\
-                --nproc-per-node={args.gpus} \\
+                --nproc-per-node={args.gpus}{_torchrun_extra(args)} \\
                 {app} -c ${{CONFIG}}{extra}
         """)
 
@@ -578,7 +664,9 @@ def _derecho_pbsdsh_script(
     ``credit/pbs.py`` so the two stay in lockstep.
 
     ``app_args`` carries entrypoint-specific flags (e.g. realtime's ``--init-time`` /
-    ``--steps``) appended after ``-c <config>``.
+    ``--steps``) appended after ``-c <config>``. ``torchrun_args`` is appended to the
+    torchrun invocation; the per-node script is written through an unquoted heredoc, so
+    any ``$`` in it expands on the mother-superior node when that script is written.
     """
     from credit.pbs import PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
 
@@ -608,7 +696,7 @@ def _derecho_pbsdsh_script(
         echo "Config    : {config}"
     """)
     block = _pbsdsh_launch_block(
-        torchrun=torchrun,
+        torchrun=torchrun + _torchrun_extra(args),
         script_path=f"{repo}/credit/applications/{app_relpath}",
         config_path=config,
         num_gpus=args.gpus,
@@ -661,14 +749,14 @@ def _build_pbs_script(
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}
-            TORCHRUN=$(which torchrun)
+            TORCHRUN={getattr(args, "torchrun", None) or "$(which torchrun)"}
 
             echo "Config : ${{CONFIG}}"
             echo "Node   : $(hostname)"
             echo "GPUs   : ${{NGPUS}}"
             echo "torchrun: ${{TORCHRUN}}"
 
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}}{_torchrun_extra(args)} \\
                 ${{REPO}}/credit/applications/train_gen2.py -c ${{CONFIG}}
         """)
 
@@ -741,6 +829,19 @@ def _qsub(script: str, save_loc: str | None = None) -> str:
     return result.stdout.strip()
 
 
+def _print_submitted(job_ids: list, cluster: str, scheduler: str, config: str, save_loc: str) -> None:
+    """Print a confirmation of the submitted job number(s), the config, and the log directory.
+
+    qsub returns ``<number>.<server>`` (e.g. ``5875448.casper-pbs``); only the
+    number is shown.  The log directory matches the one the batch scripts write to.
+    """
+    numbers = [str(job_id).split(".", 1)[0] for job_id in job_ids]
+    jobs = f"Job {numbers[0]}" if len(numbers) == 1 else f"Jobs {', '.join(numbers)}"
+    print(f"[SUCCESS] {jobs} submitted to {cluster.capitalize()} ({scheduler}).")
+    print(f"  Config: {config}")
+    print(f"  Logs:   {os.path.join(save_loc, 'logs')}", flush=True)
+
+
 def _compute_chain(args: argparse.Namespace) -> int:
     """Return the number of jobs to chain."""
     if args.chain is not None:
@@ -787,6 +888,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         "  Account  : %s\n"
         "  Config   : %s\n"
         "  GPUs     : %s\n"
+        "  Memory   : %s per node\n"
         "  Walltime : %s per job\n"
         "  Chain    : %s\n"
         "  DataLoader memory est. : %s%s\n"
@@ -797,6 +899,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         getattr(args, "account", "unset"),
         getattr(args, "config", "unset"),
         gpu_str,
+        getattr(args, "mem", None) or "site default",
         args.walltime,
         chain_desc,
         mem_str,
@@ -842,13 +945,13 @@ def _build_realtime_pbs_script(
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}
-            TORCHRUN=$(which torchrun)
+            TORCHRUN={getattr(args, "torchrun", None) or "$(which torchrun)"}
 
             echo "Realtime forecast — init: {init_time}  steps: {steps}"
             echo "Config  : ${{CONFIG}}"
             echo "Node    : $(hostname)"
 
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}}{_torchrun_extra(args)} \\
                 ${{REPO}}/credit/applications/rollout_realtime_gen2.py \\
                 -c ${{CONFIG}} --init-time {init_time} --steps {steps}
         """)
@@ -924,14 +1027,14 @@ def _build_preprocess_pbs_script(
             REPO={repo}
             CONFIG={config}
             NGPUS={args.gpus}
-            TORCHRUN=$(which torchrun)
+            TORCHRUN={getattr(args, "torchrun", None) or "$(which torchrun)"}
 
             echo "Preprocessing — scaler fitting"
             echo "Config  : ${{CONFIG}}"
             echo "Node    : $(hostname)"
             echo "GPUs    : ${{NGPUS}}"
 
-            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            ${{TORCHRUN}} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}}{_torchrun_extra(args)} \\
                 ${{REPO}}/credit/applications/preprocess.py -c ${{CONFIG}}
         """)
 
@@ -996,6 +1099,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         "  Config    : %s\n"
         "  Nodes     : %s\n"
         "  GPUs      : %s per node  (%s total)\n"
+        "  Memory    : %s per node\n"
         "  Walltime  : %s\n"
         "%s",
         sep,
@@ -1007,6 +1111,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
         args.nodes,
         args.gpus,
         args.nodes * args.gpus,
+        getattr(args, "mem", None) or "site default",
         args.walltime,
         sep,
     )
@@ -1019,6 +1124,7 @@ def _do_submit_preprocess(args: argparse.Namespace) -> None:
 
     job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
+    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc)
 
 
 def _do_submit_realtime(args: argparse.Namespace) -> None:
@@ -1078,6 +1184,7 @@ def _do_submit_realtime(args: argparse.Namespace) -> None:
 
     job_id = ctx["submit"](script, save_loc=save_loc)
     logger.info("Submitted: %s", job_id)
+    _print_submitted([job_id], args.cluster, ctx["name"], config_abs, save_loc)
 
 
 def _submit(args: argparse.Namespace) -> None:
@@ -1126,11 +1233,15 @@ def _submit(args: argparse.Namespace) -> None:
     script = build(args, first_config, repo, depend_on=None, save_loc=save_loc)
     job_id = submit(script, save_loc=save_loc)
     logger.info("[1/%d] %s  %s", n_jobs, job_id, first_config)
+    job_ids = [job_id]
 
     for i in range(2, n_jobs + 1):
         script = build(args, reload_config, repo, depend_on=job_id, save_loc=save_loc)
         job_id = submit(script, save_loc=save_loc)
         logger.info("[%d/%d] %s  afterok  (reload)", i, n_jobs, job_id)
+        job_ids.append(job_id)
+
+    _print_submitted(job_ids, args.cluster, ctx["name"], first_config, save_loc)
 
 
 def _build_rollout_pbs_script(
@@ -1171,7 +1282,7 @@ def _build_rollout_pbs_script(
             echo "Node    : $(hostname)"
             echo "GPUs    : ${{NGPUS}}"
 
-            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}} \\
+            {torchrun} --standalone --nnodes=1 --nproc-per-node=${{NGPUS}}{_torchrun_extra(args)} \\
                 ${{REPO}}/credit/applications/rollout_gen2.py \\
                 -c ${{CONFIG}}
                 # -c ${{CONFIG}} --subset {subset} --no_subset {n_subsets}  # rollout_gen2.py does not support these flags yet
@@ -1287,7 +1398,11 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         "mem": "128GB",
         "walltime": "06:00:00",
     }
-    merged_cfg = {**_rollout_defaults, **{k: v for k, v in sched_cfg.items() if v is not None}}
+    # pbs.mem: auto is sized for training; a rollout keeps its own default.
+    merged_cfg = {
+        **_rollout_defaults,
+        **{k: v for k, v in sched_cfg.items() if v is not None and not (k == "mem" and _is_auto(v))},
+    }
 
     if not hasattr(args, "nodes"):
         args.nodes = None
@@ -1351,3 +1466,4 @@ def _do_submit_rollout(args: argparse.Namespace) -> None:
         save_forecast,
         monitor,
     )
+    _print_submitted(job_ids, args.cluster, ctx["name"], config_abs, rollout_save_loc)

@@ -16,7 +16,14 @@ from pathlib import Path
 
 import yaml
 
-from ._common import _CASPER_GPU_NODES, _PBS_DEFAULTS, _SLURM_CLUSTER_DEFAULTS, _is_ncar_system, _prompt
+from ._common import (
+    _CASPER_GPU_NODES,
+    _DEFAULT_LEVELS_16,
+    _PBS_DEFAULTS,
+    _SLURM_CLUSTER_DEFAULTS,
+    _is_ncar_system,
+    _prompt,
+)
 from ._convert import _FlowSeqDumper
 
 
@@ -96,6 +103,7 @@ def _detect_system() -> dict:
     gpu_count = 0
     gpu_names = []
     mps_available = False
+    print("  Checking GPU availability (loading PyTorch) ...", flush=True)
     try:
         import torch
 
@@ -152,6 +160,30 @@ def _prompt_list(prompt: str, default: list[str]) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def _arco_levels() -> list[int]:
+    """Ask which of ARCO-ERA5's 137 model levels to use (all of them by default)."""
+    print("  ARCO-ERA5 has 137 model levels (1 = top, 137 = lowest); all 137 at 0.25 deg need a lot of memory.")
+    print(f"  'wxformer' selects the 16 WXFormer v1 levels {_DEFAULT_LEVELS_16}.")
+    while True:
+        answer = _prompt("Levels: 'all', 'wxformer', or a comma-separated list of level numbers", "all").lower()
+        if answer == "all":
+            levels = list(range(1, 138))
+        elif answer == "wxformer":
+            levels = list(_DEFAULT_LEVELS_16)
+        else:
+            # Numbers are always level numbers: "16" is level 16, not the WXFormer set.
+            try:
+                levels = sorted({int(item) for item in answer.replace(",", " ").split()})
+            except ValueError:
+                levels = []
+            if not levels or not all(1 <= level <= 137 for level in levels):
+                print("  Enter 'all', 'wxformer', or level numbers between 1 and 137.")
+                continue
+        shown = "all 137 levels" if len(levels) == 137 else f"{len(levels)} level(s): {levels}"
+        print(f"  Using {shown}.")
+        return levels
+
+
 def _select_dataset() -> tuple[str, dict]:
     print("\n  Available datasets:")
     for index, name in enumerate(_DATASET_CHOICES, 1):
@@ -166,7 +198,7 @@ def _select_dataset() -> tuple[str, dict]:
         preset = {
             "dataset_type": selection,
             "level_coord": "hybrid",
-            "levels": list(range(1, 138)),
+            "levels": _arco_levels(),
             "vars_3D": ["temperature", "specific_humidity", "u_component_of_wind", "v_component_of_wind"],
             "vars_2D": ["surface_pressure", "2m_temperature", "10m_u_component_of_wind", "10m_v_component_of_wind"],
             "static": ["geopotential_at_surface", "land_sea_mask", "sea_ice_cover"],
@@ -360,6 +392,7 @@ def _local_details(preset: dict) -> dict:
         if glob.glob(top):
             break
         print("  That path does not exist or cannot be globbed.")
+    print(f"  Scanning {top} for data files ...", flush=True)
     prog_path, diag_path, static_path = _glob_suggestions(top)
     print("  Suggested file paths were inferred from the directory contents.")
     prog_path = _prompt("Prognostic path", prog_path)
@@ -384,6 +417,8 @@ def _local_details(preset: dict) -> dict:
     preset["level_coord"] = _prompt("Vertical coordinate name", preset["level_coord"])
     preset["height"] = _prompt_int("Grid height", preset["height"])
     preset["width"] = _prompt_int("Grid width", preset["width"])
+    if preset["level_coord"]:
+        print(f"  Reading '{preset['level_coord']}' values from {prog_path} ...", flush=True)
     level_values = _read_level_values(prog_path, preset["level_coord"])
     if level_values is not None:
         # LocalDataset selects levels with nearest-neighbor matching, so the
@@ -402,6 +437,7 @@ def _local_details(preset: dict) -> dict:
         preset["levels"] = list(range(1, n_levels + 1))
     preset["local_paths"] = {"prognostic": prog_path, "diagnostic": diag_path, "static": static_path}
     preset["local_top"] = top
+    print(f"  Scanning {top} for years in file names ...", flush=True)
     years = [
         int(year)
         for year in re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", " ".join(glob.glob(top + "/**", recursive=True)))
@@ -818,7 +854,7 @@ def _pbs_config(system: str, experiment: str, nodes: int, gpus: int) -> dict:
             "nodes": nodes,
             "ncpus": defaults["cpus"],
             "ngpus": gpus,
-            "mem": defaults["mem"] if system == "derecho" else "128GB",
+            "mem": "auto",  # credit submit sizes it from the config; credit check reports the estimate
             "queue": defaults["queue"],
         }
         if system == "casper":
@@ -868,6 +904,7 @@ def _collect_state(args: object, system_info: dict) -> tuple[str, dict]:
         print("  Accelerator: Apple MPS")
     else:
         print("  GPUs: none detected (CPU configuration is still possible)")
+    print("\n  Press Enter to accept the value shown in [brackets], or type your own.")
 
     default_path = os.path.join(os.getcwd(), f"credit_config_{dt.date.today().isoformat()}.yml")
     config_path = os.path.abspath(
@@ -949,6 +986,7 @@ def _repair_state(state: dict) -> None:
 def _begin(args) -> None:
     system_info = _detect_system()
     config_path, state = _collect_state(args, system_info)
+    passed = False
     for attempt in range(3):
         config = _build_config(state)
         _quote_data_variable_names(config)
@@ -960,13 +998,19 @@ def _begin(args) -> None:
         with open(config_path, "w") as output:
             output.write(text)
         print(f"\n  Saved config: {config_path}")
-        print("  Running credit check ...")
+        print("  Running credit check (loading models may take a minute) ...", flush=True)
         if _run_check(config_path) == 0:
+            passed = True
             break
         if attempt == 2:
-            print("  The config still needs corrections; inspect the checker report above.")
             break
         _repair_state(state)
+
+    # Restate the outcome below the checker report, which can be long.
+    if passed:
+        print(f"\n[SUCCESS] Config file created at: {config_path}")
+    else:
+        print(f"\n[ERROR] Config file created at: {config_path}, but credit check still reports errors (see above).")
 
     print("\nNext steps:")
     if state["system"] != "local":

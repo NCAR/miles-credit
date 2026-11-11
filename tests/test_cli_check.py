@@ -298,6 +298,38 @@ def test_postblock_spatial_variables_mismatch_errors(conf):
     assert "spatial_variables" in _text(rep)
 
 
+def _spatial_preblock_and_flatten(conf, flatten_spatial):
+    """Spatial-SP preblock + matching scaler postblocks, plus a flatten_to_tensor
+    block on the same scaler_path with *flatten_spatial* as its spatial_variables."""
+    scaler_path = conf["postblocks"]["per_step"]["scaler"]["args"]["scaler_path"]
+    spatial = ["ERA5/prognostic/2d/SP"]
+    conf["preblocks"]["per_step"]["scaler"] = {
+        "type": "bridgescaler_transform",
+        "args": {"scaler_path": scaler_path, "variables": [], "method": "transform", "spatial_variables": spatial},
+    }
+    conf["postblocks"]["per_step"]["scaler"]["args"]["spatial_variables"] = spatial
+    conf["postblocks"]["per_step"]["scaler_target"]["args"]["spatial_variables"] = spatial
+    flatten_args = {"scaler_path": scaler_path, "variables": [], "method": "transform"}
+    if flatten_spatial is not None:
+        flatten_args["spatial_variables"] = flatten_spatial
+    conf["postblocks"]["per_step"]["flatten"] = {"type": "flatten_to_tensor", "args": flatten_args}
+
+
+def test_flatten_to_tensor_spatial_variables_matches_preblock_ok(conf):
+    """flatten_to_tensor naming the same spatial_variables as the fitting preblock: no error."""
+    _spatial_preblock_and_flatten(conf, ["ERA5/prognostic/2d/SP"])
+    assert "postblocks.per_step.flatten" not in _wheres(_run(conf))
+
+
+def test_flatten_to_tensor_missing_spatial_variables_errors(conf):
+    """flatten_to_tensor forward-scales with a grid-wise scaler but omits
+    spatial_variables — it would fail the column-count check on the first batch."""
+    _spatial_preblock_and_flatten(conf, None)
+    rep = _run(conf)
+    assert "postblocks.per_step.flatten" in _wheres(rep)
+    assert "spatial_variables" in _text(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
@@ -408,6 +440,58 @@ def test_model_levels_mismatch(conf):
     conf["model"]["levels"] = 7
     rep = _run(conf)
     assert "model.levels" in _wheres(rep)
+
+
+def _cubed_model(conf, tmp_path, grid="ne120", **overrides):
+    """Swap in a cubed_wxformer whose adjacency file auto-detects next to se_index."""
+    se_index = tmp_path / f"se_index_{grid}.npy"
+    se_index.touch()
+    (tmp_path / f"se_face_adjacency_{grid}.npz").touch()
+    model = {k: conf["model"][k] for k in ("frames", "levels", "channels", "surface_channels")}
+    model.update(input_only_channels=2, output_only_channels=1)
+    model.update(type="cubed_wxformer", se_index_path=str(se_index), **overrides)
+    conf["model"] = model
+    return conf
+
+
+def test_cubed_wxformer_halo_requires_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_must_exist(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(tmp_path / "missing_scrip.nc")))
+    assert "model.scrip_path" in _wheres(rep)
+    assert "File not found" in _text(rep)
+
+
+def test_cubed_wxformer_scrip_path_present_is_clean(conf, tmp_path):
+    scrip = tmp_path / "ne120np4_scrip.nc"
+    scrip.touch()
+    rep = _run(_cubed_model(conf, tmp_path, scrip_path=str(scrip)))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_without_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_size=0))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_linear_halo_needs_no_scrip_path(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="linear"))
+    assert "model.scrip_path" not in _wheres(rep), _text(rep)
+    assert "model.halo_geometry" not in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_unknown_halo_geometry(conf, tmp_path):
+    rep = _run(_cubed_model(conf, tmp_path, halo_geometry="bilinear"))
+    assert "model.halo_geometry" in _wheres(rep), _text(rep)
+
+
+def test_cubed_wxformer_scrip_required_on_other_resolutions(conf, tmp_path):
+    """Adjacency auto-detect follows the se_index name, so ne30 is caught too."""
+    rep = _run(_cubed_model(conf, tmp_path, grid="ne30"))
+    assert "model.scrip_path" in _wheres(rep), _text(rep)
 
 
 def test_three_dimensional_input_only_vars_count_per_level(conf):
@@ -800,3 +884,191 @@ def test_wxformer_simple_per_stage_list_is_an_error(conf):
 def test_wxformer_simple_unpaddable_grid_is_an_error(conf):
     rep = _run(_simple_conf(conf, image_height=20, image_width=64))
     assert "model.padding" in _wheres(rep)
+
+
+# ===========================================================================
+# Fitted scaler statistics
+# ===========================================================================
+
+
+def _write_standard_scaler(path, mean, var, data_type="target"):
+    import torch
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = torch.tensor(mean, dtype=torch.float64)
+    s.var_x_ = torch.tensor(var, dtype=torch.float64)
+    s.x_columns_ = list(range(len(mean)))
+    s.n_ = 10
+    s._fit = True
+    tree = {"ERA5": {"ERA5/prognostic/3d/Q": s}}
+    save_scaler_dict({data_type: tree} if data_type else tree, str(path))
+
+
+def test_scaler_with_healthy_stats_is_silent(conf, tmp_path):
+    _write_standard_scaler(tmp_path / "scaler.json", [1.0, 2.0], [0.5, 0.1])
+    rep = _run(conf)
+    assert not any("NaN/inf statistic" in f.message for f in rep.findings), _text(rep)
+
+
+def test_scaler_nan_or_zero_variance_levels_error(conf, tmp_path):
+    """All-NaN levels at fit time (e.g. ARCO cloud cover aloft) leave mean 0/NaN, var 0."""
+    _write_standard_scaler(tmp_path / "scaler.json", [0.0, float("nan"), 3.0], [0.0, float("nan"), 1.0])
+    rep = _run(conf)
+    msgs = [f.message for f in rep.findings if f.severity == "error" and "NaN/inf statistic" in f.message]
+    assert len(msgs) == 1, _text(rep)
+    assert "ERA5/prognostic/3d/Q" in msgs[0] and "channel/level: 1, 2" in msgs[0]
+
+
+def test_scaler_stats_without_data_type_level(conf, tmp_path):
+    """Post-only scaler files nest {source: {var: scaler}} with no input/target level."""
+    _write_standard_scaler(tmp_path / "scaler.json", [0.0, 3.0], [0.0, 1.0], data_type=None)
+    rep = _run(conf)
+    assert not any("Check itself failed" in f.message for f in rep.findings), _text(rep, "warning")
+    msgs = [f.message for f in rep.findings if f.severity == "error" and "NaN/inf statistic" in f.message]
+    assert len(msgs) == 1 and "channel/level: 1" in msgs[0], _text(rep)
+
+
+def _exp_transform_q(conf):
+    for name, key in (("exp", "y_processed"), ("exp_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "exp_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def _log_variance_warnings(rep):
+    return [f for f in rep.findings if f.severity == "warning" and f.where.endswith("var_weighting")]
+
+
+def test_log_variance_weight_small_spread_is_silent(conf, tmp_path):
+    """Surface-pressure-like log variances: first-order and lognormal agree."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [5.0, 6.0], [0.01, 0.02])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_log_variance_weight_large_spread_warns(conf, tmp_path):
+    """Humidity-like log variances (> 2 near the surface) make the weight unreliable."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "differ by" in found[0].message
+    assert "variable_weights" in found[0].fix and "credit preprocess" in found[0].fix
+
+
+def test_log_variance_weight_silent_with_exact_physical_stats(conf, tmp_path):
+    """The scaler_physical.json sidecar from credit preprocess gives the exact variance."""
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    _write_standard_scaler(tmp_path / "scaler_physical.json", [1e-3, 2e-3], [1e-6, 4e-6])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):
+    _exp_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    conf["loss"]["args"]["var_weighting"] = "none"
+    assert not _log_variance_warnings(_run(conf))
+
+
+def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
+    """A log-space loss scores in log units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    assert not _log_variance_warnings(_run(conf))
+
+
+# ===========================================================================
+# Gradient clipping
+# ===========================================================================
+
+
+def test_dynamic_grad_clip_valid(conf):
+    conf["trainer"]["grad_max_norm"] = "dynamic"
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0, "warmup_steps": 10}
+    assert not {w for w in _wheres(_run(conf)) if "grad" in w}
+
+
+def test_dynamic_grad_clip_bad_values(conf):
+    conf["trainer"]["grad_max_norm"] = "dynamic"
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 0.5}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf))
+    conf["trainer"]["dynamic_grad_clip"] = {"facter": 3.0}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf))
+
+
+def test_grad_max_norm_rejects_unknown_string(conf):
+    conf["trainer"]["grad_max_norm"] = "adaptive"
+    assert "trainer.grad_max_norm" in _wheres(_run(conf))
+
+
+def test_dynamic_grad_clip_ignored_without_dynamic_warns(conf):
+    conf["trainer"]["grad_max_norm"] = 1.0
+    conf["trainer"]["dynamic_grad_clip"] = {"factor": 3.0}
+    assert "trainer.dynamic_grad_clip" in _wheres(_run(conf), "warning")
+
+
+# ---------------------------------------------------------------------------
+# pbs.mem — config-derived memory estimate
+# ---------------------------------------------------------------------------
+
+
+def _mem_findings(conf):
+    from credit.cli._check import _check_pbs
+
+    rep = _Report("test.yml")
+    _check_pbs(conf, rep)
+    return [f for f in rep.findings if f.where == "pbs.mem"]
+
+
+def _big_conf(tmp_path, gib_per_channel, **pbs):
+    """_base_conf (13 channels per sample) on a grid where one float32 channel is *gib_per_channel* GiB."""
+    conf = _base_conf(tmp_path)
+    conf["model"]["image_height"] = 1
+    conf["model"]["image_width"] = int(gib_per_channel * 2**28)
+    conf["trainer"].update(thread_workers=0, valid_thread_workers=0)
+    conf["pbs"] = {"project": "X", "job_name": "j", "walltime": "01:00:00", "ngpus": 4, **pbs}
+    return conf
+
+
+def test_mem_gb_parses_pbs_units():
+    from credit.cli._check import _mem_gb
+
+    assert [_mem_gb(v) for v in ("480GB", "1tb", "512mb", " 64 gb ")] == [480, 1024, 0.5, 64]
+    assert _mem_gb("auto") is None and _mem_gb(None) is None
+
+
+def test_pbs_mem_auto_reports_the_request(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, queue="main", mem="auto"))
+    assert finding.severity == "info"
+    assert "will request 480GB per node for training" in finding.message
+    assert "--gpus" in finding.message
+
+
+def test_request_below_estimate_warns(tmp_path):
+    # (2 loaders x 13 GiB + 4) x 4 GPUs x 1.3 = 156 GB: over 64GB, under a Casper node.
+    (finding,) = _mem_findings(_big_conf(tmp_path, 1.0, queue="casper", gpu_type="a100_80gb", mem="64GB"))
+    assert finding.severity == "warning" and "pbs.mem 64GB is below the estimated" in finding.message
+    assert "mem: auto" in finding.fix
+    assert _mem_findings(_big_conf(tmp_path, 1.0, queue="casper", gpu_type="a100_80gb", mem="256GB")) == []
+    # unset mem is compared with the site default: 64GB for one Casper GPU vs (26 x 3 + 4) x 1.3 = 107 GB
+    (finding,) = _mem_findings(_big_conf(tmp_path, 3.0, queue="casper", gpu_type="a100_80gb", ngpus=1))
+    assert "pbs.mem is unset, so `credit submit` requests 64GB" in finding.message
+
+
+def test_estimate_over_a_node_warns_once(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 20.0, queue="main", mem="480GB"))
+    assert "more than one derecho node offers" in finding.message
+    info, warning = _mem_findings(_big_conf(tmp_path, 20.0, queue="casper", mem="auto"))
+    assert "will request 704GB" in info.message
+    assert "pbs.gpu_type" in warning.fix
+
+
+def test_unknown_cluster_still_reports_memory(tmp_path):
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, mem="auto"))  # no queue
+    assert finding.severity == "info"
+    assert "on Casper" in finding.message and "on Derecho" in finding.message
+    (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, queue="gpudev", mem="100GB"))  # both clusters
+    assert "was not compared" in finding.message
