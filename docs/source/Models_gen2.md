@@ -195,7 +195,7 @@ measures the rest from the first preprocessed batch:
 | input channels, `frames` | the concatenated input `x` (`B, C, T, H, W`) |
 | output channels | the concatenated target `y` |
 | grid height and width | the last two dimensions of `x` |
-| boundary padding | the smallest pad that makes the padded grid a multiple of `lcm` over stages *k* of `prod(cross_embed_strides[:k+1]) × lcm(local_window_size, global_window_size[k])` |
+| boundary padding | the smallest pad that makes the padded grid a multiple of `lcm` over stages *k* of `2^(k+1) × lcm(local_window_size, global_window_size / 2^k)` |
 
 `credit train` builds the model from one real sample right after creating it,
 before compiling, wrapping it for DDP/FSDP2, creating the optimizer, or taking
@@ -212,16 +212,37 @@ model; if the config's model block differs, a warning lists the differences and
 the saved values are used. Keep `model_hparams.yml` next to the checkpoint when
 you copy a run.
 
+Every architecture setting is a single number. The four encoder stages are
+derived from it: each stage halves the grid (stride 2, fixed) and doubles the
+channels, which is what the decoder's skip connections need.
+
+| Setting (default) | Stage *k* = 0, 1, 2, 3 |
+|---|---|
+| `dim` (64) | `dim × 2^k` → 64, 128, 256, 512 |
+| `depth` (4) | `depth` blocks in every stage |
+| `global_window_size` (8) | `global_window_size / 2^k` → 8, 4, 2, 1 (must be a multiple of 8) |
+| `local_window_size` (4) | the same in every stage |
+| `cross_embed_kernel_size` (32), `cross_embed_num_kernels` (unset) | stage 0: powers of two ending at `cross_embed_kernel_size`; stages 1–3: 2, 4 |
+
+The kernel settings follow the original CrossFormer layout: stage 0 is a wide
+multi-scale stem and the later stages are two-scale patch merges. Give one
+number, `cross_embed_kernel_size`, and the stem runs from 4 up to it (32 gives
+4, 8, 16, 32, the WXFormer default; 16 gives 4, 8, 16). Add
+`cross_embed_num_kernels` to choose how many stem kernels there are instead
+(32 with 2 gives 16, 32; 32 with 5 gives 2, 4, 8, 16, 32). The largest kernel
+must be a power of two of at least 4, and the smallest at least 2. Per-stage
+lists, `cross_embed_kernel_sizes`, and `cross_embed_strides` are rejected with a
+message naming the single-number setting to use.
+
 ```yaml
 model:
   type: "wxformer_simple"
-  dim: [32, 64, 128, 256]       # must halve stage by stage
-  depth: [2, 2, 8, 2]
-  global_window_size: [8, 4, 2, 1]
+  dim: 32                       # stage widths 32, 64, 128, 256
+  depth: 4                      # blocks per stage
+  global_window_size: 8         # 8, 4, 2, 1 across the stages
   local_window_size: 4
-  cross_embed_kernel_sizes: [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
-  cross_embed_strides: [2, 2, 2, 2]  # with these windows: pad to a multiple of 64
-  use_spectral_norm: True
+  cross_embed_kernel_size: 32   # stem kernels 4, 8, 16, 32; later stages 2, 4
+  use_spectral_norm: True       # with these windows: pad to a multiple of 64
   padding:                      # a policy, not pad sizes
     mode: earth                 # earth (default), mirror, or none
     min_pad_lat: 0              # at least this many cells per side

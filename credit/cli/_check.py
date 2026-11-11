@@ -778,6 +778,16 @@ def _check_simple_model_geometry(conf: dict, rep: _Report) -> None:
         rep.error("model", str(exc))
         return
 
+    stages = model.stages
+    rep.info(
+        "model",
+        "wxformer_simple encoder stages: dim "
+        + "/".join(str(s["dim"]) for s in stages)
+        + f", depth {stages[0]['depth']} each, global windows "
+        + "/".join(str(s["global_window_size"]) for s in stages)
+        + f", local window {stages[0]['local_window_size']}, stage-0 kernels {stages[0]['cross_embed_kernel_sizes']} "
+        + f"(later stages {stages[1]['cross_embed_kernel_sizes']}), stride {stages[0]['stride']}.",
+    )
     shapes = _simple_model_shapes(conf)
     if shapes:
         n_in, frames, n_out = shapes

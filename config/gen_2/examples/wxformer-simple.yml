@@ -224,22 +224,27 @@ postblocks:
 model:
   type: "wxformer_simple"
 
-  # Model capacity: increase dim/depth for a larger model. dim must halve stage by
-  # stage (dim[k] = dim[-1] / 2**(3-k)) for the decoder skip connections.
-  dim: [32, 64, 128, 256]
-  depth: [ 2, 2, 8, 2 ]
+  # Every architecture setting is a single number; the 4 encoder stages are derived
+  # from it. Each stage halves the grid (stride 2, fixed) and doubles the channels.
+  #
+  # Model capacity: increase dim/depth for a larger model.
+  dim: 32      # stage widths dim * 2**k  -> 32, 64, 128, 256
+  depth: 4     # attention blocks in every stage
 
+  # Attention windows. global_window_size is halved at each stage (8 -> 8, 4, 2, 1),
+  # so it must be a multiple of 8; local_window_size is the same at every stage.
   # The padded grid must be a multiple of
-  #   lcm over stages k of  prod(strides[:k+1]) * lcm(local_window, global_window[k])
+  #   lcm over stages k of  2**(k+1) * lcm(local_window_size, global_window_size / 2**k)
   # = 64 here, so 181x360 is padded to 192x384 (lat [5, 6], lon [12, 12]).
-  global_window_size: [ 8, 4, 2, 1 ]
+  global_window_size: 8
   local_window_size: 4
-  cross_embed_kernel_sizes:
-    - [ 4, 8, 16, 32 ]
-    - [ 2, 4 ]
-    - [ 2, 4 ]
-    - [ 2, 4 ]
-  cross_embed_strides: [ 2, 2, 2, 2 ]
+
+  # Multi-scale patch embedding. Stage 0 uses consecutive powers of two ending at
+  # cross_embed_kernel_size (32 -> 4, 8, 16, 32); stages 1-3 always use 2 and 4.
+  # Optionally set cross_embed_num_kernels to choose how many stage-0 kernels
+  # (32 with 2 -> 16, 32; 32 with 5 -> 2, 4, 8, 16, 32).
+  cross_embed_kernel_size: 32
+  # cross_embed_num_kernels: 4
   attn_dropout: 0.
   ff_dropout: 0.
   use_spectral_norm: True

@@ -28,7 +28,6 @@ import os
 import warnings
 
 import torch
-import torch.nn.functional as F
 import yaml
 from einops import rearrange
 from einops.layers.torch import Rearrange
@@ -453,34 +452,108 @@ class Transformer(nn.Module):
 # --------------------------------------------------------------------------------------- #
 
 
-def _per_stage(value, name):
-    """Broadcast a scalar to the 4 encoder stages and check list lengths."""
+NUM_STAGES = 4  # encoder stages; the decoder mirrors them with 3 skip connections
+STRIDE = 2  # every CrossEmbedLayer halves the grid
+
+# The per-stage lists other WXFormers take, and how each is spelled here.
+_LIST_KEY_HINTS = {
+    "cross_embed_strides": "it is not a setting: every stage downsamples by 2",
+    "cross_embed_kernel_sizes": (
+        "use cross_embed_kernel_size (largest stage-0 kernel, e.g. 32 for [4, 8, 16, 32]) and optionally "
+        "cross_embed_num_kernels (how many stage-0 kernels); stages 1-3 always use [2, 4]"
+    ),
+}
+
+
+def _is_power_of_two(n: int) -> bool:
+    return n > 0 and n & (n - 1) == 0
+
+
+def _scalar(value, name, cast, hint):
+    """``cast(value)``, rejecting the per-stage lists other WXFormers accept."""
     if isinstance(value, (list, tuple)):
-        if len(value) != 4:
-            raise ValueError(
-                f"WXFormerSimple: {name} has {len(value)} entries; it needs exactly 4 (one per stage), "
-                "or a single scalar to use for every stage."
-            )
-        return list(value)
-    return [value] * 4
+        hint = f"; {hint}" if hint else ""
+        raise ValueError(f"WXFormerSimple: {name} must be a single number, not a per-stage list ({list(value)}){hint}.")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or cast(value) != value:
+        raise ValueError(f"WXFormerSimple: {name} must be {'an int' if cast is int else 'a number'}, got {value!r}")
+    return cast(value)
 
 
-def required_divisor(cross_embed_strides, local_window_size, global_window_size) -> int:
+def cross_embed_kernels(kernel_size: int = 32, num_kernels: int | None = None, dim: int | None = None) -> list:
+    """Kernel sizes of each stage's CrossEmbedLayer, following the CrossFormer layout.
+
+    Stage 0 is a multi-scale stem: ``num_kernels`` consecutive powers of two ending at
+    ``kernel_size``. Without ``num_kernels`` the stem starts at ``2 * STRIDE``, so the
+    default ``kernel_size=32`` gives the original ``[4, 8, 16, 32]``. Stages 1-3 are
+    two-scale patch merges, ``[STRIDE, 2 * STRIDE] = [2, 4]``.
+
+    Args:
+        kernel_size: the largest stage-0 kernel; a power of two >= ``2 * STRIDE``.
+        num_kernels: number of stage-0 kernels; ``None`` to stop at ``2 * STRIDE``.
+        dim: stage-0 channels, if known; each kernel branch needs at least one channel.
+
+    Returns:
+        One sorted kernel list per stage.
+    """
+    if not _is_power_of_two(kernel_size) or kernel_size < 2 * STRIDE:
+        raise ValueError(
+            f"WXFormerSimple: cross_embed_kernel_size={kernel_size} must be a power of two >= {2 * STRIDE} "
+            "(e.g. 16, 32, 64)."
+        )
+    if num_kernels is None:
+        num_kernels = int(math.log2(kernel_size // (2 * STRIDE))) + 1
+    if num_kernels < 1:
+        raise ValueError(f"WXFormerSimple: cross_embed_num_kernels={num_kernels} must be >= 1.")
+    smallest = kernel_size // 2 ** (num_kernels - 1)
+    if smallest < STRIDE:
+        most = int(math.log2(kernel_size // STRIDE)) + 1
+        raise ValueError(
+            f"WXFormerSimple: cross_embed_num_kernels={num_kernels} halves cross_embed_kernel_size={kernel_size} "
+            f"below the stride ({STRIDE}); use at most {most} kernels for this kernel size."
+        )
+    if dim is not None and dim // 2 ** (num_kernels - 1) < 1:
+        raise ValueError(
+            f"WXFormerSimple: dim={dim} cannot be split across {num_kernels} stage-0 kernels (each smaller "
+            f"kernel gets half the channels of the last); raise dim or lower cross_embed_num_kernels."
+        )
+    stem = [smallest * 2**j for j in range(num_kernels)]
+    return [stem] + [[STRIDE, 2 * STRIDE] for _ in range(NUM_STAGES - 1)]
+
+
+def stage_plan(arch: dict) -> list[dict]:
+    """Per-stage layer settings derived from the scalar architecture.
+
+    Stage ``k`` has ``dim * 2**k`` channels, ``depth`` attention blocks, global window
+    ``global_window_size // 2**k``, local window ``local_window_size``, stride ``STRIDE``,
+    and the kernels from :func:`cross_embed_kernels`.
+    """
+    kernels = cross_embed_kernels(arch["cross_embed_kernel_size"], arch["cross_embed_num_kernels"], arch["dim"])
+    return [
+        {
+            "dim": arch["dim"] * 2**k,
+            "depth": arch["depth"],
+            "global_window_size": arch["global_window_size"] // 2**k,
+            "local_window_size": arch["local_window_size"],
+            "cross_embed_kernel_sizes": kernels[k],
+            "stride": STRIDE,
+        }
+        for k in range(NUM_STAGES)
+    ]
+
+
+def required_divisor(local_window_size: int, global_window_size: int) -> int:
     """Smallest number the padded height and width must both be multiples of.
 
-    Each CrossEmbedLayer divides the grid exactly by its stride (its padding is
-    ``kernel - stride``), so stage ``k`` is ``n / prod(strides[:k+1])`` cells wide.
-    That size must tile into both attention windows at stage ``k``, and the decoder's
-    skip connections need every stage to be an exact division. The answer is
-    ``lcm_k(prod(strides[:k+1]) * lcm(local[k], global[k]))``.
+    Each CrossEmbedLayer divides the grid exactly by ``STRIDE`` (its padding is
+    ``kernel - stride``), so stage ``k`` is ``n / 2**(k+1)`` cells wide. That size must
+    tile into both attention windows at stage ``k``, and the decoder's skip connections
+    need every stage to be an exact division. The answer is
+    ``lcm_k(2**(k+1) * lcm(local_window_size, global_window_size // 2**k))``.
     """
-    strides = _per_stage(cross_embed_strides, "cross_embed_strides")
-    local_ws = _per_stage(local_window_size, "local_window_size")
-    global_ws = _per_stage(global_window_size, "global_window_size")
-    divisor, scale = 1, 1
-    for stride, local_w, global_w in zip(strides, local_ws, global_ws):
-        scale *= int(stride)
-        divisor = math.lcm(divisor, scale * math.lcm(int(local_w), int(global_w)))
+    divisor = 1
+    for k in range(NUM_STAGES):
+        global_w = max(int(global_window_size) // 2**k, 1)
+        divisor = math.lcm(divisor, STRIDE ** (k + 1) * math.lcm(int(local_window_size), global_w))
     return divisor
 
 
@@ -577,16 +650,22 @@ def _to_builtin(value):
 class WXFormerSimple(BaseModel):
     """WXFormer whose data-shaped layers are built from the first batch it sees.
 
+    Every architecture setting is a single number; the four encoder stages are derived
+    from it (see :func:`stage_plan`). Each stage halves the grid (stride 2) and doubles
+    the channels, which is what the decoder's skip connections need.
+
     Args:
-        dim (tuple): channels of each encoder stage. Must be a halving pyramid
-            (``dim[k] == dim[-1] // 2**(3-k)``) because the decoder concatenates skip
-            connections of those widths.
-        depth (tuple): attention blocks per encoder stage.
+        dim (int): channels of the first encoder stage; stage ``k`` has ``dim * 2**k``.
+        depth (int): attention blocks in every encoder stage.
         dim_head (int): channels per attention head.
-        global_window_size (tuple): long-range attention window per stage.
-        local_window_size (int or tuple): short-range attention window (per stage if a tuple).
-        cross_embed_kernel_sizes (tuple): kernel sizes of each stage's CrossEmbedLayer.
-        cross_embed_strides (tuple): downsampling stride of each stage.
+        global_window_size (int): long-range attention window of the first stage, halved
+            at each later stage (8 gives 8, 4, 2, 1); must be a multiple of 8.
+        local_window_size (int): short-range attention window, the same for every stage.
+        cross_embed_kernel_size (int): largest kernel of the first stage's multi-scale
+            CrossEmbedLayer, a power of two. The stage-0 kernels are consecutive powers
+            of two ending here (32 gives 4, 8, 16, 32); stages 1-3 use 2 and 4.
+        cross_embed_num_kernels (int, optional): number of stage-0 kernels. By default
+            they start at 4, so 32 gives 4 kernels; 32 with 2 kernels gives 16, 32.
         attn_dropout (float): attention dropout.
         ff_dropout (float): feed-forward dropout.
         use_spectral_norm (bool): spectral-normalize every conv and linear layer.
@@ -605,13 +684,13 @@ class WXFormerSimple(BaseModel):
 
     def __init__(
         self,
-        dim: tuple = (64, 128, 256, 512),
-        depth: tuple = (2, 2, 8, 2),
+        dim: int = 64,
+        depth: int = 4,
         dim_head: int = 32,
-        global_window_size: tuple = (8, 4, 2, 1),
+        global_window_size: int = 8,
         local_window_size: int = 4,
-        cross_embed_kernel_sizes: tuple = ((4, 8, 16, 32), (2, 4), (2, 4), (2, 4)),
-        cross_embed_strides: tuple = (2, 2, 2, 2),
+        cross_embed_kernel_size: int = 32,
+        cross_embed_num_kernels: int | None = None,
         attn_dropout: float = 0.0,
         ff_dropout: float = 0.0,
         use_spectral_norm: bool = True,
@@ -622,27 +701,41 @@ class WXFormerSimple(BaseModel):
     ):
         super().__init__()
 
-        dim = [int(d) for d in _per_stage(dim, "dim")]
-        kernels = cross_embed_kernel_sizes
-        if isinstance(kernels, (list, tuple)) and kernels and not isinstance(kernels[0], (list, tuple)):
-            kernels = [kernels] * 4  # one kernel list shared by every stage
+        retired = {k: kwargs.pop(k) for k in list(kwargs) if k in _LIST_KEY_HINTS}
+        if retired:
+            raise ValueError(
+                "WXFormerSimple: "
+                + "; ".join(f"remove {k} ({_LIST_KEY_HINTS[k]})" for k in retired)
+                + ". wxformer_simple takes single-number settings and derives the per-stage values."
+            )
+        dim_hint = f"use dim: {dim[0]} (stage k gets dim * 2**k)" if isinstance(dim, (list, tuple)) and dim else ""
+        global_hint = (
+            f"use global_window_size: {global_window_size[0]} (halved at each stage)"
+            if isinstance(global_window_size, (list, tuple)) and global_window_size
+            else ""
+        )
         self.arch = {
-            "dim": dim,
-            "depth": [int(d) for d in _per_stage(depth, "depth")],
-            "dim_head": int(dim_head),
-            "global_window_size": [int(w) for w in _per_stage(global_window_size, "global_window_size")],
-            "local_window_size": [int(w) for w in _per_stage(local_window_size, "local_window_size")],
-            "cross_embed_kernel_sizes": [list(k) for k in _per_stage(kernels, "cross_embed_kernel_sizes")],
-            "cross_embed_strides": [int(s) for s in _per_stage(cross_embed_strides, "cross_embed_strides")],
+            "dim": _scalar(dim, "dim", int, dim_hint),
+            "depth": _scalar(depth, "depth", int, "every stage gets the same depth"),
+            "dim_head": _scalar(dim_head, "dim_head", int, ""),
+            "global_window_size": _scalar(global_window_size, "global_window_size", int, global_hint),
+            "local_window_size": _scalar(local_window_size, "local_window_size", int, "it is shared by every stage"),
+            "cross_embed_kernel_size": _scalar(
+                cross_embed_kernel_size, "cross_embed_kernel_size", int, _LIST_KEY_HINTS["cross_embed_kernel_sizes"]
+            ),
+            "cross_embed_num_kernels": (
+                None
+                if cross_embed_num_kernels is None
+                else _scalar(cross_embed_num_kernels, "cross_embed_num_kernels", int, "")
+            ),
             "attn_dropout": float(attn_dropout),
             "ff_dropout": float(ff_dropout),
             "use_spectral_norm": bool(use_spectral_norm),
             "padding": _normalize_padding(padding),
         }
         self._check_arch()
-        self.divisor = required_divisor(
-            self.arch["cross_embed_strides"], self.arch["local_window_size"], self.arch["global_window_size"]
-        )
+        self.stages = stage_plan(self.arch)
+        self.divisor = required_divisor(self.arch["local_window_size"], self.arch["global_window_size"])
 
         self.output_channels_hint = output_channels
         self.output_frames_hint = int(output_frames)
@@ -669,20 +762,21 @@ class WXFormerSimple(BaseModel):
     # ------------------------------------------------------------------ #
 
     def _check_arch(self):
-        dim, dim_head = self.arch["dim"], self.arch["dim_head"]
-        if dim_head > min(dim):
+        arch = self.arch
+        for key in ("dim", "depth", "dim_head", "local_window_size"):
+            if arch[key] < 1:
+                raise ValueError(f"WXFormerSimple: {key}={arch[key]} must be >= 1.")
+        if arch["dim_head"] > arch["dim"]:
             raise ValueError(
-                f"WXFormerSimple: dim_head={dim_head} is larger than the smallest stage dim {min(dim)}; "
-                f"set dim_head <= {min(dim)}."
+                f"WXFormerSimple: dim_head={arch['dim_head']} is larger than dim={arch['dim']} (the first "
+                f"stage's width); set dim_head <= {arch['dim']}."
             )
-        pyramid = [dim[-1] // 8, dim[-1] // 4, dim[-1] // 2, dim[-1]]
-        if dim != pyramid:
+        last_stage = 2 ** (NUM_STAGES - 1)
+        if arch["global_window_size"] < last_stage or arch["global_window_size"] % last_stage:
             raise ValueError(
-                f"WXFormerSimple: dim={dim} must halve stage by stage (the decoder concatenates skip "
-                f"connections of those widths); for dim[-1]={dim[-1]} use dim={pyramid}."
+                f"WXFormerSimple: global_window_size={arch['global_window_size']} is halved at each of the "
+                f"{NUM_STAGES} stages, so it must be a multiple of {last_stage} (e.g. 8 gives 8, 4, 2, 1)."
             )
-        if pyramid[0] == 0 or pyramid[0] % dim[0]:
-            raise ValueError(f"WXFormerSimple: dim[-1]={dim[-1]} is too small; use at least 8 * dim[0].")
 
     @property
     def needs_materialize(self) -> bool:
@@ -801,8 +895,8 @@ class WXFormerSimple(BaseModel):
         self._check_expected(measured)
 
         arch = self.arch
-        dim = arch["dim"]
-        last_dim = dim[-1]
+        first_dim = arch["dim"]
+        last_dim = self.stages[-1]["dim"]
 
         # Attributes shared with CrossFormer: the gen2 trainer's domain-parallel path
         # reads padding_opt / image_height / image_width / use_padding / use_interp.
@@ -813,27 +907,26 @@ class WXFormerSimple(BaseModel):
         self.output_channels = output_channels * output_frames
         self.use_padding = any(pad_lat) or any(pad_lon)
         self.padding_opt = TensorPadding(mode=arch["padding"]["mode"], pad_lat=pad_lat, pad_lon=pad_lon)
-        self.use_interp = True  # only acts when stage-0 stride != 2 leaves the decoder short
+        self.use_interp = False  # every stage strides by 2, so the decoder lands back on the padded grid
 
-        dims = [self.input_channels, *dim]
         self.layers = nn.ModuleList([])
-        for (dim_in, dim_out), num_layers, global_wsize, local_wsize, kernel_sizes, stride in zip(
-            zip(dims[:-1], dims[1:]),
-            arch["depth"],
-            arch["global_window_size"],
-            arch["local_window_size"],
-            arch["cross_embed_kernel_sizes"],
-            arch["cross_embed_strides"],
-        ):
+        dim_in = self.input_channels
+        for stage in self.stages:
+            dim_out = stage["dim"]
             self.layers.append(
                 nn.ModuleList(
                     [
-                        CrossEmbedLayer(dim_in=dim_in, dim_out=dim_out, kernel_sizes=kernel_sizes, stride=stride),
+                        CrossEmbedLayer(
+                            dim_in=dim_in,
+                            dim_out=dim_out,
+                            kernel_sizes=stage["cross_embed_kernel_sizes"],
+                            stride=stage["stride"],
+                        ),
                         Transformer(
                             dim=dim_out,
-                            local_window_size=local_wsize,
-                            global_window_size=global_wsize,
-                            depth=num_layers,
+                            local_window_size=stage["local_window_size"],
+                            global_window_size=stage["global_window_size"],
+                            depth=stage["depth"],
                             dim_head=arch["dim_head"],
                             attn_dropout=arch["attn_dropout"],
                             ff_dropout=arch["ff_dropout"],
@@ -841,12 +934,14 @@ class WXFormerSimple(BaseModel):
                     ]
                 )
             )
+            dim_in = dim_out
 
         # Decoder: sub-pixel conv + PixelShuffle, ICNR-initialized with zero bias (see the
-        # checkerboard notes in crossformer.py).
-        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, dim[0])
-        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, dim[0])
-        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, dim[0])
+        # checkerboard notes in crossformer.py). last_dim // 8 == first_dim, so the
+        # GroupNorm groups (first_dim) always divide every block's channels.
+        self.up_block1 = UpBlockPS(1 * last_dim, last_dim // 2, first_dim)
+        self.up_block2 = UpBlockPS(2 * (last_dim // 2), last_dim // 4, first_dim)
+        self.up_block3 = UpBlockPS(2 * (last_dim // 4), last_dim // 8, first_dim)
         scale = 2
         ps_conv = nn.Conv2d(2 * (last_dim // 8), self.output_channels * (scale**2), kernel_size=3, stride=1, padding=1)
         icnr_init_(ps_conv.weight, scale)
@@ -913,11 +1008,6 @@ class WXFormerSimple(BaseModel):
         x = torch.cat([x, encodings[0]], dim=1)
         x = self.up_block4(x)
 
-        # The decoder upsamples 2x past stage 0, so with a stage-0 stride other than 2
-        # it lands off the padded grid; resize back before cutting the padding off.
-        if self.use_interp and tuple(x.shape[-2:]) != (h, w):
-            x = F.interpolate(x, size=(h, w), mode="bilinear")
-
         if self.use_padding:
             x = self.padding_opt.unpad(x)
 
@@ -971,8 +1061,8 @@ class WXFormerSimple(BaseModel):
             "dim_head",
             "global_window_size",
             "local_window_size",
-            "cross_embed_kernel_sizes",
-            "cross_embed_strides",
+            "cross_embed_kernel_size",
+            "cross_embed_num_kernels",
             "attn_dropout",
             "ff_dropout",
             "use_spectral_norm",

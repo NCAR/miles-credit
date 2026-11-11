@@ -17,14 +17,16 @@ from credit.models.base_model import BaseModel
 from credit.models.wxformer.wxformer_simple import (
     HPARAMS_FILENAME,
     WXFormerSimple,
+    cross_embed_kernels,
     load_hparams,
     materialize_from_data,
     required_divisor,
     resolve_padding,
+    stage_plan,
 )
 
-# Small but real: divisor 64 with the default strides/windows.
-ARCH = {"dim": [16, 32, 64, 128], "depth": [1, 1, 1, 1], "dim_head": 8}
+# Small but real: divisor 64 with the default windows.
+ARCH = {"dim": 16, "depth": 1, "dim_head": 8}
 
 
 def _model(**overrides):
@@ -92,11 +94,6 @@ def test_same_seed_builds_identical_weights():
         assert torch.equal(pa, pb), name
 
 
-def test_stage0_stride_four_resizes_back_to_the_grid():
-    model, x = _built(cross_embed_strides=[4, 2, 2, 2], height=181, width=360)
-    assert model(x).shape == (2, 6, 1, 181, 360)
-
-
 def test_target_on_another_grid_is_rejected():
     model = _model()
     with pytest.raises(ValueError, match="differ"):
@@ -112,14 +109,90 @@ def test_base_models_do_not_need_materializing():
 # ---------------------------------------------------------------------------
 
 
-def test_non_pyramid_dim_rejected_with_suggestion():
-    with pytest.raises(ValueError, match=r"\[16, 32, 64, 128\]"):
-        _model(dim=[32, 32, 64, 128])
+def test_stages_are_derived_from_scalars():
+    stages = _model(dim=32, depth=3, global_window_size=16, local_window_size=2).stages
+    assert [s["dim"] for s in stages] == [32, 64, 128, 256]
+    assert [s["depth"] for s in stages] == [3, 3, 3, 3]
+    assert [s["global_window_size"] for s in stages] == [16, 8, 4, 2]
+    assert [s["local_window_size"] for s in stages] == [2, 2, 2, 2]
+    assert [s["stride"] for s in stages] == [2, 2, 2, 2]
 
 
-def test_wrong_stage_count_rejected():
-    with pytest.raises(ValueError, match="exactly 4"):
-        _model(depth=[1, 1])
+def test_defaults_match_the_original_wxformer_layout():
+    """Everything but depth reproduces the old list defaults."""
+    model = WXFormerSimple()
+    assert [s["dim"] for s in model.stages] == [64, 128, 256, 512]
+    assert [s["global_window_size"] for s in model.stages] == [8, 4, 2, 1]
+    assert [s["cross_embed_kernel_sizes"] for s in model.stages] == [[4, 8, 16, 32], [2, 4], [2, 4], [2, 4]]
+    assert model.divisor == 64
+    assert stage_plan(model.arch) == model.stages
+
+
+@pytest.mark.parametrize(
+    "kernel_size,num_kernels,stem",
+    [
+        (32, None, [4, 8, 16, 32]),
+        (16, None, [4, 8, 16]),
+        (4, None, [4]),
+        (64, None, [4, 8, 16, 32, 64]),
+        (32, 2, [16, 32]),
+        (32, 5, [2, 4, 8, 16, 32]),
+        (8, 1, [8]),
+    ],
+)
+def test_cross_embed_kernels(kernel_size, num_kernels, stem):
+    assert cross_embed_kernels(kernel_size, num_kernels) == [stem, [2, 4], [2, 4], [2, 4]]
+
+
+@pytest.mark.parametrize(
+    "kwargs,match",
+    [
+        ({"kernel_size": 24}, "power of two"),
+        ({"kernel_size": 2}, "power of two"),
+        ({"kernel_size": 32, "num_kernels": 0}, ">= 1"),
+        ({"kernel_size": 32, "num_kernels": 6}, "at most 5 kernels"),
+        ({"kernel_size": 32, "num_kernels": 5, "dim": 8}, "cannot be split"),
+    ],
+)
+def test_bad_cross_embed_kernels_rejected(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        cross_embed_kernels(**kwargs)
+
+
+def test_kernel_settings_flow_into_the_model():
+    model, x = _built(cross_embed_kernel_size=16, cross_embed_num_kernels=2)
+    assert model.stages[0]["cross_embed_kernel_sizes"] == [8, 16]
+    assert [conv[1].kernel_size[0] for conv in model.layers[0][0].convs] == [8, 16]
+    assert model(x).shape == (2, 6, 1, 37, 70)
+
+
+@pytest.mark.parametrize(
+    "overrides,match",
+    [
+        ({"dim": [16, 32, 64, 128]}, "use dim: 16"),
+        ({"depth": [1, 1, 1, 1]}, "same depth"),
+        ({"global_window_size": [8, 4, 2, 1]}, "use global_window_size: 8"),
+        ({"local_window_size": [4, 4, 4, 4]}, "single number"),
+        ({"cross_embed_kernel_size": [4, 8, 16, 32]}, "single number"),
+        ({"cross_embed_strides": [2, 2, 2, 2]}, "remove cross_embed_strides"),
+        ({"cross_embed_kernel_sizes": [[4, 8], [2, 4], [2, 4], [2, 4]]}, "use cross_embed_kernel_size"),
+        ({"depth": 1.5}, "must be an int"),
+    ],
+)
+def test_per_stage_lists_are_rejected_with_the_scalar_to_use(overrides, match):
+    with pytest.raises(ValueError, match=match):
+        _model(**overrides)
+
+
+@pytest.mark.parametrize("window", [4, 6, 12])
+def test_global_window_must_survive_halving(window):
+    with pytest.raises(ValueError, match="multiple of 8"):
+        _model(global_window_size=window)
+
+
+def test_dim_head_wider_than_dim_rejected():
+    with pytest.raises(ValueError, match="dim_head=32 is larger than dim=16"):
+        _model(dim_head=32)
 
 
 def test_legacy_keys_matching_the_data_are_accepted():
@@ -139,7 +212,9 @@ def test_legacy_keys_disagreeing_with_the_data_raise():
 
 
 def test_required_divisor_defaults():
-    assert required_divisor([2, 2, 2, 2], 4, [8, 4, 2, 1]) == 64
+    assert required_divisor(4, 8) == 64
+    assert required_divisor(4, 16) == 64
+    assert required_divisor(3, 8) == 48
 
 
 @pytest.mark.parametrize(
@@ -190,8 +265,9 @@ def test_hparams_include_defaults_and_measured_values(tmp_path):
     with open(path) as f:
         saved = yaml.safe_load(f)
     assert saved["type"] == "wxformer_simple"
-    assert saved["cross_embed_strides"] == [2, 2, 2, 2]  # a default, never in the config
-    assert saved["local_window_size"] == [4, 4, 4, 4]
+    assert saved["cross_embed_kernel_size"] == 32  # a default, never in the config
+    assert saved["cross_embed_num_kernels"] is None
+    assert saved["depth"] == 1 and saved["local_window_size"] == 4
     assert saved["input_channels"] == 7 and saved["output_channels"] == 6
     assert saved["pad_lat"] == [13, 14]
 
@@ -226,9 +302,9 @@ def test_load_model_prefers_saved_hparams_over_edited_config(tmp_path, caplog):
     model.eval()
     _save_trained(tmp_path, model)
 
-    conf = {"save_loc": str(tmp_path), "model": {"type": "wxformer_simple", **ARCH, "depth": [2, 2, 2, 2]}}
+    conf = {"save_loc": str(tmp_path), "model": {"type": "wxformer_simple", **ARCH, "depth": 2}}
     loaded = load_model(conf, load_weights=True).eval()
-    assert loaded.arch["depth"] == [1, 1, 1, 1]
+    assert loaded.arch["depth"] == 1
     assert "using the saved values" in caplog.text
     with torch.no_grad():
         assert torch.allclose(model(x), loaded(x))

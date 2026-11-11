@@ -741,15 +741,28 @@ def _simple_model_block(wxformer_block: dict, has_source_levels: bool) -> dict:
     """The wxformer block minus everything wxformer_simple measures from the data.
 
     ``levels`` stays only when no source lists its levels: the data pipeline then
-    reads the level count from ``model.levels``.
+    reads the level count from ``model.levels``. The per-stage architecture lists
+    become wxformer_simple's single-number settings (stage widths double from
+    ``dim``, global windows halve from ``global_window_size``, stride is always 2).
     """
     from credit.models.wxformer.wxformer_simple import DATA_DERIVED_KEYS
 
+    per_stage = ("dim", "depth", "global_window_size", "cross_embed_kernel_sizes", "cross_embed_strides")
     block = {"type": "wxformer_simple"}
     for key, value in wxformer_block.items():
-        if key == "type" or (key in DATA_DERIVED_KEYS and not (key == "levels" and not has_source_levels)):
+        if key == "type" or key in per_stage:
+            continue
+        if key in DATA_DERIVED_KEYS and not (key == "levels" and not has_source_levels):
             continue
         block[key] = value
+    block.update(
+        {
+            "dim": wxformer_block["dim"][0],
+            "depth": 4,
+            "global_window_size": wxformer_block["global_window_size"][0],
+            "cross_embed_kernel_size": max(wxformer_block["cross_embed_kernel_sizes"][0]),
+        }
+    )
     block["padding"] = {"mode": "earth"}
     return block
 
