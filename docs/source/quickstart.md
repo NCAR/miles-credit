@@ -97,15 +97,26 @@ both to local paths first.
 
 ### What the config contains
 
-The config is one YAML file that describes the whole experiment: the data
-sources and variables, the [preblocks](Preblocks.md) that prepare data for the
-model (for example, normalization), the [model](Models_gen2.md), the
-[postblocks](postblocks_gen2.md) that process the model output (for example,
-converting back to physical units), the loss, the trainer settings, and the
-`inference:` settings. `credit check`, `credit preprocess`, `credit train`,
-`credit rollout`, `credit plot`, and `credit submit` all read it with `-c`.
-The *Config Settings* page in the sidebar describes the Gen 1 format; for Gen 2,
-use the annotated reference config linked at the end of this step.
+The config is one YAML file that describes the whole experiment. Its top-level
+sections are:
+
+- `data:` and `validation_data:`: the [data sources and variables](Datasets.md),
+  and the date ranges used for training and validation
+- `preblocks:`: [steps that prepare data for the model](Preblocks.md), such as
+  normalization
+- `model:`: the [model architecture](Models_gen2.md)
+- `postblocks:`: [steps that process the model output](postblocks_gen2.md), such
+  as converting back to physical units
+- `loss:`: the [loss function](Losses.md) that training minimizes
+- `trainer:`: [training settings](Training.md#trainer-configuration) such as
+  batch size, number of epochs, and parallelism
+- `inference:`: [forecast settings](Inference.md#gen2-current-inference): which
+  start times to run, how long each forecast is, and where output goes
+- `pbs:` (HPC systems only): job settings used by `credit submit`
+
+Many [`credit` commands](cli.md) read it directly. The *Config Settings* page in
+the sidebar describes the Gen 1 format; for Gen 2, use the annotated reference
+config linked at the end of this step.
 
 ### Validating a config with `credit check`
 
@@ -137,18 +148,27 @@ convention where `0` meant a single step.
 
 ## 3. Fit the scalers with `credit preprocess`
 
-Before training, run the preprocessing step once per config:
-
-```bash
-credit preprocess -c my_experiment.yml
-```
-
 `credit preprocess` streams through the training data and fits the
 [bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
 by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
 config. Training will fail without this file, so run it once before your first
 training job (and re-run it if you change the variables, levels, training date
 range, or any preblock that runs before the scaler).
+
+### Run locally
+
+```bash
+credit preprocess -c my_experiment.yml
+```
+
+### Submit on NCAR HPC
+
+```bash
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode preprocess
+```
+
+`credit begin` suggests `credit submit --mode preprocess` as the next step on
+HPC systems.
 
 ### Why the data is scaled
 
@@ -328,14 +348,6 @@ credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mo
 
 Rollout jobs are independent, so there is no `afterok` chain like training.
 
-### What you have at this point
-
-- In `save_loc`: the trained model checkpoint (`checkpoint.pt`, or
-  `model_checkpoint.pt` for FSDP runs), `training_log.csv`, and `tensorboard/`
-  if `trainer.use_tensorboard` is on.
-- The fitted scaler JSON at each `scaler_path`. Rollout uses the same file to
-  normalize its inputs and convert predictions back to physical units.
-
 Output lands in `save_forecast/<YYYYMMDD_HHMMZ>/`, one subdirectory per init time,
 as NetCDF (or Zarr) files in physical units. `inference.output.group_by` sets the file
 granularity (one file per step, day, month, or whole run). These forecasts are the
@@ -345,7 +357,29 @@ for any downstream analysis.
 
 > **More detail**: [Inference guide](Inference.md) | `credit rollout --help`
 
-## 7. Visualize a prediction
+## 7. Reviewing the Output
+
+Training and rollout write their files to the paths set in the config. The
+comment on each line names the command that writes it.
+
+```text
+<scaler_path>              # credit preprocess: fitted scaler JSON, one per scaler preblock
+                           # (credit begin sets it to <save_loc>/standard_scaler.json)
+<save_loc>/                # credit train
+├── checkpoint.pt          # FSDP runs keep the weights in model_checkpoint.pt and optimizer_checkpoint.pt
+├── checkpoint_ema.pt      # only if trainer.use_ema is on
+├── training_log.csv
+├── tensorboard/           # only if trainer.use_tensorboard is on
+└── logs/                  # PBS job logs, only for jobs sent with credit submit
+<save_forecast>/           # credit rollout
+└── <YYYYMMDD_HHMMZ>/      # one subdirectory per init time
+    └── *.nc or *.zarr     # physical units; inference.output.group_by sets how many files
+```
+
+Rollout uses the same scaler file to normalize its inputs and convert
+predictions back to physical units.
+
+## 8. Visualize a prediction
 
 For a quick look at what the model has learned, `credit plot` loads the latest
 checkpoint, runs a single forward step on the first validation sample, and
@@ -377,7 +411,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 > **More detail**: `credit plot --help`
 
-## 8. Get help from the AI assistant
+## 9. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat
