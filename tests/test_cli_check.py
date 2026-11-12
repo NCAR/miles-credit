@@ -330,6 +330,39 @@ def test_flatten_to_tensor_missing_spatial_variables_errors(conf):
     assert "spatial_variables" in _text(rep)
 
 
+def _water_fixer_block(**units):
+    args = {
+        "q_var": "ERA5/prognostic/3d/Q",
+        "sp_var": "ERA5/prognostic/2d/SP",
+        "precip_var": "ERA5/diagnostic/2d/TP",
+        "evapor_var": "ERA5/diagnostic/2d/TP",
+        "lead_time_periods": 6,
+        **units,
+    }
+    return {"type": "global_water_fixer", "args": args}
+
+
+def test_water_fixer_valid_units_ok(conf):
+    conf["postblocks"]["per_step"]["water"] = _water_fixer_block(
+        precip_units="m s-1", evapor_units="kg m-2 s-1", evapor_positive_up=True
+    )
+    rep = _run(conf)
+    assert not any(w.startswith("postblocks.per_step.water") for w in _wheres(rep)), _text(rep)
+
+
+def test_water_fixer_unknown_units_errors(conf):
+    conf["postblocks"]["per_step"]["water"] = _water_fixer_block(precip_units="m/s")
+    rep = _run(conf)
+    assert "postblocks.per_step.water.args.precip_units" in _wheres(rep)
+    assert "'m s-1'" in _text(rep)
+
+
+def test_net_energy_fixer_unknown_flux_units_errors(conf):
+    conf["postblocks"]["per_step"]["energy"] = {"type": "GlobalNetEnergyFixer", "args": {"flux_units": "W/m2"}}
+    rep = _run(conf)
+    assert "postblocks.per_step.energy.args.flux_units" in _wheres(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
