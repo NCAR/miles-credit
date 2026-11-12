@@ -130,8 +130,9 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     module purge
     module load ncarenv/24.12
     module reset
-    module load gcc craype cray-mpich cuda cudnn/8.9.7.29-12 conda mkl
+    module load gcc craype cray-mpich/8.1.29 cuda cudnn/8.9.7.29-12 conda mkl
     conda activate {pbs_options.get("conda", "credit")}
+    {DERECHO_MPICH_GTL_FIX}
 
     # Export environment variables
     export LSCRATCH=/glade/derecho/scratch/{user}/
@@ -261,7 +262,8 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
 #PBS -k eod
 
 module --force purge
-module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich/8.1.29 conda
+{DERECHO_MPICH_GTL_FIX}
 
 {torchrun_line}export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
 export LOGLEVEL=INFO
@@ -311,6 +313,20 @@ echo "Done at $(date)"
 PBSDSH_DERECHO_MODULES = (
     "ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 "
     "cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1 libfabric/1.15.2.0"
+)
+
+# libtorch links Cray's libmpi_gtl_cuda.so.0, but the cray-mpich module does not put its own
+# gtl/lib on LD_LIBRARY_PATH, so the loader falls back to /opt/cray/pe/lib64 via the linker
+# cache. Since the 2026-11-03 Derecho maintenance that resolves to the new default mpich 9.1.0,
+# whose GTL needs libcudart.so.13, and `import torch` fails against CUDA 12. Prepend the loaded
+# cray-mpich's gtl/lib (CRAY_MPICH_ROOTDIR is set by the module) after the module load and
+# `conda activate`, so the GTL that matches the loaded MPICH wins, and log which one is used.
+# Kept on one line so it can be dropped into the indented, dedented script templates.
+# TODO(remove when NCAR fixes the cray-mpich module / torch is rebuilt against PE 9.x).
+DERECHO_MPICH_GTL_FIX = (
+    'if [ -d "${CRAY_MPICH_ROOTDIR:-}/gtl/lib" ]; then '
+    'export LD_LIBRARY_PATH="${CRAY_MPICH_ROOTDIR}/gtl/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"; '
+    'echo "credit: using MPICH GTL from ${CRAY_MPICH_ROOTDIR}/gtl/lib"; fi'
 )
 
 
@@ -498,6 +514,7 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
 module --force purge
 module load {PBSDSH_DERECHO_MODULES}
 conda activate {conda}
+{DERECHO_MPICH_GTL_FIX}
 """
     block = _pbsdsh_launch_block(
         torchrun=torchrun,
