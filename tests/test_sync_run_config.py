@@ -147,3 +147,106 @@ def test_sync_run_config_skips_user_owned_repo_at_save_loc(tmp_path, caplog):
     assert not (save / ".gitignore").exists()
     assert "not created by CREDIT" in caplog.text
     assert "outside the miles-credit repo" in caplog.text
+
+
+@needs_git
+def test_sync_run_config_dubious_ownership_suggests_safe_directory(tmp_path, monkeypatch, caplog):
+    from credit import run_config
+
+    real_git = run_config._git
+
+    def dubious(save_loc, *args, **kwargs):
+        if args[:3] == ("config", "--local", "--get"):
+            return subprocess.CompletedProcess(args, 128, stdout="", stderr="fatal: detected dubious ownership")
+        return real_git(save_loc, *args, **kwargs)
+
+    monkeypatch.setattr(run_config, "_git", dubious)
+    save = tmp_path / "shared"
+    with caplog.at_level(logging.WARNING):
+        sync_run_config(_cfg(tmp_path, "a: 1\n"), str(save))
+    assert (save / "model.yml").read_text() == "a: 1\n"
+    assert "safe.directory" in caplog.text
+    assert "outside the miles-credit repo" not in caplog.text
+    assert subprocess.run(["git", "-C", str(save), "rev-parse", "HEAD"], capture_output=True).returncode != 0
+
+
+# ---------------------------------------------------------------------------
+# Callers: the config must reach save_loc/model.yml before a job runs -c <save_loc>/model.yml
+# ---------------------------------------------------------------------------
+
+
+def _launcher_cfg(tmp_path, save, text_extra=""):
+    return _cfg(tmp_path, f"save_loc: {save}\npbs:\n  queue: main\n  project: TEST0000\n{text_extra}")
+
+
+@pytest.mark.parametrize(
+    "module, func",
+    [
+        ("credit.pbs", "launch_script_mpi"),
+        ("credit.slurm", "launch_script"),
+        ("credit.slurm", "launch_script_mpi"),
+        ("credit.slurm", "launch_script_torchrun"),
+    ],
+)
+def test_launchers_write_model_yml(tmp_path, monkeypatch, module, func):
+    import importlib
+
+    mod = importlib.import_module(module)
+
+    def no_submit(*args, **kwargs):
+        raise AssertionError("launch=False must not submit a job")
+
+    monkeypatch.setattr(mod.subprocess, "Popen", no_submit)
+    monkeypatch.setattr(mod.subprocess, "run", no_submit)
+    monkeypatch.chdir(tmp_path)  # some launchers write launch.sh to the working directory
+    save = tmp_path / "run"
+    cfg = _launcher_cfg(tmp_path, save)
+    getattr(mod, func)(cfg, str(tmp_path / "train.py"), launch=False)
+    assert (save / "model.yml").read_text() == (tmp_path / "cfg.yml").read_text()
+
+
+def _run_gen1_main_cli(monkeypatch, cfg, launch, world_rank=0):
+    import sys
+
+    from credit.applications import train_gen1
+
+    calls = {}
+    monkeypatch.setattr(train_gen1, "credit_main_parser", lambda conf, **kw: conf)
+    monkeypatch.setattr(train_gen1, "training_data_check", lambda conf, **kw: None)
+    monkeypatch.setattr(train_gen1, "get_rank_info", lambda mode: (0, world_rank, 2))
+    monkeypatch.setattr(train_gen1, "main", lambda *a, **kw: calls.setdefault("main", True))
+
+    def fake_launch(config, script_path, *a, **kw):
+        # The generated PBS script reads save_loc/model.yml, so it must exist by now.
+        with open(config) as f:
+            calls["launched_with"] = f.read()
+
+    monkeypatch.setattr(train_gen1, "launch_script", fake_launch)
+    monkeypatch.setattr(train_gen1, "launch_script_mpi", fake_launch)
+    monkeypatch.setattr(sys, "argv", ["credit_train_gen1", "-c", cfg, "-l", str(launch)])
+    if launch:
+        with pytest.raises(SystemExit):
+            train_gen1.main_cli()
+    else:
+        train_gen1.main_cli()
+    return calls
+
+
+@pytest.mark.parametrize("queue", ["casper", "main"])
+def test_train_gen1_launch_writes_model_yml_before_submitting(tmp_path, monkeypatch, queue):
+    save = tmp_path / "run"
+    text = f"save_loc: {save}\ndata:\n  datasets: {{}}\ntrainer:\n  mode: none\npbs:\n  queue: {queue}\n"
+    cfg = _cfg(tmp_path, text)
+    calls = _run_gen1_main_cli(monkeypatch, cfg, launch=1)
+    assert "launched_with" in calls
+    assert (save / "model.yml").read_text() == text
+    assert "main" not in calls
+
+
+@pytest.mark.parametrize("world_rank, expect_written", [(0, True), (1, False)])
+def test_train_gen1_only_rank_zero_writes_model_yml(tmp_path, monkeypatch, world_rank, expect_written):
+    save = tmp_path / "run"
+    text = f"save_loc: {save}\ndata:\n  datasets: {{}}\ntrainer:\n  mode: ddp\n"
+    calls = _run_gen1_main_cli(monkeypatch, _cfg(tmp_path, text), launch=0, world_rank=world_rank)
+    assert calls.get("main")
+    assert (save / "model.yml").exists() == expect_written

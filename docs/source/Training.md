@@ -58,8 +58,9 @@ recommend setting `save_loc` to a directory outside the `miles-credit` repositor
 repository), for example under your scratch space, so training outputs never mix with source code.
 
 If `save_loc` is owned by another user (a shared run directory), git's "dubious ownership" check can refuse to
-work in it, and CREDIT will log the same warning on every run (`model.yml` is still copied). To enable history
-tracking there, run `git config --global --add safe.directory <save_loc>`.
+work in it. CREDIT then logs a warning on every run that names the fix (`model.yml` is still copied, but its
+history is not recorded). To enable history tracking there, run
+`git config --global --add safe.directory <save_loc>`.
 
 ## How many jobs do I need?
 

@@ -109,7 +109,17 @@ def sync_run_config(config_path: str, save_loc: str) -> str:
                     raise RuntimeError(f"`git config` failed: {res.stderr.strip()}")
                 with open(os.path.join(save_loc, ".gitignore"), "w") as f:
                     f.write(_GIT_IGNORE)
-            if _git(save_loc, "config", "--local", "--get", _GIT_MARKER).stdout.strip() != "true":
+            marker = _git(save_loc, "config", "--local", "--get", _GIT_MARKER)
+            if "dubious ownership" in marker.stderr:
+                # save_loc is owned by another user (e.g. a shared run directory): git refuses to work there.
+                logger.warning(
+                    'git refuses to use %s because it is owned by another user ("dubious ownership"); '
+                    "model.yml was still copied but its history is NOT being recorded. To enable tracking, run "
+                    "`git config --global --add safe.directory %s`.",
+                    save_loc,
+                    save_loc,
+                )
+            elif marker.stdout.strip() != "true":
                 # save_loc is itself someone's repo (e.g. the repo root): never commit onto their branch.
                 logger.warning(
                     "%s is a git repository not created by CREDIT; skipping config history tracking there. "
