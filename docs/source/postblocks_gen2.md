@@ -352,6 +352,22 @@ Closes the global water budget by rescaling precipitation so the column-water
 tendency plus evaporation balances precipitation over the forecast step.
 `lead_time_periods` is the step length in hours.
 
+`precip_units` and `evapor_units` are set independently, because datasets often
+mix them. Each takes one of:
+
+| Value | Meaning |
+|---|---|
+| `"m"` (default) | liquid-water depth accumulated over the step (ERA5 `tp`/`e`) |
+| `"kg m-2"` | water mass accumulated over the step |
+| `"m s-1"` | liquid-water depth rate (e.g. CESM/E3SM `PRECT`) |
+| `"kg m-2 s-1"` | water mass flux (e.g. CESM/E3SM `QFLX`) |
+
+Both are converted to `kg m-2 s-1` internally. The correction is a ratio, so
+precipitation comes back out in its original units. Evaporation defaults to the
+ERA5 sign (positive downward, so evaporation is negative); set
+`evapor_positive_up: true` for datasets where evaporation is positive, such as
+`QFLX`. `credit check` rejects unknown unit strings.
+
 ```yaml
 type: "global_water_fixer"
 args:
@@ -364,6 +380,16 @@ args:
   lon_lat_level_name: ["lon2d", "lat2d", "a_half", "b_half"]
   grid_type: "sigma"
   midpoint: false
+```
+
+For E3SM/CESM rate output, change just the units and sign:
+
+```yaml
+  precip_var: "E3SM_ATM/diagnostic/2d/PRECT"   # m s-1
+  evapor_var: "E3SM_ATM/diagnostic/2d/QFLX"    # kg m-2 s-1, positive up
+  precip_units: "m s-1"
+  evapor_units: "kg m-2 s-1"
+  evapor_positive_up: true
 ```
 
 ### `global_energy_fixer` / `global_energy_fixer_updown` (GlobalEnergyFixerUpDown)
