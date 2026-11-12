@@ -1006,6 +1006,7 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
             "cosine-annealing": ("torch.optim.lr_scheduler", "CosineAnnealingLR"),
             "cosine-annealing-restarts": ("credit.scheduler", "CosineAnnealingWarmupRestarts"),
             "linear-warmup-cosine": ("credit.scheduler", "LinearWarmupCosineScheduler"),
+            "warmup-stable-decay": ("credit.scheduler", "WarmupStableDecayScheduler"),
         }
         if stype not in builders:
             rep.error(
