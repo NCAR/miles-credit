@@ -21,11 +21,17 @@ check_model_gpu_memory(conf, model, optimizer, rank) -> None
     Runs a synthetic forward/backward/optimizer step and logs peak VRAM.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 
 from credit.datasets.gen_2.channel_utils import resolve_num_levels
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +247,7 @@ def check_dataloader_startup(
 # ---------------------------------------------------------------------------
 
 
-def _cpu_copy(obj):
+def _cpu_copy(obj: Any) -> Any:
     """A deep copy of a (nested) state dict with every tensor cloned to the CPU."""
     import torch
 
@@ -254,15 +260,21 @@ def _cpu_copy(obj):
     return obj
 
 
-def synthetic_step(model, optimizer, x) -> None:
+def synthetic_step(model: torch.nn.Module, optimizer: torch.optim.Optimizer, x: torch.Tensor) -> None:
     """Run one forward/backward/optimizer step on *x* and leave no trace of it.
 
     The step allocates what a real one does (activations, gradients, optimizer
     state), so peak memory is measured faithfully. But it runs on the real model
-    and optimizer, so everything it touches is put back: the learning rate is 0
-    during the step (the weights do not move), and afterwards the optimizer state
-    (Adam's moments and step count), the module buffers (spectral norm's power-
-    iteration vectors, norm statistics) and the train/eval mode are restored.
+    and optimizer, so everything it touches is put back afterwards: the
+    parameters, their ``.grad``, the module buffers (spectral norm's
+    power-iteration vectors, norm statistics) and the optimizer state (Adam's
+    moments, step count and learning rate). The parameters and optimizer state
+    are held on the CPU meanwhile, about one extra copy of each in host memory.
+    Train/eval mode is left alone: forward and backward do not change it.
+
+    Restoring the parameters matters even though the step's update is thrown
+    away: an all-zero input can make a normalization layer divide by zero, and a
+    non-finite gradient turns the update into NaN weights.
 
     Without this, a resumed job's restored Adam moments were overwritten by the
     gradient of ``mean(model(zeros))``; with the scheduler past its warmup, the
@@ -271,25 +283,26 @@ def synthetic_step(model, optimizer, x) -> None:
     """
     import torch
 
-    saved_optimizer = _cpu_copy(optimizer.state_dict())
+    params = list(model.parameters())
+    saved_params = [p.detach().to("cpu", copy=True) for p in params]
+    saved_grads = [p.grad for p in params]  # set aside (not copied): backward then allocates fresh ones
     saved_buffers = {name: buf.detach().clone() for name, buf in model.named_buffers()}
-    was_training = model.training
-    lrs = [group["lr"] for group in optimizer.param_groups]
+    saved_optimizer = _cpu_copy(optimizer.state_dict())
+    for p in params:
+        p.grad = None
     try:
-        for group in optimizer.param_groups:
-            group["lr"] = 0.0
         model(x).mean().backward()
         optimizer.step()
     finally:
-        optimizer.zero_grad(set_to_none=True)
         optimizer.load_state_dict(saved_optimizer)  # drops state the step created, restores the rest
-        for group, lr in zip(optimizer.param_groups, lrs):
-            group["lr"] = lr
         with torch.no_grad():
+            for p, saved in zip(params, saved_params):
+                p.copy_(saved)
             for name, buf in model.named_buffers():
                 if name in saved_buffers:
                     buf.copy_(saved_buffers[name])
-        model.train(was_training)
+        for p, grad in zip(params, saved_grads):
+            p.grad = grad
 
 
 def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
