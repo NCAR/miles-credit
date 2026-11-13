@@ -34,31 +34,10 @@ build:
       - uv pip install --python "${READTHEDOCS_VIRTUALENV_PATH}/bin/python" --torch-backend cpu ".[docs]"
     pre_build:
       - free -h; df -h .
-    # TEST: since ~2026-11-12 20:25 UTC RTD kills any single build command that runs longer than
-    # ~60 s ("terminated due to inactivity"). Run Sphinx (the default RTD command, plus -v) in the
-    # background and wait for it in short steps; each step saves the tail of Sphinx's log.
+    # Same command RTD runs by default, plus -v so the log shows how far Sphinx got if the build is killed.
     build:
       html:
-        - >-
-          nohup setsid sh -c '"${READTHEDOCS_VIRTUALENV_PATH}/bin/python" -m sphinx -T -v -b html
-          -d docs/source/_build/doctrees -D language=en docs/source "${READTHEDOCS_OUTPUT}/html";
-          echo $? > /tmp/sphinx.rc' > /tmp/sphinx.log 2>&1 < /dev/null &
-        - &wait_sphinx 'for i in $(seq 8); do [ -f /tmp/sphinx.rc ] && break; sleep 5; done; tail -n 15 /tmp/sphinx.log'
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - *wait_sphinx
-        - >-
-          tail -n 60 /tmp/sphinx.log;
-          [ -f /tmp/sphinx.rc ] || { echo "Sphinx still running after the wait steps"; exit 1; };
-          exit "$(cat /tmp/sphinx.rc)"
+        - '"${READTHEDOCS_VIRTUALENV_PATH}/bin/python" -m sphinx -T -v -b html -d docs/source/_build/doctrees -D language=en docs/source "${READTHEDOCS_OUTPUT}/html"'
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
