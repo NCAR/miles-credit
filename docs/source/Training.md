@@ -135,6 +135,21 @@ tensorboard --logdir /glade/derecho/scratch/$USER/my_run/tensorboard
 
 See [Monitoring with TensorBoard](tensorboard.md) for port-forwarding instructions for Casper and Derecho.
 
+`scheduler_type: warmup-stable-decay` is the warmup-stable-decay (WSD) alternative to the cosine schedule:
+linear warmup, a constant learning rate, then a short decay to `min_lr` (`1-sqrt` by default, or `linear`).
+Like `linear-warmup-cosine`, it is stepped once per batch, so with `grad_accum_every: A` give the steps in
+micro-batches (optimizer steps × A):
+
+```yaml
+    scheduler:
+        scheduler_type: warmup-stable-decay
+        warmup_steps: 4000      # 1,000 optimizer steps x A = 4
+        decay_start: 136000    # constant until 34,000 optimizer steps
+        total_steps: 160000    # 1-sqrt decay to min_lr over the last 6,000
+        min_lr: 1.0e-5
+        decay: 1-sqrt          # or linear
+```
+
 ## Gen2 parallelism: FSDP2, tensor parallel, and domain parallel
 
 The gen2 trainer supports three independent parallelism axes, controlled by a
