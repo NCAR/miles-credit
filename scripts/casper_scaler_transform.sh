@@ -2,7 +2,7 @@
 #PBS -N scaler_t
 #PBS -l select=4:ncpus=36:mpiprocs=36:ngpus=0:mem=200GB
 #PBS -l walltime=06:00:00
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -q casper
 #PBS -j oe
 #PBS -k eod

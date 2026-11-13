@@ -1,7 +1,7 @@
 #!/bin/bash
 #-*- coding: utf-8 -*-
 #PBS -N Run_Climate_CAMulator
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -l walltime=12:00:00
 #PBS -o RUN_Climate.out
 #PBS -e RUN_Climate.out

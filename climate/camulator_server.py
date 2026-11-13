@@ -24,7 +24,7 @@ Usage:
       --init_cond  /path/to/init_tensor.pth
 
 
-qsub -I -A NAML0001 -q casper -l job_priority=premium -l walltime=12:00:00 -l select=1:ncpus=32:mpiprocs=1:ompthreads=1:mem=100gb:ngpus=1:gpu_type=a100_80gb
+qsub -I -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} -q casper -l job_priority=premium -l walltime=12:00:00 -l select=1:ncpus=32:mpiprocs=1:ompthreads=1:mem=100gb:ngpus=1:gpu_type=a100_80gb
 
 python camulator_server.py --config ./camulator_config.yml --model_name checkpoint.pt00091.pt --rundir /glade/derecho/scratch/wchapman/g.e21.CAMULATOR_SBV01/run/ --save_atm_nc camulator_out --daily_mean
 See climate/README_Coupling.md for full documentation.

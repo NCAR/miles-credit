@@ -42,6 +42,12 @@ complete, valid CREDIT config file.  It detects whether you are on an NCAR
 system (Derecho/Casper), NERSC Perlmutter, or a laptop, and tailors the
 defaults accordingly (scratch paths, PBS/SLURM blocks, parallelism mode).
 
+On an HPC system it asks for the project code to charge.  Press Enter to skip
+it: the config then has no `pbs.project`, and `credit submit` uses
+`$PBS_ACCOUNT` (or `$SLURM_ACCOUNT` on Perlmutter) at submit time.  Skipping is
+the portable choice when you share configs or `$PBS_ACCOUNT` is already set in
+your shell profile.
+
 **When to use it:** the first time you set up an experiment, or when you want a
 known-good starting point that you can then hand-edit for advanced options.
 
@@ -188,6 +194,20 @@ generated `torchrun` line; `credit rollout-ensemble` accepts the same flag.
 preprocess jobs from the config, never below the site default and capped at one node.
 See [Memory requests](Training.md#memory-requests-mem-auto).
 
+`credit submit` charges the first account it finds, in this order:
+
+1. `--account <PROJECT>` on the command line
+2. `pbs.project` (or its alias `pbs.account`) in the config
+3. the `$PBS_ACCOUNT` environment variable (`$SLURM_ACCOUNT` for SLURM sites)
+
+Blank values (`--account ""`, `project: ""`, an empty variable) count as unset,
+so they fall through to the next source.  There is no built-in default.  If none
+of these is set, a PBS submit stops with an error that lists all three options;
+`--dry-run` instead shows `#PBS -A <UNSET>` in the preview and prints a warning.
+`credit check` reports which account will be charged, notes when `pbs.project`
+overrides a different `$PBS_ACCOUNT`, and notes when a config has no `pbs:` block
+and `$PBS_ACCOUNT` is unset.
+
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /
 `credit rollout` directly.
@@ -203,7 +223,8 @@ credit convert -c old_v1_config.yml -o new_v2_config.yml
 
 Interactively converts a legacy CREDIT v1 config to the gen2 nested data
 schema, adding the new trainer features (EMA, TensorBoard, scheduler) and PBS
-settings along the way.
+settings along the way.  As in `credit begin`, leave the PBS account blank to
+charge `$PBS_ACCOUNT` at submit time instead of writing it into the config.
 
 **When to use it:** when you have an older config from a previous CREDIT
 version and want to bring it up to the current schema.

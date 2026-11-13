@@ -169,7 +169,7 @@ predict:
 
 pbs: #derecho
     conda: "/glade/work/ksha/miniconda3/envs/credit"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "wxformer_6h"
     walltime: "12:00:00"
     nodes: 8

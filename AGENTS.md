@@ -63,7 +63,8 @@ constraint, add the matching check there — it is the fastest way for users to 
 `credit submit --cluster {casper,derecho} -c config.yml --gpus N [--nodes N] [--dry-run]` generates and
 optionally submits a PBS batch script (`credit/pbs.py`), auto-chains multiple jobs via `afterok` dependencies
 based on `trainer.epochs / trainer.num_epoch`, and resolves the PBS account as
-CLI flag → config `pbs:` block → `$PBS_ACCOUNT` env var → default. Always sanity-check with `--dry-run` first.
+CLI flag → config `pbs.project` (alias `pbs.account`) → `$PBS_ACCOUNT` env var, with no built-in default: a real
+submit exits if none is set, `--dry-run` renders `<UNSET>`. Always sanity-check with `--dry-run` first.
 
 There are also legacy standalone entry points (`credit_train_gen1`, `credit_rollout_realtime`,
 `credit_gfs_init`, etc., see `pyproject.toml` `[project.scripts]`) kept for backward compatibility —
