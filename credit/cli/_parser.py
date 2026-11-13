@@ -10,6 +10,8 @@ from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
+from credit.rollout_args import init_time_arg
+
 from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
 
@@ -106,15 +108,45 @@ def _build_parser() -> argparse.ArgumentParser:
     # ---- rollout ----
     p = sub.add_parser("rollout", help="Batch forecast rollout to NetCDF")
     p.add_argument("-c", "--config", required=True, metavar="CONFIG", help="Path to YAML config")
-    p.add_argument("-m", "--mode", default="none", help="Distributed mode: none | ddp | fsdp (default: none)")
+    p.add_argument(
+        "-m",
+        "--mode",
+        default=None,
+        choices=["none", "ddp", "fsdp"],
+        help="Distributed backend. Overrides inference.mode; use 'none' to run a single process without "
+        "torchrun. Not the same as --run-mode (batch vs single forecasts) or 'credit submit --mode' (job type).",
+    )
     p.add_argument("-p", "--procs", type=int, default=4, help="CPU workers for async NetCDF save (default: 4)")
+    p.add_argument(
+        "--run-mode",
+        default=None,
+        choices=["batch", "single"],
+        dest="run_mode",
+        help="Override inference.run_mode from config.",
+    )
+    p.add_argument(
+        "--init-time",
+        type=init_time_arg,
+        default=None,
+        metavar="ISO8601",
+        dest="init_time",
+        help="Single-forecast init time in naive UTC, e.g. 2020-06-01T00. "
+        "Overrides inference.single_forecast.start_datetime and implies --run-mode single.",
+    )
+    p.add_argument(
+        "--save-dir",
+        default=None,
+        metavar="DIR",
+        dest="save_dir",
+        help="Output directory. Overrides inference.save_forecast.",
+    )
     p.add_argument(
         "--ensemble-size",
         type=int,
         default=None,
         metavar="N",
         dest="ensemble_size",
-        help="Override predict.ensemble_size from config.",
+        help=argparse.SUPPRESS,  # not yet supported by gen2 rollout; rejected in _rollout
     )
 
     # ---- rollout-ensemble ----
