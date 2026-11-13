@@ -3,7 +3,6 @@ import sys
 import yaml
 import copy
 import optuna
-import shutil
 import logging
 import warnings
 from glob import glob
@@ -29,6 +28,7 @@ from credit.parser import credit_main_parser
 
 from credit.metrics import LatWeightedMetrics
 from credit.pbs import launch_script, launch_script_mpi
+from credit.run_config import sync_run_config
 from credit.models import load_model
 from credit.models.checkpoint import FSDPOptimizerWrapper, TorchFSDPCheckpointIO
 
@@ -596,15 +596,14 @@ def primary_main():
     # training_data_check(conf, print_summary=False)
     # ======================================================== #
 
-    # Create directories if they do not exist and copy yml file
+    # Create directories if they do not exist
     save_loc = os.path.expandvars(conf["save_loc"])
     os.makedirs(save_loc, exist_ok=True)
 
-    if not os.path.exists(os.path.join(save_loc, "model.yml")):
-        shutil.copy(config, os.path.join(save_loc, "model.yml"))
-
     # Launch PBS jobs
     if launch:
+        # Single process here: write model.yml before the generated PBS script (which runs -c <save_loc>/model.yml)
+        sync_run_config(config, save_loc)
         # Where does this script live?
         script_path = Path(__file__).absolute()
         if conf["pbs"]["queue"] == "casper":
@@ -619,6 +618,9 @@ def primary_main():
     seed_everything(seed)
 
     local_rank, world_rank, world_size = get_rank_info(conf["trainer"]["mode"])
+    # main_cli runs once per rank, so only rank 0 may write model.yml / touch its git repo
+    if world_rank == 0:
+        sync_run_config(config, save_loc)
     main(world_rank, world_size, conf, backend)
 
 

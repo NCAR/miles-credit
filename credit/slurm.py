@@ -38,6 +38,7 @@ import subprocess
 
 from credit.cli._common import _PERLMUTTER_ENV_SETUP
 from credit.conda_env import torchrun_path
+from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +209,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     num_gpus = options.get("ngpus", 1)
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
+    sync_run_config(config_file, save_loc)
 
     conda = options.get("conda", "credit")
     torchrun = _resolve_torchrun(conda)
@@ -252,18 +254,8 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     save_loc = os.path.expandvars(config["save_loc"])
     config_save_path = os.path.join(save_loc, "model.yml")
 
-    # Copy the config to model.yml in save_loc
-    source_path = config_file
-    destination_path = config_save_path
-    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-        os.remove(destination_path)
-        logger.info(f"Removed the old model.yml at {destination_path}")
-    try:
-        os.makedirs(save_loc, exist_ok=True)
-        shutil.copy(source_path, destination_path)
-        logger.info(f"Copied the new {source_path} to {destination_path}")
-    except shutil.SameFileError:
-        pass
+    # Copy the config to model.yml in save_loc (history tracked in git)
+    sync_run_config(config_file, save_loc)
 
     conda = options.get("conda", "credit")
     torchrun = _resolve_torchrun(conda)
@@ -326,13 +318,8 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
     num_gpus = options.get("ngpus", 4)
 
     save_loc = os.path.expandvars(config["save_loc"])
-    os.makedirs(save_loc, exist_ok=True)
     config_save_path = os.path.join(save_loc, "model.yml")
-
-    try:
-        shutil.copy(config_file, config_save_path)
-    except shutil.SameFileError:
-        pass
+    sync_run_config(config_file, save_loc)
 
     conda = options.get("conda", "credit")
     torchrun = _resolve_torchrun(conda)
