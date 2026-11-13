@@ -44,6 +44,9 @@ Notes on testing:
   on a slow or offline connection they run long or fail (e.g. 0-byte GRIB downloads). `SKIP_REMOTE=1`
   skips the HRRR remote tests (`tests/test_hrrr.py`, `tests/test_hrrr_download.py`). A full local run
   is ~8 min on a good connection.
+- Small model configs used by the tests live under `config/`, not `tests/`: `tests/test_models.py` builds
+  models from `config/gen_1/applications/other_models/*_test.yml` (e.g. `wxformer_1dg_test.yml`, a CPU-sized
+  CrossFormer with spectral norm), and other tests read from `config/`.
 
 ## The `credit` CLI
 
@@ -141,6 +144,34 @@ Transform-only use of an already-fitted scaler is unaffected. Separately, a scal
 (grid-wise scaling) must match between the preblock that fits it and the postblock that applies it, or
 the postblock's column-count check fails on the first training batch — `credit check` validates this.
 
+### Training state, resume and parallelism
+
+Both trainers share the epoch loop in `credit/trainers/base_trainer.py` (`fit`), so changes there affect
+gen1 and gen2.
+
+- **Building and resuming state**: `load_model_states_and_optimizer` (`credit/trainers/utils.py`) creates the
+  AdamW optimizer, scheduler and AMP scaler and, on resume, restores them from `save_loc/checkpoint.pt`
+  (keys `epoch`, `model_state_dict`, `optimizer_state_dict`, `scheduler_state_dict`, `scaler_state_dict`).
+  Resume is driven by `trainer.load_weights` / `load_optimizer` / `load_scheduler` / `load_scaler` /
+  `reload_epoch` / `start_epoch`; `update_learning_rate` overrides the restored LR. Users resume long runs
+  across CREDIT versions, so checkpoints written by older versions must keep loading —
+  `_migrate_legacy_checkpoint` exists for this. A change to anything saved in the checkpoint needs a
+  save → resume test against an uninterrupted run.
+- **Schedulers** (`credit/scheduler.py`, `load_scheduler`, `trainer.scheduler.scheduler_type`): `lambda`,
+  `plateau`, `cosine-annealing`, `cosine-annealing-restarts`, `linear-warmup-cosine`. The last two step
+  every batch (`update_on_batch`); the others step once per epoch (`update_on_epoch`; `plateau` gets the
+  training metric).
+- **Preflight** (`credit/trainers/preflight.py`): before the first epoch, rank 0 checks DataLoader startup
+  and runs a synthetic forward/backward/optimizer step to measure peak GPU memory. `fit` skips the GPU
+  check for DDP/FSDP-wrapped or tensor/domain-parallel models.
+- **Parallelism**: gen2 configures it with `trainer.parallelism` (`data: none|ddp|fsdp2`, `tensor`,
+  `domain`); gen1 uses `trainer.mode`. `effective_mode(conf)` (`credit/trainers/utils.py`) resolves the
+  mode used by the checkpoint and AMP code. Implementations live in `credit/parallel/` (`fsdp2.py`,
+  `tensor_parallel.py`, `domain.py`); see `docs/source/Training.md` "Gen2 parallelism". CI covers some
+  of this on CPU through multi-process `gloo` tests (`tests/test_fsdp2_parallel.py`,
+  `tests/test_native_tp.py`, `tests/test_ring_crps.py`); GPU-only tests skip there, and NCCL/multi-node
+  behavior is tested only in `tests/manual/`.
+
 ### Applications vs CLI vs top-level `applications/`
 
 - `credit/applications/*.py` — the actual runnable scripts (`train_gen2.py`, `rollout_gen2.py`,
@@ -177,3 +208,10 @@ Full docs source is in `docs/source/*.md` (Sphinx + MyST + autoapi, published to
 When changing config schema, registry entries, or CLI behavior, update the matching doc page. Docstrings
 feed the autoapi reference — RST rules apply (e.g. a blank line before bullet lists), and violations
 surface as sphinx-build errors on the generated `docs/source/api/` pages.
+
+## Agent skills
+
+Task-specific instructions for coding agents live in `.agents/skills/` (see `.agents/README.md`):
+`credit-pr-review` (review a PR and verify each finding by running code) and `credit-issue-triage`.
+Claude Code finds them through symlinks in `.claude/skills/`, and reads this file itself from version
+2.1.281. Keep this the only project instructions file: a project `CLAUDE.md` turns that off.
