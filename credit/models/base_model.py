@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 
 
 class BaseModel(nn.Module):
+    # Models that build their data-dependent layers from the first batch (e.g.
+    # wxformer_simple) override this to report True until they are built. The gen2
+    # trainer then materializes them before compiling/wrapping the model.
+    needs_materialize = False
+
     def __init__(self):
         super().__init__()
 
@@ -55,6 +60,16 @@ class BaseModel(nn.Module):
         return tensor1, tensor2
 
     @classmethod
+    def _build_for_loading(cls, conf):
+        """Instantiate the model that checkpoint weights are loaded into.
+
+        Subclasses whose layers depend on the data override this to rebuild them
+        from saved hyperparameters instead of from ``conf["model"]`` alone.
+        """
+        model_conf = {k: v for k, v in conf["model"].items() if k != "type"}
+        return cls(**model_conf)
+
+    @classmethod
     def load_model(cls, conf):
         conf = copy.deepcopy(conf)
         save_loc = os.path.expandvars(conf["save_loc"])
@@ -74,10 +89,7 @@ class BaseModel(nn.Module):
             map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
         )
 
-        if "type" in conf["model"]:
-            del conf["model"]["type"]
-
-        model_class = cls(**conf["model"])
+        model_class = cls._build_for_loading(conf)
         if "model_state_dict" in checkpoint.keys():
             load_msg = model_class.load_state_dict(checkpoint["model_state_dict"], strict=False)
         else:
@@ -108,10 +120,7 @@ class BaseModel(nn.Module):
             map_location=torch.device("cpu") if not torch.cuda.is_available() else None,
         )
 
-        if "type" in conf["model"]:
-            del conf["model"]["type"]
-
-        model_class = cls(**conf["model"])
+        model_class = cls._build_for_loading(conf)
 
         load_msg = model_class.load_state_dict(checkpoint if fsdp else checkpoint["model_state_dict"], strict=False)
         load_state_dict_error_handler(load_msg)

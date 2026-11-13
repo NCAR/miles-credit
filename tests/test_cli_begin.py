@@ -273,3 +273,15 @@ def test_python_dash_m_credit_cli_runs():
     )
     assert result.returncode == 0
     assert "check" in result.stdout
+
+
+def test_wxformer_simple_config_passes_check(tmp_path):
+    state = {**_state(_wb2_preset(sorted(_WB2_GRIDS)[0]), tmp_path), "model_type": "wxformer_simple"}
+    conf = _build_config(state)
+    assert conf["model"]["type"] == "wxformer_simple"
+    for key in ("channels", "levels", "image_height", "padding_conf", "input_only_channels"):
+        assert key not in conf["model"]
+    for key in ("dim", "depth", "global_window_size", "local_window_size", "cross_embed_kernel_size"):
+        assert isinstance(conf["model"][key], int), key
+    assert "cross_embed_strides" not in conf["model"] and "cross_embed_kernel_sizes" not in conf["model"]
+    assert _errors(conf) == []

@@ -200,6 +200,15 @@ def main_cli():
         )
         conf["model"].pop("post_conf", None)
     m = load_model(conf)
+    if getattr(m, "needs_materialize", False):
+        # The model sizes its layers from the data (e.g. wxformer_simple). Build them
+        # now, still under the shared seed, so every rank initializes identical
+        # weights before compile, wrapping, the optimizer, and the EMA snapshot.
+        from credit.models.wxformer.wxformer_simple import materialize_from_data
+
+        materialize_from_data(m, conf, train_dataset)
+        if rank == 0 and hasattr(m, "save_hparams"):
+            m.save_hparams(save_loc)
     m.to(device)
 
     if conf["trainer"].get("compile", False):

@@ -16,6 +16,7 @@ config/
   gen_2/                    Current generation (era5-gen2 trainer, nested data schema)
     examples/
       example-v2026.2.yml           Annotated reference config (CrossFormer, 1° ERA5, 6h)
+      wxformer-simple.yml           wxformer_simple: channels, grid, and padding measured from the data
       wxformer_era5_025deg_6hr.yml  WXFormer, 0.25° ERA5 pressure-level, 6h
       wxformer_npj_era5_028deg.yml  WXFormer, model-level ERA5, 0.28°
       multi_source_data.yaml        Multi-source data configuration example

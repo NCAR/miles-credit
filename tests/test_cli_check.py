@@ -869,6 +869,57 @@ def test_checks_do_not_mutate_the_config(conf):
 
 
 # ===========================================================================
+# wxformer_simple: data-derived model shapes
+# ===========================================================================
+
+
+def _simple_conf(conf, **model):
+    conf["model"] = {"type": "wxformer_simple", "dim": 32, "depth": 1, **model}
+    return conf
+
+
+def test_wxformer_simple_without_channel_keys_is_clean(conf):
+    rep = _run(_simple_conf(conf))
+    assert _wheres(rep) == set(), _text(rep)
+    assert "model" not in _wheres(rep, "warning")
+    info = _text(rep, "info")
+    # T, Q x 2 levels + SP + tisr + lsm = 7 in; T, Q x 2 levels + SP + TP = 6 out
+    assert "7 input channel(s) x 1 frame(s) -> 6 output channel(s)" in info
+    assert "multiple of 64" in info
+    assert "dim 32/64/128/256" in info and "global windows 8/4/2/1" in info
+    assert "stage-0 kernels [4, 8, 16, 32]" in info
+
+
+def test_wxformer_simple_deep_builds_and_runs(conf):
+    rep = _run(_simple_conf(conf), deep=True)
+    assert "model" not in _wheres(rep), _text(rep)
+
+
+def test_wxformer_simple_warns_about_redundant_keys(conf):
+    rep = _run(_simple_conf(conf, image_height=721, image_width=1440))
+    assert "model" in _wheres(rep, "warning")
+    assert "image_height, image_width" in _text(rep, "warning")
+    assert "768x1472" in _text(rep, "info")
+
+
+def test_wxformer_simple_bad_architecture_is_an_error(conf):
+    rep = _run(_simple_conf(conf, global_window_size=6))
+    assert "model" in _wheres(rep)
+    assert "multiple of 8" in _text(rep)
+
+
+def test_wxformer_simple_per_stage_list_is_an_error(conf):
+    rep = _run(_simple_conf(conf, depth=[2, 2, 8, 2], cross_embed_strides=[2, 2, 2, 2]))
+    assert "model" in _wheres(rep)
+    assert "cross_embed_strides" in _text(rep)
+
+
+def test_wxformer_simple_unpaddable_grid_is_an_error(conf):
+    rep = _run(_simple_conf(conf, image_height=20, image_width=64))
+    assert "model.padding" in _wheres(rep)
+
+
+# ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================
 

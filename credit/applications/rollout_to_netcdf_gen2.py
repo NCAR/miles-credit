@@ -39,7 +39,7 @@ from credit.datasets.gen_2.channel_utils import (
     update_x,
 )
 from credit.preblock import build_preblocks, apply_preblocks
-from credit.models import load_model
+from credit.models import build_trained_shapes, load_model
 from credit.seed import seed_everything
 from credit.distributed import get_rank_info, select_device, setup, distributed_model_wrapper
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
@@ -332,7 +332,7 @@ def _load_model(conf, device):
     if mode == "none":
         return load_model(conf, load_weights=True).to(device)
     elif mode == "ddp":
-        model = load_model(conf).to(device)
+        model = build_trained_shapes(load_model(conf), conf).to(device)
         model = distributed_model_wrapper(conf, model, device)
         ckpt_path = os.path.join(os.path.expandvars(conf["save_loc"]), "checkpoint.pt")
         ckpt = torch.load(ckpt_path, map_location=device)

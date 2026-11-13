@@ -6,7 +6,7 @@ import torch
 from tqdm import tqdm
 
 from credit.datasets.gen_2._utils import decode_time, to_calendar  # pyright: ignore[reportPrivateUsage]
-from credit.models import load_model
+from credit.models import build_trained_shapes, load_model
 from credit.models.checkpoint import load_model_state, load_state_dict_error_handler
 from credit.postblock import apply_postblocks
 from credit.preblock import apply_preblocks
@@ -157,7 +157,7 @@ def load_model_for_inference(conf: dict, device: torch.device) -> torch.nn.Modul
         return load_model(conf, load_weights=True).to(device)
 
     if mode == "ddp":
-        model = load_model(conf).to(device)
+        model = build_trained_shapes(load_model(conf), conf).to(device)
         model = distributed_model_wrapper(conf, model, device)
         # Buffers are static once the checkpoint is loaded below (eval mode, no
         # training), so there's nothing to sync. DDP's default broadcast_buffers=True
