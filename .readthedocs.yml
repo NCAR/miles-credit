@@ -21,9 +21,6 @@ build:
   # CPU-only torch skips the multi-GB CUDA wheels, which the docs never need.
   # See https://docs.readthedocs.io/en/stable/build-customization.html#install-dependencies-with-uv
   jobs:
-    # Diagnostics for builds being terminated "due to inactivity": log the VM's CPU, memory and disk.
-    post_checkout:
-      - nproc; free -h; df -h .
     pre_create_environment:
       - asdf plugin add uv
       - asdf install uv latest
@@ -32,12 +29,6 @@ build:
       - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
     install:
       - uv pip install --python "${READTHEDOCS_VIRTUALENV_PATH}/bin/python" --torch-backend cpu ".[docs]"
-    pre_build:
-      - free -h; df -h .
-    # Same command RTD runs by default, plus -v so the log shows how far Sphinx got if the build is killed.
-    build:
-      html:
-        - '"${READTHEDOCS_VIRTUALENV_PATH}/bin/python" -m sphinx -T -v -b html -d docs/source/_build/doctrees -D language=en docs/source "${READTHEDOCS_OUTPUT}/html"'
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
