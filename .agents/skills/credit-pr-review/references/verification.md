@@ -20,6 +20,14 @@ VIRTUAL_ENV=$SCRATCH/credit-env uv pip install torch torchvision --index-url htt
 VIRTUAL_ENV=$SCRATCH/credit-env uv pip install -e "$SCRATCH/pr<N>[develop]"
 ```
 
+Without `uv`, use conda instead:
+
+```bash
+conda create -y -p $SCRATCH/credit-env python=3.12
+conda run -p $SCRATCH/credit-env pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+conda run -p $SCRATCH/credit-env pip install -e "$SCRATCH/pr<N>[develop]"
+```
+
 Reuse an existing environment if one is already set up. Use `SKIP_REMOTE=1` unless the PR touches remote
 datasets; several dataset tests stream from AWS/GCS and are slow or fail offline.
 
@@ -57,8 +65,14 @@ Pick the ones that fit the candidate. The first two apply to almost every PR.
 6. **Config-level checks.** For config, registry or schema changes, run `credit check -c <config>` on every
    example config the PR touches or should touch (`config/gen_2/examples/`), and a deliberately broken one
    to see that the new rule fires.
-7. **Docs build.** For docstring or `docs/` changes, build the docs if the environment allows it; RST errors
+7. **Docs build.** For docstring or `docs/` changes, install the `docs` extra and run
+   `sphinx-build -b html docs/source $SCRATCH/docs-html` (the configuration readthedocs uses); RST errors
    surface on the generated `docs/source/api/` pages.
+8. **Base vs PR equivalence.** For a refactor that should not change results: build the same model or
+   block on base and on the PR (two runs, `PYTHONPATH` pointing at each tree), seed it, load identical
+   weights (`torch.save` the base `state_dict` and load it in the PR run), feed the same fixed input, and
+   compare outputs with `torch.testing.assert_close` (tight tolerances on CPU/float32). Renamed parameters
+   show up as `load_state_dict` mismatches, which is itself a back-compat finding.
 
 Some distributed logic **can** be checked on CPU: multi-process `gloo` tests (`tests/test_fsdp2_parallel.py`,
 `tests/test_native_tp.py`, `tests/test_ring_crps.py`) show the pattern; copy it for a 2-process repro.

@@ -61,6 +61,10 @@ large; for small PRs, do it in one pass.
   code path covered (every scheduler type, every parallel mode the caller allows)?
 - **Docs and PR hygiene**: matching `docs/source/*.md` page updated (AGENTS.md "Docs"); docstrings valid
   RST; PR description matches the code; the PR title is release-note quality (it goes into release notes).
+- **Repo PR checklist** (the `github-actions` checklist comment on every PR): dependencies kept in sync
+  between `pyproject.toml` and `requirements.txt`; paths in code and example configs are user-generic
+  (data outside the repo has a cloud URL or lives under `/glade/campaign/aiml/credit/`); public methods
+  have docstrings and type hints; GPU-related changes were run by the submitter on Casper or Derecho.
 - **Scientific-software practice**: reproducibility (seeds, determinism), units, performance regressions,
   readability, maintainability.
 
@@ -84,6 +88,14 @@ each candidate:
 Always run, whatever the candidates: the PR's new tests on the PR; a **mutation test of each source hunk**
 (revert it, rerun the tests; a hunk whose reversion no test notices is a coverage finding); `ruff check`
 and `ruff format --check` on changed files.
+
+For a PR with **no source hunks** (docs, configs, agent skills only), mutation testing does not apply.
+Instead: run `credit check` on every touched gen2 config; build the docs if `docs/` changed; and check
+that every code reference in the changed text (paths, functions, config keys, commands, line numbers)
+exists on the PR branch and says what the text claims.
+
+For a **refactor** of a model, preblock or postblock (behavior should not change), compare a fixed-seed
+forward pass or short rollout on base vs PR (verification.md §Techniques, item 8).
 
 ## Stage 4 — Report
 
