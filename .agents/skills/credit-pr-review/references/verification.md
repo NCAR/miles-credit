@@ -5,10 +5,11 @@
 Use a scratch directory outside the repo (`$SCRATCH` below), e.g. the agent's scratchpad.
 
 ```bash
-# PR worktree, next to the user's checkout (never switch branches in their checkout)
+# PR worktree (never switch branches in the user's checkout). --detach: the PR branch may already be
+# checked out in another worktree, e.g. when reviewing your own or a colleague's branch.
 git fetch origin
-git worktree add --detach ../miles-credit-pr<N> origin/main
-(cd ../miles-credit-pr<N> && gh pr checkout <N>)
+git worktree add --detach $SCRATCH/pr<N> origin/main
+(cd $SCRATCH/pr<N> && gh pr checkout <N> --detach)
 
 # Clean base worktree, for "does this also happen on main?" comparisons
 git worktree add --detach $SCRATCH/base-wt origin/<base>
@@ -16,7 +17,7 @@ git worktree add --detach $SCRATCH/base-wt origin/<base>
 # CPU-only environment, like CI (Python >= 3.11; CI tests 3.11-3.13)
 uv venv -p 3.12 $SCRATCH/credit-env
 VIRTUAL_ENV=$SCRATCH/credit-env uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-VIRTUAL_ENV=$SCRATCH/credit-env uv pip install -e "../miles-credit-pr<N>[develop]"
+VIRTUAL_ENV=$SCRATCH/credit-env uv pip install -e "$SCRATCH/pr<N>[develop]"
 ```
 
 Reuse an existing environment if one is already set up. Use `SKIP_REMOTE=1` unless the PR touches remote
@@ -69,6 +70,6 @@ Keep every script you write in `$SCRATCH`: they are the evidence, and the author
 ## Cleanup
 
 ```bash
-git worktree remove ../miles-credit-pr<N>        # after the PR merges, if a re-review was possible
+git worktree remove $SCRATCH/pr<N>        # after the PR merges, if a re-review was possible
 git worktree remove $SCRATCH/base-wt
 ```

@@ -32,7 +32,9 @@ rather than repeating it, and list unanswered questions or disagreements under *
 
 Search open **and** closed issues and PRs with 2-3 keyword variants:
 `gh search issues --repo NCAR/miles-credit "<keywords>"` and `gh pr list --state all --search "<keywords>"`.
-Also check whether an open PR already claims to fix it (`closingIssuesReferences`).
+Also check whether a PR already claims to fix it: on the issue, that is `closedByPullRequestsReferences`
+(`gh api graphql -f query='query{repository(owner:"NCAR",name:"miles-credit"){issue(number:<n>){
+closedByPullRequestsReferences(first:10,includeClosedPrs:true){nodes{number title state}}}}}'`).
 
 ## 4. Locate and reproduce
 

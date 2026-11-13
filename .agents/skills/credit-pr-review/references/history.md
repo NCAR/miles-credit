@@ -11,7 +11,7 @@ query($n:Int!){repository(owner:"NCAR",name:"miles-credit"){pullRequest(number:$
   headRefOid reviewDecision lastEditedAt
   reviews(first:100){nodes{author{login} state submittedAt commit{oid} body}}
   reviewThreads(first:100){nodes{isResolved isOutdated path line
-    comments(first:50){nodes{author{login} createdAt body}}}}
+    comments(first:50){nodes{databaseId author{login} createdAt body}}}}
   comments(first:100){nodes{author{login} createdAt body}}
   commits(last:100){nodes{commit{oid committedDate messageHeadline}}}
   userContentEdits(first:20){nodes{editedAt editor{login}}}
@@ -23,6 +23,10 @@ query($n:Int!){repository(owner:"NCAR",name:"miles-credit"){pullRequest(number:$
 }}}'
 gh pr checks <N>
 ```
+
+Each list returns at most 100 items (50 comments per thread) and the query does not paginate; for a PR
+with more, add `pageInfo{hasNextPage endCursor}` and page with `after:`. `databaseId` is the REST id used
+to reply to a thread (report.md §Posting).
 
 Skip bot boilerplate (e.g. the `github-actions` review checklist), but note which of its boxes are still open.
 

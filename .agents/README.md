@@ -14,7 +14,8 @@ the steps link to.
 ## Using them
 
 - **Claude Code**: `.claude/skills/` holds symlinks to these folders, so the skills are available as
-  `/credit-pr-review <PR number>` and `/credit-issue-triage <issue number>`.
+  `/credit-pr-review <PR number>` and `/credit-issue-triage <issue number>`. Claude Code reads
+  `AGENTS.md` itself from version 2.1.281; on older versions run `claude update`.
 - **Other agents**: agents that read `.agents/skills/` pick them up directly. For any other agent,
   point it at the skill's `SKILL.md`, e.g. "Follow `.agents/skills/credit-pr-review/SKILL.md` for PR 564".
 

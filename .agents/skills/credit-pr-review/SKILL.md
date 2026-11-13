@@ -52,7 +52,10 @@ large; for small PRs, do it in one pass.
 - **Distributed**: rank-0-only code paths, collectives that not every rank joins, DDP/FSDP wrapping.
 - **CREDIT contracts** (AGENTS.md): registry entries registered, not special-cased; a new registry key,
   config key or structural rule needs a matching check in `credit check`; preblock chains end with
-  `concat`, postblock chains start with `reconstruct`; `bridgescaler` fitting sets `channels_last: False`.
+  `concat`, postblock chains start with `reconstruct`; a `bridgescaler` preblock that fits a new scaler must
+  not end up with `channels_last: True`. `rollout_gen2.py` duplicates the trainer's inner loop, so a change
+  to the training step needs the matching change in the rollout, or inference drifts from training. Logic
+  is edited under `credit/applications/`, never in the top-level `applications/` symlinks.
 - **API and back-compat**: config schema changes, renamed keys, default changes, `credit convert` impact.
 - **Tests**: do the new tests fail without the fix (stage 3 checks this)? Are all options of a touched
   code path covered (every scheduler type, every parallel mode the caller allows)?

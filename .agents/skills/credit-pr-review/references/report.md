@@ -36,6 +36,8 @@ Inline comments (at most 5, ordered by severity)
 Style rules:
 
 - Under ~80 words per inline comment. No praise filler, no restating the diff.
+- The summary opens with one specific sentence on what the PR does well; the repo's PR checklist asks
+  reviewers for both positive and constructive feedback.
 - Only CONFIRMED and PLAUSIBLE findings. Say which, in plain words ("I reproduced…", "not reproduced, needs
   multi-GPU").
 - Things the author need not change go in the same comment as "no change needed", or are left out.

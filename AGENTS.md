@@ -213,4 +213,5 @@ surface as sphinx-build errors on the generated `docs/source/api/` pages.
 
 Task-specific instructions for coding agents live in `.agents/skills/` (see `.agents/README.md`):
 `credit-pr-review` (review a PR and verify each finding by running code) and `credit-issue-triage`.
-Claude Code finds them through symlinks in `.claude/skills/`, and loads this file through `CLAUDE.md`.
+Claude Code finds them through symlinks in `.claude/skills/`, and reads this file itself from version
+2.1.281. Keep this the only project instructions file: a project `CLAUDE.md` turns that off.
