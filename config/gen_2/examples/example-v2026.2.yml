@@ -135,6 +135,7 @@ trainer:
   start_epoch: 0
   num_epoch: 1            # epochs per qsub job (checkpoint after each)
   epochs: &epochs 70      # total training target
+  # checkpoints_per_epoch: 4  # mid-epoch restart points: 1/4, 1/2, 3/4 + end of epoch (0 = end only)
 
   use_tensorboard: True
   use_ema: True           # exponential moving average of weights for validation
