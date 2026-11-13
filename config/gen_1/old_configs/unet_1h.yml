@@ -1,3 +1,10 @@
+# The unet model lives in credit-zoo: pip install git+https://github.com/NCAR/credit-zoo.git
+custom_objects:
+  unet:
+    object_type: model
+    module_path: credit_zoo.models.unet.unet
+    module_name: SegmentationModel
+
 save_loc: "./"
 seed: 1000
 

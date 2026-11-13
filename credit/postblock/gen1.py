@@ -25,7 +25,6 @@ from credit.physics_constants import (
     CP_DRY,
     CP_VAPOR,
 )
-from credit.skebs import SKEBS
 
 import logging
 from math import pi
@@ -65,6 +64,9 @@ class PostBlock(nn.Module):
 
         # stochastic kinetic energy backscattering (SKEB)
         if post_conf.get("skebs", {}).get("activate", False):
+            # imported lazily: SKEBS needs the optional torch-harmonics dependency
+            from credit.skebs import SKEBS
+
             logging.info("using SKEBS")
             self.operations.append(SKEBS(post_conf))
 

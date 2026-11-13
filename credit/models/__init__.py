@@ -57,7 +57,6 @@ _MODEL_REGISTRY = {
         "CrossFormerWithNoise",
         "Loading the ensemble CrossFormer model with a Style-GAN-like noise injection scheme ...",
     ),
-    "unet": ("credit.models.unet", "SegmentationModel", "Loading a unet model"),
     "fuxi": ("credit.models.fuxi", "Fuxi", "Loading Fuxi model"),
     "swin": ("credit.models.swin", "SwinTransformerV2Cr", "Loading the minimal Swin model"),
     "graph": (
@@ -72,11 +71,6 @@ _MODEL_REGISTRY = {
         "credit.models.wxformer.crossformer_downscaling",
         "DownscalingCrossFormer",
         "Loading downscaling crossformer model",
-    ),
-    "unet_downscaling": (
-        "credit.models.unet_downscaling",
-        "DownscalingSegmentationModel",
-        "Loading downscaling U-net",
     ),
     # ── WXFormer next generation ─────────────────────────────────────────────
     "wxformer_column": (
@@ -104,7 +98,6 @@ _MODEL_REGISTRY = {
 _CLASS_SOURCES = {
     "CrossFormer": ("credit.models.crossformer", "CrossFormer"),
     "Camulator": ("credit.models.camulator", "Camulator"),
-    "SegmentationModel": ("credit.models.unet", "SegmentationModel"),
     "Fuxi": ("credit.models.fuxi", "Fuxi"),
     "SwinTransformerV2Cr": ("credit.models.swin", "SwinTransformerV2Cr"),
     "GraphResTransfGRU": ("credit.models.graph", "GraphResTransfGRU"),
@@ -112,13 +105,39 @@ _CLASS_SOURCES = {
     "WXFormer": ("credit.models.wxformer.crossformer", "CrossFormer"),
     "CrossFormerWithNoise": ("credit.models.wxformer.crossformer_ensemble", "CrossFormerWithNoise"),
     "DownscalingCrossFormer": ("credit.models.wxformer.crossformer_downscaling", "DownscalingCrossFormer"),
-    "DownscalingSegmentationModel": ("credit.models.unet_downscaling", "DownscalingSegmentationModel"),
     "CrossFormerDiffusion": ("credit.models.wxformer.crossformer_diffusion", "CrossFormerDiffusion"),
     "UnetDiffusion": ("credit.models.unet_diffusion", "UnetDiffusion"),
     "ModifiedGaussianDiffusion": ("credit.diffusion", "ModifiedGaussianDiffusion"),
     "WRFTransformer": ("credit.models.swin_wrf", "WRFTransformer"),
     "DscaleTransformer": ("credit.models.dscale_wrf", "DscaleTransformer"),
 }
+
+# Models that moved to credit-zoo (https://github.com/NCAR/credit-zoo) so that core CREDIT does not
+# depend on segmentation-models-pytorch. Maps the old config key → (zoo module path, class name, old class name).
+_MOVED_TO_CREDIT_ZOO = {
+    "unet": ("credit_zoo.models.unet.unet", "SegmentationModel"),
+    "unet_downscaling": ("credit_zoo.models.unet_downscaling.unet_downscaling", "DownscalingSegmentationModel"),
+}
+
+
+def _moved_to_credit_zoo_message(model_type):
+    module_path, class_name = _MOVED_TO_CREDIT_ZOO[model_type]
+    return (
+        f"Model type '{model_type}' ({class_name}) has moved to credit-zoo "
+        "(https://github.com/NCAR/credit-zoo). Install it with "
+        "`pip install git+https://github.com/NCAR/credit-zoo.git` and add this block to your config:\n\n"
+        "custom_objects:\n"
+        f"  {model_type}:\n"
+        "    object_type: model\n"
+        f"    module_path: {module_path}\n"
+        f"    module_name: {class_name}\n"
+    )
+
+
+def _check_moved_model(model_type):
+    """Raise a migration error for a model type that moved to credit-zoo and was not registered."""
+    if model_type in _MOVED_TO_CREDIT_ZOO and model_type not in _MODEL_REGISTRY:
+        raise ValueError(_moved_to_credit_zoo_message(model_type))
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +153,9 @@ def __getattr__(name):
             return getattr(module, class_name)
         except ImportError as exc:
             raise AttributeError(f"Cannot import {name!r}: optional dependencies missing.") from exc
+    for model_type, (_, class_name) in _MOVED_TO_CREDIT_ZOO.items():
+        if name == class_name:
+            raise AttributeError(_moved_to_credit_zoo_message(model_type))
     raise AttributeError(f"module 'credit.models' has no attribute {name!r}")
 
 
@@ -182,6 +204,7 @@ def _load_model_entry(model_type):
         ValueError: If model_type is not in _MODEL_REGISTRY.
         ImportError: If the model's module cannot be imported (missing optional dependencies).
     """
+    _check_moved_model(model_type)
     if model_type not in _MODEL_REGISTRY:
         raise ValueError(
             f"Unknown model type '{model_type}'. "
@@ -328,6 +351,7 @@ def load_model(conf, load_weights=False, model_name=False):
         raise ValueError(msg)
 
     model_type = model_conf.pop("type")
+    _check_moved_model(model_type)
 
     if model_type in ("unet", "unet404"):
         import torch
@@ -411,6 +435,7 @@ def load_model_name(conf, model_name, load_weights=False):
         raise ValueError(msg)
 
     model_type = model_conf.pop("type")
+    _check_moved_model(model_type)
 
     if model_type in ("unet", "unet404"):
         import torch

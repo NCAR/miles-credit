@@ -143,7 +143,9 @@ for weather prediction.
 ## UNet
 
 The UNet (`unet`) is a standard segmentation-style U-Net adapted for weather field prediction,
-using convolutional encoder-decoder blocks with skip connections.
+using convolutional encoder-decoder blocks with skip connections. It now lives in
+[credit-zoo](https://github.com/NCAR/credit-zoo) (`credit_zoo.models.unet.unet.SegmentationModel`); register it
+through a `custom_objects:` block, as shown in [Models_gen2](Models_gen2.md).
 
 ## WXFormer Diffusion
 

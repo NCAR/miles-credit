@@ -525,6 +525,13 @@ def credit_main_parser(conf, parse_training=True, parse_predict=True, print_summ
 
     # SKEBS
     if conf["model"]["post_conf"]["skebs"]["activate"]:
+        # fail at parse time, not mid-way through model construction, if the extra is missing
+        from credit._optional import require
+
+        require("torch_harmonics", "SKEBS (model.post_conf.skebs.activate: True)")
+        if conf["model"]["post_conf"]["skebs"].get("dissipation_type") == "unet":
+            require("segmentation_models_pytorch", "SKEBS dissipation_type 'unet'")
+
         assert "freeze_base_model_weights" in conf["model"]["post_conf"]["skebs"], (
             "need to specify freeze_base_model_weights in skebs config"
         )
