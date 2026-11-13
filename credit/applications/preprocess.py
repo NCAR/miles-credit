@@ -17,7 +17,6 @@ from torch.distributed import barrier, gather_object
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
 from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
-from credit.preblock.log import LogTransform
 from credit.preblock.scaler import (
     combine_scaler_dicts,
     fit_physical_target_stats,
@@ -136,16 +135,19 @@ def log_fitted_scalers(scaler_dict, logger, path=()):
 def _save_physical_stats(all_physical, preblocks, scaler_block_keys):
     """Write each scaler's ``*_physical.json`` sidecar of exact physical-unit target stats.
 
-    ``all_physical`` holds one ``{log_block_key: {"target": {source: {var: scaler}}}}``
-    dict per rank. The fits are combined across ranks, then each scaler file gets the
-    physical statistics of the log-transformed target variables it scales.
+    ``all_physical`` holds one ``{unit_block_key: {"target": {source: {var: scaler}}}}``
+    dict per rank, keyed by the unit-changing preblock (``log_transform``,
+    ``sqrt_transform``). The fits are combined across ranks, then each scaler file
+    gets the physical statistics of the transformed target variables it scales.
     """
     fits = [p for p in all_physical if p]
     if not fits:
         return
-    by_var = {}  # var_key -> (source, scaler); the first log block to transform a variable wins
-    for log_stats in combine_scaler_dicts(fits).values():
-        for source, scalers in log_stats["target"].items():
+    # var_key -> (source, scaler). The first block (in chain order) to transform a
+    # variable wins: it is the one that saw the variable in physical units.
+    by_var = {}
+    for unit_stats in combine_scaler_dicts(fits).values():
+        for source, scalers in unit_stats["target"].items():
             for var_key, scaler in scalers.items():
                 by_var.setdefault(var_key, (source, scaler))
     for scaler_key in scaler_block_keys:
@@ -163,7 +165,7 @@ def _save_physical_stats(all_physical, preblocks, scaler_block_keys):
         _backup_existing_file(path)
         save_scaler_dict({"target": sidecar}, path)
         logger.info(
-            "Saved physical-unit statistics of log-transformed targets %s to %s",
+            "Saved physical-unit statistics of transformed (log/sqrt) targets %s to %s",
             sorted(v for s in sidecar.values() for v in s),
             path,
         )
@@ -301,10 +303,12 @@ Examples:
                 f"scaler_path '{path}'. Each scaler preblock must use a distinct scaler_path."
             )
         seen_paths[path] = scaler_key
-    # Log-transformed targets are scored in physical units by BaseLoss and the gen2
-    # metrics, but their scaler only sees log-space values. Fit their exact
-    # physical-unit statistics alongside, on the batch as it reaches each log block.
-    log_block_keys = [k for k, v in preblocks.items() if isinstance(v, LogTransform) and "target" in v.data_types]
+    # Log- and sqrt-transformed targets are scored in physical units by BaseLoss and
+    # the gen2 metrics, but their scaler only sees transformed values. Fit their exact
+    # physical-unit statistics alongside, on the batch as it reaches each such block.
+    unit_block_keys = [
+        k for k, v in preblocks.items() if getattr(v, "changes_units", False) and "target" in v.data_types
+    ]
     physical_stats = {}
 
     # Force forecast_len=1 so the dataloader only yields IC batches (step i=0).
@@ -341,13 +345,13 @@ Examples:
             preblocks[scaler_key].fit_scaler_batch(processed_batch)
         # Expanded by the scaler fits above; grid-wise variables keep that layout here.
         spatial_variables = [v for k in scaler_block_keys for v in preblocks[k].spatial_variables]
-        for log_key in log_block_keys:
-            pre_log_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=log_key)
+        for unit_key in unit_block_keys:
+            pre_unit_batch = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=unit_key)
             fitted = fit_physical_target_stats(
-                preblocks[log_key], pre_log_batch, physical_stats.get(log_key), spatial_variables
+                preblocks[unit_key], pre_unit_batch, physical_stats.get(unit_key), spatial_variables
             )
             if fitted is not None:
-                physical_stats[log_key] = fitted
+                physical_stats[unit_key] = fitted
     del dl  # iterator lives only here; refcount → 0, workers shut down immediately
     del train_loader
 
@@ -375,7 +379,7 @@ Examples:
             logger.info("Fitted scaler values for preblock '%s' by variable:", scaler_key)
             log_fitted_scalers(combined_scaler, logger)
 
-    if log_block_keys:
+    if unit_block_keys:
         if dist.is_initialized() and world_size > 1:
             all_physical = [None] * world_size if rank == 0 else None
             gather_object(move_scaler_dict_to_cpu(physical_stats), all_physical, dst=0)

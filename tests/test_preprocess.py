@@ -431,6 +431,89 @@ def test_fit_after_existing_scaler_file_raises(processed_batches, tmp_path):
         loaded.fit_scaler_batch(batches[0])
 
 
+def _synthetic_target_batch(seed=0):
+    g = torch.Generator().manual_seed(seed)
+    return {
+        "target": {
+            SOURCE: {
+                VAR_Q: torch.rand(4, 2, 1, 3, 5, generator=g) * 0.02,
+                VAR_SP: torch.rand(4, 1, 1, 3, 5, generator=g) * 1e3 + 1e5,
+                VAR_T: torch.rand(4, 2, 1, 3, 5, generator=g) * 50 + 250,
+            }
+        }
+    }
+
+
+def test_unit_changing_preblocks_are_flagged():
+    from credit.preblock.base import BasePreblock
+    from credit.preblock.log import LogTransform
+    from credit.preblock.sqrt import SqrtTransform
+
+    assert BasePreblock.changes_units is False
+    assert LogTransform.changes_units and SqrtTransform.changes_units
+    assert BridgeScalerTransform.changes_units is False
+
+
+def test_fit_physical_target_stats_for_sqrt_transform():
+    """A sqrt_transform block gets pre-sqrt (physical) stats for its target variables only."""
+    from credit.preblock.scaler import fit_physical_target_stats
+    from credit.preblock.sqrt import SqrtTransform
+
+    block = SqrtTransform(variables=[VAR_SP])
+    batches = [_synthetic_target_batch(0), _synthetic_target_batch(1)]
+    stats = None
+    for batch in batches:
+        stats = fit_physical_target_stats(block, batch, stats)
+    assert set(stats["target"][SOURCE]) == {VAR_SP}
+    sp = torch.cat([b["target"][SOURCE][VAR_SP] for b in batches])
+    scaler = stats["target"][SOURCE][VAR_SP]
+    assert float(np.asarray(scaler.mean_x_).reshape(-1)[0]) == pytest.approx(float(sp.mean()), rel=1e-4)
+    assert float(np.asarray(scaler.var_x_).reshape(-1)[0]) == pytest.approx(float(sp.var(unbiased=False)), rel=1e-2)
+
+    # An input-only block transforms no targets, so nothing is recorded.
+    assert fit_physical_target_stats(SqrtTransform(variables=[VAR_SP], data_types=["input"]), batches[0]) is None
+
+
+def test_fit_physical_target_stats_sqrt_spatial_variables():
+    """Grid-wise scaled variables get per-grid-point physical stats, as for log transforms."""
+    from credit.preblock.scaler import fit_physical_target_stats
+    from credit.preblock.sqrt import SqrtTransform
+
+    batch = _synthetic_target_batch(0)
+    pooled = fit_physical_target_stats(SqrtTransform(variables=[VAR_SP]), batch)
+    gridwise = fit_physical_target_stats(SqrtTransform(variables=[VAR_SP]), batch, None, [VAR_SP])
+    assert np.asarray(pooled["target"][SOURCE][VAR_SP].var_x_).size == 1
+    assert np.asarray(gridwise["target"][SOURCE][VAR_SP].var_x_).size == 3 * 5
+
+
+def test_save_physical_stats_mixed_log_and_sqrt(tmp_path):
+    """One sidecar holds the physical stats of both log- and sqrt-transformed targets."""
+    from types import SimpleNamespace
+
+    from bridgescaler import load_scaler_dict
+    from credit.applications.preprocess import _save_physical_stats
+    from credit.preblock.log import LogTransform
+    from credit.preblock.scaler import fit_physical_target_stats
+    from credit.preblock.sqrt import SqrtTransform
+
+    batch = _synthetic_target_batch(0)
+    physical = {
+        "log_transform": fit_physical_target_stats(LogTransform(variables=[VAR_Q]), batch),
+        "sqrt_transform": fit_physical_target_stats(SqrtTransform(variables=[VAR_SP]), batch),
+    }
+    scaler_path = str(tmp_path / "scaler.json")
+    scaled = {"target": {SOURCE: {VAR_Q: None, VAR_SP: None, VAR_T: None}}}
+    preblocks = {"scaler": SimpleNamespace(scaler=scaled, scaler_path=scaler_path)}
+    _save_physical_stats([physical], preblocks, ["scaler"])
+
+    sidecar = load_scaler_dict(str(tmp_path / "scaler_physical.json"))["target"][SOURCE]
+    assert set(sidecar) == {VAR_Q, VAR_SP}
+    sp = batch["target"][SOURCE][VAR_SP]
+    assert float(np.asarray(sidecar[VAR_SP].var_x_).reshape(-1)[0]) == pytest.approx(
+        float(sp.var(unbiased=False)), rel=1e-2
+    )
+
+
 def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     """Drive applications.preprocess.main single-process and confirm it writes a
     reasonable scaler file (exercises the full CLI workflow incl. the rank-0 save)."""
@@ -442,9 +525,16 @@ def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     conf = _make_conf(str(tmp_path / "save"), str(scaler_file))
     conf["preblocks"]["per_step"]["scaler"]["args"]["scaler_params"] = {"channels_last": False}
     conf["trainer"]["batches_per_epoch"] = 3
+    # Add a sqrt transform on surface pressure ahead of the scaler (order matters).
+    per_step = conf["preblocks"]["per_step"]
+    conf["preblocks"]["per_step"] = {
+        "log_transform": per_step["log_transform"],
+        "sqrt_transform": {"type": "sqrt_transform", "args": {"variables": [VAR_SP]}},
+        "scaler": per_step["scaler"],
+    }
 
     config_path = tmp_path / "preprocess.yml"
-    config_path.write_text(yaml.safe_dump(conf))
+    config_path.write_text(yaml.safe_dump(conf, sort_keys=False))
 
     monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
     try:
@@ -462,11 +552,17 @@ def test_preprocess_main_end_to_end(tmp_path, monkeypatch):
     # 3 batches * batch_size 2 * 64 * 32 grid points per level.
     assert int(np.asarray(t_scaler.n_).reshape(-1)[0]) == 3 * 2 * 64 * 32
 
-    # The log-transformed humidity also gets exact physical-unit target stats.
+    # The log-transformed humidity and sqrt-transformed surface pressure also get
+    # exact physical-unit target stats.
     physical = load_scaler_dict(str(tmp_path / "scaler_physical.json"))["target"][SOURCE]
-    assert set(physical) == {VAR_Q}
+    assert set(physical) == {VAR_Q, VAR_SP}
     q_mean = np.asarray(physical[VAR_Q].mean_x_)
     assert ((q_mean > 0) & (q_mean < 0.05)).all(), f"implausible physical humidity means: {q_mean}"
+    sp_mean = np.asarray(physical[VAR_SP].mean_x_)
+    assert ((sp_mean > 5e4) & (sp_mean < 1.1e5)).all(), f"implausible physical surface pressure means: {sp_mean}"
+    # ...while the scaler itself holds sqrt-space pressure (~300 Pa^0.5).
+    sqrt_mean = np.asarray(scaler_dict["target"][SOURCE][VAR_SP].mean_x_)
+    assert ((sqrt_mean > 200) & (sqrt_mean < 340)).all(), f"scaler should hold sqrt-space pressure: {sqrt_mean}"
 
 
 def test_preprocess_main_two_scalers_writes_both_files(tmp_path, monkeypatch):

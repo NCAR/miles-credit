@@ -1178,8 +1178,11 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
                 )
 
 
-def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
-    """Warn where an ``exp_transform``ed variable's inverse-variance weight is unreliable.
+def _check_transformed_variance_weights(conf: dict, rep: _Report) -> None:
+    """Warn where a log- or sqrt-transformed variable's inverse-variance weight is unreliable.
+
+    Covers variables an ``exp_transform`` or ``square_transform`` postblock returns
+    to physical units in ``y_processed`` (``credit.losses.base.UNIT_TRANSFORMS``).
 
     The scaler of a log-transformed variable holds its log-space mean ``m`` and
     variance ``s2``; BaseLoss and the gen2 metrics turn them into a physical
@@ -1193,20 +1196,28 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
     of magnitude too small, so the variable dominates the loss. Variables with exact
     physical-unit statistics in the scaler's ``*_physical.json`` sidecar (written
     by ``credit preprocess``) are weighted by those instead and are not flagged.
+
+    A sqrt-transformed variable without sidecar statistics is always flagged: its
+    physical variance is estimated as ``4 m^2 s2 + 2 s2^2`` from the sqrt-space
+    mean and variance (``_physical_variance_from_sqrt``), which is exact only when
+    the sqrt-space values are normal. The second term dominating (``s2 > 2 m^2``)
+    marks a zero-inflated field, where the estimate is least reliable.
     """
     import math
 
     import torch
 
     from credit.losses.base import (
+        UNIT_TRANSFORMS,
         _load_physical_scalers,
-        _matching_exp_spec,
+        _matching_unit_spec,
         _physical_variance_from_log,
+        _physical_variance_from_sqrt,
         _scaler_channel_variance,
-        exp_transform_specs,
+        unit_transform_specs,
     )
 
-    specs = exp_transform_specs(conf)
+    specs = unit_transform_specs(conf)
     if not specs:
         return
     sections = {}  # scaler path -> sections that weight by it
@@ -1245,16 +1256,17 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
         )
         for source_scalers in target.values():
             for var_key, scaler in source_scalers.items():
-                spec = _matching_exp_spec(var_key, specs)
+                spec = _matching_unit_spec(var_key, specs)
                 var = _scaler_channel_variance(scaler)
                 if spec is None or var is None or not torch.isfinite(var).all() or var_key in physical:
                     continue
+                space = UNIT_TRANSFORMS[spec["type"]]["space"]
                 mean = getattr(scaler, "mean_x_", None)
                 if mean is None:
                     rep.warn(
                         where,
-                        f"'{var_key}' is exp_transformed back to physical units, but its scaler has no mean "
-                        f"to convert the log-space variance, so the {users} weight it with the log-space "
+                        f"'{var_key}' is {spec['type']}ed back to physical units, but its scaler has no mean "
+                        f"to convert the {space}-space variance, so the {users} weight it with the {space}-space "
                         "variance (orders of magnitude off).",
                         fix=(
                             f"{refit}, or set\n"
@@ -1263,6 +1275,27 @@ def _check_log_variance_weights(conf: dict, rep: _Report) -> None:
                     )
                     continue
                 mean = torch.as_tensor(mean, dtype=torch.float64).flatten()
+                if spec["type"] == "square_transform":
+                    estimate = _physical_variance_from_sqrt(mean, var)
+                    zero_inflated = bool((var.double() > 2 * mean**2).any())
+                    rep.warn(
+                        where,
+                        f"'{var_key}' is square_transformed back to physical units, but the scaler has no "
+                        f"physical-unit statistics for it, so its {users} weight uses a variance estimated "
+                        f"from the sqrt-space mean and variance ({float(estimate.mean()):.3g}, exact only if "
+                        "the sqrt-space values are normal)."
+                        + (
+                            " Its sqrt-space spread is large relative to its mean (a zero-inflated or strongly "
+                            "skewed field), where that estimate is least reliable."
+                            if zero_inflated
+                            else ""
+                        ),
+                        fix=(
+                            f"{refit}, or measure the variable's physical-unit variance V (level mean) and set\n"
+                            f"variable_weights:\n  {var_key}: {float(estimate.mean()):.3g} / V"
+                        ),
+                    )
+                    continue
                 s2 = var.double() * {"e": 1.0, "2": math.log(2.0), "10": math.log(10.0)}[spec["base"]] ** 2
                 first_order = _physical_variance_from_log(mean, var, spec["base"], spec["eps"])
                 lognormal = torch.expm1(s2) * torch.exp(s2) * first_order / s2.clamp_min(1e-300)
@@ -1541,7 +1574,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
-            _check_log_variance_weights,
+            _check_transformed_variance_weights,
             _check_trainer,
             _check_channel_schema,
             _check_pbs,
