@@ -6,6 +6,7 @@ import logging
 import subprocess
 
 from credit.conda_env import torchrun_path
+from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
 
@@ -101,20 +102,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     config_save_path = os.path.join(save_loc, "model.yml")
 
-    # Define the source and destination paths
-    source_path = config_file
-    destination_path = config_save_path
-
-    # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-        os.remove(destination_path)
-        logger.info(f"Removed the old model.yml at {destination_path}")
-
-    try:
-        shutil.copy(source_path, destination_path)
-        logger.info(f"Copied the new {source_path} to {destination_path}")
-    except shutil.SameFileError:
-        pass
+    sync_run_config(config_file, save_loc)
 
     # Generate the PBS script
     script = f"""#!/bin/bash
