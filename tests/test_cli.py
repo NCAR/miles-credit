@@ -1176,6 +1176,22 @@ class TestSubmitDryRun:
         out = capsys.readouterr().out
         assert "#PBS" in out
 
+    @pytest.mark.parametrize("cwd_name", [".", "elsewhere", "rel_save"])
+    @pytest.mark.parametrize("mode", ["train", "preprocess"])
+    def test_relative_save_loc_anchored_to_config_dir(self, tmp_path, capsys, monkeypatch, mode, cwd_name):
+        # A relative save_loc path must be resolved relative to config, not cwd.
+        config_path = _make_minimal_conf(tmp_path, extra={"save_loc": "./rel_save"})
+        cwd = tmp_path / cwd_name
+        cwd.mkdir(exist_ok=True)
+        monkeypatch.chdir(cwd)
+        args = _derecho_args(config=config_path, dry_run=True, chain=1, nodes=1, submit_mode=mode)
+
+        with _inject_preflight(0.0):
+            cli._submit(args)
+
+        out_lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("#PBS -o ")]
+        assert out_lines == [f"#PBS -o {tmp_path / 'rel_save' / 'logs'}"]
+
     def test_dry_run_derecho_prints_script(self, tmp_path, capsys):
         config_path = _make_minimal_conf(tmp_path)
         args = _derecho_args(config=config_path, dry_run=True, chain=1, nodes=1)
