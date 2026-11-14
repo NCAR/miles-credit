@@ -329,6 +329,47 @@ def should_not_checkpoint(module):
     return isinstance(module, exclude_types)
 
 
+def ignore_static_attn_mask_buffers(module):
+    """Exclude Swin's static attention masks from DDP buffer synchronization.
+
+    ``SwinTransformerV2CrBlock._make_attention_mask`` registers ``attn_mask`` as
+    a non-persistent buffer derived purely from the window geometry
+    (``feat_size``, ``window_size``, ``shift_size``). It contains no data and no
+    randomness, so every rank builds a bit-identical copy in ``__init__`` and it
+    never changes during training.
+
+    DDP nevertheless broadcasts every buffer from rank 0 on each forward pass
+    (``broadcast_buffers=True``). For the 640x1280, depth-12 configuration the
+    six masks total roughly 300 MiB, so this re-sends constant data every
+    iteration — pure communication overhead, and one more collective that can
+    time out.
+
+    DDP's constructor reads ``_ddp_params_and_buffers_to_ignore`` off the
+    wrapped module, so listing the masks there skips exactly those buffers.
+    Parameters, gradients and all other buffers synchronize as before. Must be
+    called *before* the module is handed to DDP.
+
+    Args:
+        module (nn.Module): The unwrapped model.
+
+    Returns:
+        List[str]: Fully-qualified buffer names newly added to the ignore list.
+    """
+    masks = {name: buf for name, buf in module.named_buffers() if name.rsplit(".", 1)[-1] == "attn_mask"}
+    if not masks:
+        return []
+
+    ignored = list(getattr(module, "_ddp_params_and_buffers_to_ignore", []))
+    added = [name for name in masks if name not in ignored]
+    if not added:
+        return []
+
+    module._ddp_params_and_buffers_to_ignore = ignored + added
+    mib = sum(masks[name].numel() * masks[name].element_size() for name in added) / 2**20
+    logger.info(f"Excluding {len(added)} static attn_mask buffer(s) ({mib:.1f} MiB) from DDP buffer synchronization")
+    return added
+
+
 def distributed_model_wrapper(conf, neural_network, device):
     """Wraps the neural network model for distributed training.
 
@@ -461,12 +502,14 @@ def distributed_model_wrapper(conf, neural_network, device):
             model._domain_parallel_manager = domain_manager
 
     elif mode == "ddp":
+        ignore_static_attn_mask_buffers(neural_network)
         model = DDP(neural_network, device_ids=[device], find_unused_parameters=True)
 
     elif mode == "domain_parallel":
         if domain_manager is not None and domain_manager.data_parallel_size > 1:
             # Wrap with DDP using the data-parallel subgroup so gradients are
             # synced across data-parallel replicas (domain_group handles halo exchange)
+            ignore_static_attn_mask_buffers(neural_network)
             model = DDP(
                 neural_network,
                 device_ids=[device],
@@ -636,6 +679,7 @@ def distributed_model_wrapper_gen2(conf: dict, model, device):
                 ddp_kwargs["find_unused_parameters"] = True
             if dp_group is not None:
                 ddp_kwargs["process_group"] = dp_group
+            ignore_static_attn_mask_buffers(model)
             model = torch.nn.parallel.DistributedDataParallel(model, **ddp_kwargs)
             logger.info("[V2] DDP applied")
 
