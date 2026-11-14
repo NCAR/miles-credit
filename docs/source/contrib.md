@@ -18,7 +18,9 @@ The code for CREDIT is hosted on GitHub. If you do not have one, you will need t
 
 ## Reporting bugs
 
-Something not working as expected? We would love to hear about it! Please report any bugs you find by opening an issue on GitHub. 
+Something not working as expected? We would love to hear about it! Please report any bugs you find by opening an issue on GitHub with the [Bug report](https://github.com/NCAR/miles-credit/issues/new?template=bug_report.yml) template.
+
+Every bug report must include **steps to reproduce**: the minimal sequence of commands (and config, if relevant) that triggers the bug, starting from a fresh checkout or install. The pull request that fixes the bug is reviewed against these steps, so reviewers can confirm the problem before the fix and its absence after.
 
 When reporting a bug, please include as much information as possible. This will help us reproduce the bug and fix it efficiently. For more information on how to write a good bug report, see this Stack Overflow post on [how to make a good bug report](https://stackoverflow.com/help/minimal-reproducible-example).  
 To increase the helpfulness of the bug report, please include the following information:
@@ -308,6 +310,7 @@ Required
 - [ ] Paths in code and example config files are user generic. Data not included in the repository should have a cloud URL or be located in /glade/campaign/aiml/credit/.   
 - [ ] The reviewer has provided both positive and constructive feedback in their review response.  
 - [ ] Changes affecting GPU-related functionality have been run by the submitter on Casper and/or Derecho to verify that the code runs as expected.
+- [ ] For bug fixes, the reviewer has followed the linked issue's steps to reproduce and confirmed the bug no longer occurs.
 
 Recommended
 
