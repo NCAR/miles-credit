@@ -91,7 +91,32 @@ and some model settings. Modify the config file later with more advanced options
 
 For a laptop-runnable starting point, see
 `config/gen_2/examples/weatherbench2_era5_wxformer_tiny.yml`, which streams a
-small WeatherBench2 ERA5 subset from the cloud — no local data required.
+small WeatherBench2 ERA5 subset from the cloud — no local data required. Its
+`save_loc` and `scaler_path` point to NCAR's `scratch` directory, so change
+both to local paths first.
+
+### What the config contains
+
+The config is one YAML file that describes the whole experiment. Its top-level
+sections are:
+
+- `data:` and `validation_data:`: the [data sources and variables](Datasets.md),
+  and the date ranges used for training and validation
+- `preblocks:`: [steps that prepare data for the model](Preblocks.md), such as
+  normalization
+- `model:`: the [model architecture](Models_gen2.md)
+- `postblocks:`: [steps that process the model output](postblocks_gen2.md), such
+  as converting back to physical units
+- `loss:`: the [loss function](Losses.md) that training minimizes
+- `trainer:`: [training settings](Training.md#trainer-configuration) such as
+  batch size, number of epochs, and parallelism
+- `inference:`: [forecast settings](Inference.md#gen2-current-inference): which
+  start times to run, how long each forecast is, and where output goes
+- `pbs:` (HPC systems only): job settings used by `credit submit`
+
+Many [`credit` commands](cli.md) read it directly. The *Config Settings* page in
+the sidebar describes the Gen 1 format; for Gen 2, use the annotated reference
+config linked at the end of this step.
 
 ### Validating a config with `credit check`
 
@@ -123,17 +148,37 @@ convention where `0` meant a single step.
 
 ## 3. Fit the scalers with `credit preprocess`
 
-Before training, run the preprocessing step once per config:
+`credit preprocess` streams through the training data and fits the
+[bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
+by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
+config. Training will fail without this file, so run it once before your first
+training job (and re-run it if you change the variables, levels, training date
+range, or any preblock that runs before the scaler).
+
+### Run locally
 
 ```bash
 credit preprocess -c my_experiment.yml
 ```
 
-`credit preprocess` streams through the training data and fits the
-[bridgescaler](https://github.com/NCAR/bridgescaler) normalization scalers used
-by the `bridgescaler_transform` preblock, saving the fitted scaler as JSON at the `scaler_path` given in your
-config. Training will fail without this file, so run it once before your first
-training job (and re-run it if you change the variable list or date range).
+### Submit on NCAR HPC
+
+```bash
+credit submit --cluster casper -c my_experiment.yml --account <ACCOUNT_KEY> --mode preprocess
+```
+
+`credit begin` suggests `credit submit --mode preprocess` as the next step on
+HPC systems.
+
+### Why the data is scaled
+
+Weather variables differ by orders of magnitude: surface pressure is around
+100,000 Pa, while specific humidity stays below about 0.03 kg/kg. The
+`bridgescaler_transform` preblock rescales each variable with statistics fitted
+on your training data before the model sees it (by default a standard scaler:
+subtract the mean, divide by the standard deviation), and a
+`bridgescaler_transform` postblock converts the predictions back to physical
+units.
 
 ## 4. Start a training job
 
@@ -306,12 +351,35 @@ Rollout jobs are independent, so there is no `afterok` chain like training.
 Output lands in `save_forecast/<YYYYMMDD_HHMMZ>/`, one subdirectory per init time,
 as NetCDF (or Zarr) files in physical units. `inference.output.group_by` sets the file
 granularity (one file per step, day, month, or whole run). These forecasts are the
-input for evaluation with `credit metrics` (see [Evaluation](Evaluation.md)) and
+input for evaluation with
+[`credit metrics`](cli.md#credit-metrics--weatherbench2-style-evaluation) and
 for any downstream analysis.
 
 > **More detail**: [Inference guide](Inference.md) | `credit rollout --help`
 
-## 7. Visualize a prediction
+## 7. Reviewing the Output
+
+Training and rollout write their files to the paths set in the config. The
+comment on each line names the command that writes it.
+
+```text
+<scaler_path>              # credit preprocess: fitted scaler JSON, one per scaler preblock
+                           # (credit begin sets it to <save_loc>/standard_scaler.json)
+<save_loc>/                # credit train
+├── checkpoint.pt          # FSDP runs keep the weights in model_checkpoint.pt and optimizer_checkpoint.pt
+├── checkpoint_ema.pt      # only if trainer.use_ema is on
+├── training_log.csv
+├── tensorboard/           # only if trainer.use_tensorboard is on
+└── logs/                  # PBS job logs, only for jobs sent with credit submit
+<save_forecast>/           # credit rollout
+└── <YYYYMMDD_HHMMZ>/      # one subdirectory per init time
+    └── *.nc or *.zarr     # physical units; inference.output.group_by sets how many files
+```
+
+Rollout uses the same scaler file to normalize its inputs and convert
+predictions back to physical units.
+
+## 8. Visualize a prediction
 
 For a quick look at what the model has learned, `credit plot` loads the latest
 checkpoint, runs a single forward step on the first validation sample, and
@@ -343,7 +411,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 
 > **More detail**: `credit plot --help`
 
-## 8. Get help from the AI assistant
+## 9. Get help from the AI assistant
 
 `credit ask` is a unified AI assistant — it automatically runs in agent mode (reads files,
 runs commands, iterates) when Anthropic is available, or falls back to simple chat

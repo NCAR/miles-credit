@@ -102,12 +102,15 @@ without import or shape errors.
 credit preprocess -c my_run.yml
 ```
 
-Reads your training data and fits a BridgeScaler (standard scaler) JSON file
-that the preblocks, loss, and metrics all reference.  This must run once before
-training; the scaler file is written to `{save_loc}/standard_scaler.json`.
+Reads your training data and fits a BridgeScaler (a standard scaler by default)
+JSON file that the preblocks, loss, and metrics all reference.  This must run
+once before training; the scaler file is written to the `scaler_path` of each
+`bridgescaler_transform` preblock (`credit begin` sets it to
+`{save_loc}/standard_scaler.json`).
 
-**When to use it:** once, after `credit begin` and before `credit train`.  If
-you change your variable list or level selection, re-run it.
+**When to use it:** once, after `credit begin` and before `credit train`.  Re-run
+it if you change the variables, levels, training date range, or any preblock
+that runs before the scaler.
 
 ---
 
