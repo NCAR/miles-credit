@@ -213,8 +213,49 @@ def test_r2score_per_variable(tmp_path):
         ss_res = torch.mean((p - t) ** 2).item()
         target_mean = torch.mean(t).item()
         ss_tot = torch.mean((t - target_mean) ** 2).item()
-        expected = 1.0 - ss_res / (ss_tot + 1e-12)
+        expected = 1.0 - ss_res / ss_tot
         assert out[f"r2score/{var_key}"] == pytest.approx(expected, abs=1e-5)
+
+
+@pytest.mark.parametrize("scale", [1.0, 1e-4, 1e-8, 1e-12])
+def test_r2score_independent_of_units(tmp_path, scale):
+    """R² is unit-free: rescaling pred and target together does not change it, even for tiny units.
+
+    With the former fixed 1e-12 epsilon, a field scaled by 1e-8 (ss_tot ~1e-16, like a moisture tendency
+    in kg kg-1 s-1) scored R² ≈ 1 whatever the forecast.
+    """
+    metric = _make_metric(R2ScoreMetric, _make_scaler_file(tmp_path), var_weighting="none")
+    g = torch.Generator().manual_seed(7)
+    target = {
+        VAR_T: torch.randn(2, N_LEVELS, 1, 4, 5, generator=g),
+        VAR_SP: torch.randn(2, 1, 1, 4, 5, generator=g),
+        VAR_PRECIP: torch.randn(2, 1, 1, 4, 5, generator=g),
+    }
+    noise = {k: torch.randn(v.shape, generator=g) for k, v in target.items()}
+    pred = {k: (target[k] + noise[k]) * scale for k in target}
+    state = {"y_processed": {"ERA5": pred}, "y_target_processed": {"ERA5": {k: v * scale for k, v in target.items()}}}
+    out = metric(state)
+    for var_key in metric.var_keys:
+        t, n = target[var_key].double(), noise[var_key].double()
+        expected = 1.0 - (n**2).mean() / ((t - t.mean()) ** 2).mean()
+        assert out[f"r2score/{var_key}"] == pytest.approx(expected.item(), abs=1e-4)
+        assert out[f"r2score/{var_key}"] < 0.5  # noise as large as the signal: no spurious skill
+
+
+def test_r2score_constant_target_finite(tmp_path):
+    """A constant target (ss_tot = 0) gives a finite score: 1 for a perfect forecast, very negative otherwise."""
+    metric = _make_metric(R2ScoreMetric, _make_scaler_file(tmp_path), var_weighting="none")
+    const = {
+        k: torch.full(shape, 3.0)
+        for k, shape in [(VAR_T, (2, N_LEVELS, 1, 4, 5)), (VAR_SP, (2, 1, 1, 4, 5)), (VAR_PRECIP, (2, 1, 1, 4, 5))]
+    }
+    perfect = metric({"y_processed": {"ERA5": const}, "y_target_processed": {"ERA5": const}})
+    off = metric(
+        {"y_processed": {"ERA5": {k: v + 1.0 for k, v in const.items()}}, "y_target_processed": {"ERA5": const}}
+    )
+    for var_key in metric.var_keys:
+        assert perfect[f"r2score/{var_key}"] == pytest.approx(1.0)
+        assert np.isfinite(off[f"r2score/{var_key}"]) and off[f"r2score/{var_key}"] < -1e6
 
 
 def test_r2score_perfect_forecast(tmp_path):
@@ -248,9 +289,7 @@ def test_r2score_climatology_forecast(tmp_path):
     state = {"y_processed": {"ERA5": pred}, "y_target_processed": {"ERA5": target}}
     out = metric(state)
     for var_key in metric.var_keys:
-        # R² is near 0; small deviations from the epsilon in the denominator
-        # are largest for low-variance variables (e.g. precip ~1e-8).
-        assert out[f"r2score/{var_key}"] == pytest.approx(0.0, abs=1e-2)
+        assert out[f"r2score/{var_key}"] == pytest.approx(0.0, abs=1e-4)
 
 
 def test_log_variance_ratio_per_variable(tmp_path):
