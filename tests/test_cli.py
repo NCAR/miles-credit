@@ -554,7 +554,7 @@ class TestQsub:
 
         monkeypatch.setattr(subprocess, "run", fake_run)
         result = _qsub("#!/bin/bash\necho hello")
-        assert captured["cmd"][0] == "qsub"
+        assert os.path.basename(captured["cmd"][0]) == "qsub"  # /opt/pbs/bin/qsub where that exists
         assert result == "12345.pbs"
 
     def test_strips_whitespace_from_job_id(self, monkeypatch):
@@ -565,13 +565,16 @@ class TestQsub:
         )
         assert _qsub("script") == "99999.pbs"
 
-    def test_exits_on_failure(self, monkeypatch):
+    def test_raises_on_failure(self, monkeypatch):
+        # credit submit reports it ("qsub failed: ...") and exits 1; see test_submit_exits_when_qsub_fails.
+        from credit.runs import SchedulerError
+
         monkeypatch.setattr(
             subprocess,
             "run",
             lambda *a, **kw: mock.MagicMock(returncode=1, stdout="", stderr="qsub: bad script"),
         )
-        with pytest.raises(SystemExit):
+        with pytest.raises(SchedulerError, match="qsub: bad script"):
             _qsub("script")
 
 
@@ -1470,7 +1473,9 @@ class TestCollectRunContext:
 class TestSubmitReload:
     """Test _submit with --reload flag (dry-run so no qsub)."""
 
-    def test_reload_writes_reload_config(self, tmp_path, capsys):
+    def test_reload_uses_run_dir_reload_config(self, tmp_path, capsys):
+        # The reload config now lives in the run directory and is written at
+        # submit time, so a dry run names it but writes nothing.
         config_path = _make_minimal_conf(tmp_path)
         args = _casper_args(
             config=config_path,
@@ -1481,9 +1486,22 @@ class TestSubmitReload:
         )
         with _inject_preflight(0.0):
             cli._submit(args)
-        # reload config should have been written
         save_loc = tmp_path / "save"
-        assert (save_loc / "config_reload.yml").exists()
+        out = capsys.readouterr().out
+        assert f"CONFIG={save_loc}/.credit/runs/train-" in out
+        assert "/config_reload.yml" in out
+        assert not (save_loc / "config_reload.yml").exists()
+        assert not (save_loc / ".credit").exists()
+
+    def test_live_reload_writes_reload_config_in_run_dir(self, tmp_path, capsys, monkeypatch):
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=1, reload=True, torchrun="/usr/bin/torchrun")
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", lambda script, save_loc=None: "1.pbs")
+        with _inject_preflight(0.0):
+            cli._submit(args)
+        (run_dir,) = [p for p in (tmp_path / "save" / ".credit" / "runs").iterdir() if p.is_dir()]
+        assert (run_dir / "config_reload.yml").exists()
+        assert (run_dir / "config.yml").exists()
 
     def test_submit_live_calls_qsub(self, tmp_path, capsys, monkeypatch):
         """Live submit (non-dry-run) should call _qsub at least once."""
@@ -1512,6 +1530,76 @@ class TestSubmitReload:
         out = capsys.readouterr().out
         assert "[SUCCESS] Job 99999 submitted to Casper (PBS).\n" in out
         assert f"  Logs:   {tmp_path / 'save' / 'logs'}\n" in out
+
+    def test_submit_records_run_and_ledger(self, tmp_path, capsys, monkeypatch):
+        """credit submit writes run.json, the scripts, submit events, and a ledger entry."""
+        import json
+
+        from credit import runs
+
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=2, reload=False, torchrun="/usr/bin/torchrun")
+        ids = iter(["11.casper-pbs", "12.casper-pbs"])
+        scripts = []
+
+        def fake_qsub(script, save_loc=None):
+            scripts.append(script)
+            return next(ids)
+
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", fake_qsub)
+        with _inject_preflight(0.0):
+            cli._submit(args)
+
+        (entry,) = runs.ledger_index().values()
+        run_dir = entry["run_dir"]
+        assert entry["created_by"] == "cli" and run_dir.startswith(str(tmp_path / "save" / ".credit" / "runs"))
+        record = runs.read_run(run_dir)
+        assert [(j["job_id"], j["job_key"], j["depends_on"]) for j in record["jobs"]] == [
+            ("11.casper-pbs", "11", None),
+            ("12.casper-pbs", "12", "11.casper-pbs"),
+        ]
+        assert record["target"]["scheduler"] == "pbs" and record["target"]["server"] == "casper-pbs"
+        assert f"export CREDIT_RUN_DIR={run_dir}" in scripts[0]
+        assert f"CONFIG={run_dir}/config.yml" in scripts[0]
+        assert f"CONFIG={run_dir}/config_reload.yml" in scripts[1]
+        assert open(os.path.join(run_dir, "scripts", "job-2.sh")).read() == scripts[1]
+        # The script copy that was qsub'ed carries the dependency, as it always has.
+        assert "#PBS -W depend=afterok:11.casper-pbs" in scripts[1] and "depend=" not in scripts[0]
+        with open(os.path.join(run_dir, "events", "submit.jsonl")) as f:
+            events = [json.loads(line) for line in f]
+        assert [e["type"] for e in events] == [
+            "run.created",
+            "job.submitting",
+            "job.submitted",
+            "job.submitting",
+            "job.submitted",
+        ]
+        assert events[1]["data"] == {"index": 1, "job_name": "test_job"}  # the name the script sets
+        assert f"  Run:    {record['run_id']}  (credit status {record['run_id']})\n" in capsys.readouterr().out
+
+    def test_submit_exits_when_qsub_fails(self, tmp_path, capsys, monkeypatch):
+        """A refused qsub prints the scheduler's message, exits 1, and is logged as job.submit_failed."""
+        import json
+
+        from credit import runs
+        from credit.runs import SchedulerError
+
+        config_path = _make_minimal_conf(tmp_path)
+        args = _casper_args(config=config_path, dry_run=False, chain=2, reload=False, torchrun="/usr/bin/torchrun")
+        calls = []
+
+        def fake_qsub(script, save_loc=None):
+            calls.append(script)
+            raise SchedulerError("qsub: Unknown queue")
+
+        monkeypatch.setattr(sys.modules["credit.cli._submit"], "_qsub", fake_qsub)
+        with _inject_preflight(0.0), pytest.raises(SystemExit) as exc:
+            cli._submit(args)
+        assert exc.value.code == 1 and len(calls) == 1
+        assert "qsub failed:\nqsub: Unknown queue\n" in capsys.readouterr().err
+        (entry,) = runs.ledger_index().values()
+        with open(os.path.join(entry["run_dir"], "events", "submit.jsonl")) as f:
+            assert [json.loads(line)["type"] for line in f] == ["run.created", "job.submitting", "job.submit_failed"]
 
     def test_submit_chain_calls_qsub_multiple(self, tmp_path, capsys, monkeypatch):
         """Chain=3 should call _qsub 3 times."""
@@ -1992,21 +2080,15 @@ class TestResolveAutoMem:
         args = self._args(tmp_path, _mem_conf(50), mem="auto", submit_mode="rollout")
         assert _resolve_pbs_opts(args, {"mem": "128GB"}).mem == "128GB"
 
+        # A config's pbs.mem: auto is sized for training, so a rollout keeps its own default.
         submit = sys.modules["credit.cli._submit"]  # credit.cli re-exports a _submit function
-        seen = {}
-
-        class _Stop(Exception):
-            pass
-
-        def _resolve(args, cfg):
-            seen.update(cfg)
-            raise _Stop
-
-        ctx = {"load": lambda path: {"mem": "Auto"}, "resolve": _resolve}
-        monkeypatch.setattr(submit, "_scheduler_ctx", lambda args: ctx)
-        with pytest.raises(_Stop):
-            submit._do_submit_rollout(argparse.Namespace(cluster="casper", config="unused.yml"))
-        assert seen["mem"] == "128GB"
+        assert submit._rollout_sched_cfg("casper", {"mem": "Auto"})["mem"] == "128GB"
+        conf = {**_mem_conf(50), "save_loc": str(tmp_path / "save"), "pbs": {"conda": "/env", "mem": "auto"}}
+        path = tmp_path / "rollout.yml"
+        path.write_text(yaml.safe_dump(conf))
+        cli_args = argparse.Namespace(cluster="casper", config=str(path), submit_mode="rollout", jobs=1)
+        plan = submit._plan(submit._cli_request(cli_args), cli=cli_args)
+        assert plan["target"]["mem"] == "128GB"
 
     def test_slurm_treats_auto_as_unset(self, tmp_path):
         from credit.cli._common import _SLURM_DEFAULTS

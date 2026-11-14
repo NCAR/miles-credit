@@ -188,9 +188,81 @@ generated `torchrun` line; `credit rollout-ensemble` accepts the same flag.
 preprocess jobs from the config, never below the site default and capped at one node.
 See [Memory requests](Training.md#memory-requests-mem-auto).
 
+Every submission is recorded as a *run*: `credit submit` prints its run id,
+creates a run directory at `<save_loc>/.credit/runs/<run_id>/` (with a snapshot
+of the config, the exact scripts submitted, and `run.json`), and appends it to
+the run ledger at `~/.credit/runs/index.jsonl` (set `CREDIT_HOME` to move it).
+The jobs run the config snapshot, and chained jobs run `config_reload.yml` from
+the same directory, so editing your config after submitting cannot change a
+queued job.  The batch script also records when each job starts and exits (and
+if it was killed by walltime or `qdel`), and the trainer writes progress
+events there; `credit status` reads them.
+
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /
 `credit rollout` directly.
+
+---
+
+## `credit status` — list submitted runs
+
+```bash
+credit status                                  # every run in the ledger
+credit status train-20261030T153207-a1b2       # one run in detail
+credit status --json                           # machine-readable
+```
+
+Lists the runs recorded by `credit submit` with each run's state (`queued`,
+`running`, `completed`, `stopped`, `failed`, `cancelled`) and the live
+scheduler state of its jobs (one `qstat` per PBS server, or `sacct` on SLURM).
+The detail view adds the job ids, exec host, walltime used, PBS's estimated
+start time for queued jobs, exit codes, and the latest training progress.
+
+---
+
+## `credit remote-setup` — choose what credit-mcp may access
+
+```bash
+credit remote-setup                                            # interactive; suggests folders from your runs
+credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes # non-interactive
+credit remote-setup --show                                     # print the current policy
+```
+
+Run this once in a shell on the HPC system before using credit-mcp. It writes
+`~/.credit/remote.yaml`, the policy that limits what `credit.remote` can read,
+list and write. Until that file exists, only runs already in the ledger are
+visible, never your whole home, work or scratch area. Your home directory
+itself, folders above it, and hidden folders can't be chosen.
+
+The policy also turns on two features, unless you pass `--no-redact` or
+`--no-audit`:
+- masking of secrets (tokens, keys, passwords) in any text sent back
+- an audit log at `~/.credit/audit.jsonl`, with one line per call
+
+GPU-hour budgets are optional and limit what credit-mcp may submit to PBS or
+SLURM (runs on the `local` scheduler are not counted):
+
+```bash
+credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes \
+    --max-gpu-hours-per-plan 200 --max-gpu-hours-per-day 1000
+```
+
+- `--max-gpu-hours-per-plan H`: a plan estimated above `H` GPU-hours is refused
+  unless a person types its GPU-hours to confirm it.
+- `--max-gpu-hours-per-day H`: the GPU-hours submitted in any rolling 24 hours,
+  plus those a new submit would add, may not exceed `H`. This limit has no
+  override. Resubmitting a run that is already fully queued adds nothing.
+
+They are written as a `budgets:` block in `remote.yaml`. A plan whose GPU-hours
+can't be estimated (no walltime) is refused while any budget is set. When several
+policy files set a budget, the smallest value applies. A budget that isn't a
+positive number counts as 0, so nothing can be submitted until it is fixed.
+Running `credit remote-setup` again without these flags keeps the existing
+budgets. The GPU-hours actually submitted are recorded in `~/.credit/budget.jsonl`
+in your real home directory.
+
+Choosing folders is deliberately a command you run yourself. No MCP tool can
+change it. See [remote.md](remote.md).
 
 ---
 
@@ -270,6 +342,7 @@ reading the docs end-to-end.
 | `credit rollout`    | Generate forecasts                     | Yes                    |
 | `credit realtime`   | Single forecast from a given init time | Yes                    |
 | `credit submit`     | Submit any of the above to a scheduler | Depends on mode        |
+| `credit status`     | List submitted runs and their state    | No                     |
 | `credit convert`    | Upgrade a gen 1 config to gen 2        | No                     |
 | `credit plot`       | Quick truth-vs-prediction map          | Yes                    |
 | `credit metrics`    | WeatherBench2-style skill scores       | Yes                    |

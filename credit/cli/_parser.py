@@ -10,6 +10,8 @@ from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
+from ._remote_setup import _remote_setup, positive_hours
+from ._status import _status
 from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
 
@@ -29,6 +31,7 @@ def _build_parser() -> argparse.ArgumentParser:
               credit submit   --cluster casper  -c config.yml --mode rollout --jobs 10
               credit submit   --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00
               credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
+              credit status
         """),
     )
     sub = parser.add_subparsers(dest="command", metavar="COMMAND")
@@ -303,6 +306,65 @@ def _build_parser() -> argparse.ArgumentParser:
         help="(train mode) Submit N jobs in sequence using PBS afterok dependencies.",
     )
 
+    # ---- status ----
+    p = sub.add_parser(
+        "status",
+        help="List submitted runs and their scheduler state",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            List the runs recorded by 'credit submit' (the ledger in
+            $CREDIT_HOME/runs/index.jsonl, default ~/.credit) with the live
+            scheduler state of each job, or show one run in detail.
+
+            Examples:
+              credit status
+              credit status train-20261030T153207-a1b2
+              credit status --json
+        """),
+    )
+    p.add_argument("run_id", nargs="?", default=None, metavar="RUN_ID", help="Show one run in detail")
+    p.add_argument("--json", action="store_true", help="Emit JSON instead of text")
+
+    # ---- remote-setup ----
+    p = sub.add_parser(
+        "remote-setup",
+        help="Choose the folders credit-mcp may read and write on this host",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description=textwrap.dedent("""\
+            Write ~/.credit/remote.yaml, the policy that limits what credit-mcp
+            (through `python -m credit.remote`) can read, list and write here.
+            Until it exists, only the runs already in the ledger are served.
+            Secret redaction and the audit log are on unless turned off.
+            Optional GPU-hour budgets limit what credit-mcp may submit.
+
+            Examples:
+              credit remote-setup
+              credit remote-setup --root /glade/work/$USER/CREDIT_runs --yes
+              credit remote-setup --max-gpu-hours-per-plan 200 --max-gpu-hours-per-day 1000
+              credit remote-setup --show
+        """),
+    )
+    p.add_argument("--root", action="append", metavar="DIR", help="Folder to allow (repeatable)")
+    p.add_argument("--yes", action="store_true", help="Don't prompt; use --root or the suggested folders")
+    p.add_argument("--show", action="store_true", help="Print the current policy and exit")
+    p.add_argument("--no-redact", action="store_true", dest="no_redact", help="Don't mask secrets in returned text")
+    p.add_argument("--no-audit", action="store_true", dest="no_audit", help="Don't keep ~/.credit/audit.jsonl")
+    p.add_argument(
+        "--max-gpu-hours-per-plan",
+        type=positive_hours,
+        default=None,
+        metavar="H",
+        help="Above this many GPU-hours a person must type the GPU-hours to confirm a submit",
+    )
+    p.add_argument(
+        "--max-gpu-hours-per-day",
+        type=positive_hours,
+        default=None,
+        metavar="H",
+        help="At most this many GPU-hours submitted in any 24 hours (no override)",
+    )
+    p.add_argument("--policy-file", default=None, dest="policy_file", help=argparse.SUPPRESS)
+
     # ---- plot ----
     p = sub.add_parser(
         "plot",
@@ -454,6 +516,8 @@ def main() -> None:
         "rollout-ensemble": _rollout_ensemble,
         "realtime": _realtime,
         "submit": _submit,
+        "status": _status,
+        "remote-setup": _remote_setup,
         "convert": _convert,
         "plot": _plot,
         "ask": _ask,

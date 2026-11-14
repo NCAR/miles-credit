@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from credit import runs
+
 from ._common import (
     _CASPER_GPU_NODES,
     _DEFAULT_LEVELS_16,
@@ -88,15 +90,7 @@ _BeginDumper.add_representer(_QuotedVariable, _represent_quoted_variable)
 def _detect_system() -> dict:
     """Return a friendly summary of the current host, environment, and GPUs."""
     hostname = socket.gethostname().lower()
-    # Compute nodes are matched with anchored digit patterns (dec0123, nid001234)
-    # rather than bare substrings, so ordinary hostnames that merely contain
-    # "dec"/"nid" (e.g. "decode-box", "unidata") are not misread as HPC systems.
-    if any(name in hostname for name in ("derecho", "casper", "crhtc", "crlogin")) or re.match(r"dec\d+", hostname):
-        system = "derecho" if "derecho" in hostname else "casper" if "casper" in hostname else "ncar"
-    elif "perlmutter" in hostname or re.match(r"nid\d+", hostname):
-        system = "perlmutter"
-    else:
-        system = "local"
+    system = runs.system_name(hostname)
 
     gpu_count = 0
     gpu_names = []
@@ -940,18 +934,22 @@ def _repair_state(state: dict) -> None:
         state["pbs"] = _pbs_config(state["system"], state["experiment"], state["nodes"], state["gpus"])
 
 
+def _dump_config(config: dict) -> str:
+    """Return a built config as the commented YAML text ``credit begin`` writes (also used by ``credit.remote``)."""
+    _quote_data_variable_names(config)
+    stream = io.StringIO()
+    yaml.dump(config, stream, Dumper=_BeginDumper, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    text = stream.getvalue().replace("&id001", "&data_sources").replace("*id001", "*data_sources")
+    return _add_section_comments(text)
+
+
 def _begin(args) -> None:
     system_info = _detect_system()
     config_path, state = _collect_state(args, system_info)
     passed = False
     for attempt in range(3):
-        config = _build_config(state)
-        _quote_data_variable_names(config)
+        text = _dump_config(_build_config(state))
         Path(config_path).parent.mkdir(parents=True, exist_ok=True)
-        stream = io.StringIO()
-        yaml.dump(config, stream, Dumper=_BeginDumper, default_flow_style=False, sort_keys=False, allow_unicode=True)
-        text = stream.getvalue().replace("&id001", "&data_sources").replace("*id001", "*data_sources")
-        text = _add_section_comments(text)
         with open(config_path, "w") as output:
             output.write(text)
         print(f"\n  Saved config: {config_path}")
