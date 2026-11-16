@@ -6,6 +6,7 @@ import pathlib
 from typing import NamedTuple
 
 from credit.conda_env import torchrun_path
+from credit.pbs import _nonblank  # noqa: F401  (re-exported for the CLI submodules)
 
 logger = logging.getLogger(__name__)
 
@@ -225,18 +226,6 @@ def queue_cluster_error(queue: str, cluster: str) -> str:
         f"{cluster.capitalize()} queues: {valid}.\n"
         f"Fix the 'queue:' in the config's pbs block, or override it with --queue."
     )
-
-
-def _nonblank(value) -> str | None:
-    """Return *value* as a stripped string, or None when it is unset or blank.
-
-    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
-    through to the config and environment, like an empty config key or env var does.
-    """
-    if value is None:
-        return None
-    value = str(value).strip()
-    return value or None
 
 
 _PBS_DEFAULTS = {

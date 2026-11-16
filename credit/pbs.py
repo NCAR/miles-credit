@@ -5,11 +5,24 @@ import shutil
 import logging
 import subprocess
 
-from credit.cli._common import _nonblank
 from credit.conda_env import torchrun_path
 from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
+
+
+# Defined here, not in credit.cli._common: credit.cli imports credit.pbs at module level,
+# so importing credit.cli from this module would be circular.
+def _nonblank(value) -> str | None:
+    """Return *value* as a stripped string, or None when it is unset or blank.
+
+    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
+    through to the config and environment, like an empty config key or env var does.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
 
 
 def _pbs_account(pbs_options: dict) -> str:
