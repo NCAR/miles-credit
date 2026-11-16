@@ -170,6 +170,26 @@ def test_sync_run_config_dubious_ownership_suggests_safe_directory(tmp_path, mon
     assert subprocess.run(["git", "-C", str(save), "rev-parse", "HEAD"], capture_output=True).returncode != 0
 
 
+@needs_git
+def test_sync_run_config_dubious_ownership_real_git(tmp_path, monkeypatch, caplog):
+    cfg = _cfg(tmp_path, "a: 1\n")
+    save = tmp_path / "run"
+    sync_run_config(cfg, str(save))  # creates a CREDIT-managed repo
+    assert _log(save, "rev-list", "--count", "HEAD").strip() == "1"
+
+    # Make git treat the repo as owned by someone else (a shared run directory).
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    with caplog.at_level(logging.WARNING):
+        sync_run_config(_cfg(tmp_path, "a: 2\n", name="cfg2.yml"), str(save))
+
+    assert (save / "model.yml").read_text() == "a: 2\n"
+    assert "safe.directory" in caplog.text
+    assert f"git config --global --add safe.directory {save}" in caplog.text
+    assert "not created by CREDIT" not in caplog.text
+    monkeypatch.delenv("GIT_TEST_ASSUME_DIFFERENT_OWNER")
+    assert _log(save, "rev-list", "--count", "HEAD").strip() == "1"  # no commit was attempted
+
+
 # ---------------------------------------------------------------------------
 # Callers: the config must reach save_loc/model.yml before a job runs -c <save_loc>/model.yml
 # ---------------------------------------------------------------------------
