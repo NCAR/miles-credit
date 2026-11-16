@@ -11,6 +11,32 @@ from credit.run_config import sync_run_config
 logger = logging.getLogger(__name__)
 
 
+# Defined here, not in credit.cli._common: credit.cli imports credit.pbs at module level,
+# so importing credit.cli from this module would be circular.
+def _nonblank(value) -> str | None:
+    """Return *value* as a stripped string, or None when it is unset or blank.
+
+    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
+    through to the config and environment, like an empty config key or env var does.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _pbs_account(pbs_options: dict) -> str:
+    """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
+    account = (
+        _nonblank(pbs_options.get("project"))
+        or _nonblank(pbs_options.get("account"))
+        or _nonblank(os.environ.get("PBS_ACCOUNT"))
+    )
+    if not account:
+        raise ValueError("No PBS account. Set pbs.project in the config or export PBS_ACCOUNT.")
+    return account
+
+
 def launch_script(config_file, script_path, launch=True, backend="nccl"):
     """Generates and optionally launches a PBS script for a single-node MPI job on Casper.
 
@@ -41,7 +67,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     #PBS -N {pbs_options["job_name"]}
     #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}{gpu_type_select}
     #PBS -l walltime={pbs_options["walltime"]}
-    #PBS -A {pbs_options["project"]}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -q {pbs_options["queue"]}
     #PBS -j oe
     #PBS -k eod
@@ -106,7 +132,7 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     # Generate the PBS script
     script = f"""#!/bin/bash
-    #PBS -A {pbs_options.get("project", "default_project")}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -N {pbs_options.get("job_name", "default_job")}
     #PBS -l walltime={pbs_options.get("walltime", "00:10:00")}
     #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 1)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "4GB")}
@@ -241,7 +267,7 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
     torchrun_line = f"TORCHRUN={torchrun}\n" if num_nodes == 1 else ""
 
     script = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
@@ -490,7 +516,7 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
     torchrun = f"{conda}/bin/torchrun" if "/" in str(conda) else "torchrun"
 
     header = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2_pbsdsh")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}

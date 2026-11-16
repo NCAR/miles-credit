@@ -1,6 +1,6 @@
 #!/bin/bash
 # PBS -N LZ_01
-# PBS -A NAML0001
+# PBS -A YOUR_ACCOUNT
 # PBS -l walltime=12:00:00
 # PBS -o LZ_01.out
 # PBS -e LZ_01.out

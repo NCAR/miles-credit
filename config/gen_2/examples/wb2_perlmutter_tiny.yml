@@ -171,7 +171,7 @@ trainer:
 
 slurm:
   conda: "/global/common/software/m5388/djgagne/envs/credit-perlmutter"
-  project: "m5388"
+  # project: YOUR_ACCOUNT  # or export SLURM_ACCOUNT (Perlmutter GPU accounts end in _g)
   job_name: "credit_wb2_tiny"
   nodes: 1
   ngpus: 2

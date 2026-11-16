@@ -6,6 +6,7 @@ import pathlib
 from typing import NamedTuple
 
 from credit.conda_env import torchrun_path
+from credit.pbs import _nonblank  # noqa: F401  (re-exported for the CLI submodules)
 
 logger = logging.getLogger(__name__)
 
@@ -239,7 +240,9 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        "account": "NAML0001",
+        # Default account is none. It must come from --account,
+        # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
+        "account": None,
         "job_name": "credit_gen2",
     },
     "derecho": {
@@ -250,7 +253,9 @@ _PBS_DEFAULTS = {
         "walltime": "12:00:00",
         "gpus": 4,
         "nodes": 1,
-        "account": "NAML0001",
+        # Default account is none. It must come from --account,
+        # the config's pbs.project, or $PBS_ACCOUNT (see _resolve_pbs_opts).
+        "account": None,
         "job_name": "credit_gen2",
     },
 }

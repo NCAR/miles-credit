@@ -195,7 +195,7 @@ trainer:
 pbs:
   conda: /glade/work/schreck/conda-envs/credit-main-derecho
   job_name: smoke_v2_tp_domain
-  project: NAML0001
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   walltime: 01:00:00
   nodes: 1
   ncpus: 64

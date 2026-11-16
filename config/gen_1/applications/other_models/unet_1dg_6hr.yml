@@ -182,7 +182,7 @@ predict:
 pbs: # casper
     conda: "credit-casper"
     job_name: 'test_1dg_unet'
-    project: 'NAML0001'
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     nodes: 1
     ncpus: 8
     ngpus: 1
@@ -193,7 +193,7 @@ pbs: # casper
 
 # pbs: #derecho
 #     conda: "credit-derecho"
-#     project: "NAML0001"
+#     project: YOUR_ACCOUNT
 #     job_name: "unet_data"
 #     walltime: "12:00:00"
 #     nodes: 1

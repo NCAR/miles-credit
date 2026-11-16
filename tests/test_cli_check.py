@@ -868,6 +868,65 @@ def test_checks_do_not_mutate_the_config(conf):
     assert conf == before
 
 
+@pytest.mark.parametrize(
+    ("pbs", "env_account", "severity"),
+    [
+        ({"queue": "main"}, None, "warning"),  # submit would fail: nothing to charge
+        ({"queue": "main"}, "ENV_ACCOUNT", "info"),  # $PBS_ACCOUNT covers it
+        ({"queue": "main", "project": "ABCD0001"}, None, None),
+        ({"queue": "main", "project": "ABCD0001"}, "ABCD0001", None),  # agree: nothing to say
+        ({"queue": "main", "project": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # config overrides env
+        ({"queue": "main", "account": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # alias too
+    ],
+)
+def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
+    if env_account:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    conf["pbs"] = pbs
+    rep = _run(conf)
+    found = {f.severity for f in rep.findings if f.where == "pbs.project"}
+    assert found == ({severity} if severity else set())
+
+
+def test_slurm_only_block_reports_account(conf, monkeypatch):
+    # A config with only a slurm: block (no pbs:) still gets its account reported.
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    conf.pop("pbs", None)
+    conf["slurm"] = {"conda": "credit", "partition": "gpu"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"] and "m0000_g" in found[0].message
+
+
+@pytest.mark.parametrize(("env_account", "needle"), [(None, "SLURM_ACCOUNT"), ("m0000_g", "m0000_g")])
+def test_slurm_account_message_is_scheduler_aware(conf, monkeypatch, env_account, needle):
+    # A Perlmutter block (written under pbs: by `credit begin`) resolves $SLURM_ACCOUNT, not $PBS_ACCOUNT.
+    monkeypatch.setenv("PBS_ACCOUNT", "PBS_ONLY")
+    if env_account:
+        monkeypatch.setenv("SLURM_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("SLURM_ACCOUNT", raising=False)
+    conf["pbs"] = {"constraint": "gpu", "qos": "regular", "job_name": "j", "walltime": "01:00:00", "queue": "main"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"]
+    text = found[0].message + (found[0].fix or "")
+    assert needle in text and "PBS_ACCOUNT" not in text
+
+
+@pytest.mark.parametrize(("env_account", "expect_info"), [(None, True), ("", True), ("ENV0001", False)])
+def test_no_pbs_block_notes_missing_account(conf, monkeypatch, env_account, expect_info):
+    # No pbs: block (e.g. a laptop config): INFO only, never a warning, and silent when $PBS_ACCOUNT is set.
+    if env_account is None:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    else:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    conf.pop("pbs", None)
+    conf.pop("slurm", None)
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == (["info"] if expect_info else [])
+
+
 # ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================

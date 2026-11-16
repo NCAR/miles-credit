@@ -546,7 +546,7 @@ predict:
 # credit.pbs supports NSF NCAR HPCs (casper.ucar.edu and derecho.hpc.ucar.edu)
 pbs: #derecho
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "ps_wxformer_CESM_6h"
     walltime: "12:00:00"
     nodes: 8
