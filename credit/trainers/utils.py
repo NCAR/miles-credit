@@ -580,6 +580,22 @@ def _migrate_legacy_checkpoint(model, checkpoint):
     migrate_legacy_state_dict(getattr(model, "module", model), state_dict)
 
 
+def _apply_resume_position(conf, checkpoint):
+    """Set trainer.start_epoch / trainer.resume_at_batch from a checkpoint's position.
+
+    ``batch_in_epoch`` > 0 resumes inside that epoch; 0 or absent (incl. older
+    checkpoints) resumes at the next epoch.
+    """
+    batch_in_epoch = int(checkpoint.get("batch_in_epoch") or 0)
+    if batch_in_epoch > 0:
+        conf["trainer"]["start_epoch"] = checkpoint["epoch"]
+        conf["trainer"]["resume_at_batch"] = batch_in_epoch
+        logging.info(f"Resuming mid-epoch: epoch {checkpoint['epoch']}, batch {batch_in_epoch}")
+    else:
+        conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
+        conf["trainer"]["resume_at_batch"] = 0
+
+
 def load_model_states_and_optimizer(conf, model, device):
     """Load model weights, optimizer, scheduler, and gradient scaler.
 
@@ -677,7 +693,7 @@ def load_model_states_and_optimizer(conf, model, device):
         scaler = _make_scaler()
 
         if conf["trainer"].get("reload_epoch", False) and os.path.exists(os.path.join(save_loc, "training_log.csv")):
-            conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
+            _apply_resume_position(conf, checkpoint)
 
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
@@ -708,11 +724,14 @@ def load_model_states_and_optimizer(conf, model, device):
         scaler = _make_scaler()
 
         if conf["trainer"].get("reload_epoch", False):
-            conf["trainer"]["start_epoch"] = checkpoint["epoch"] + 1
+            _apply_resume_position(conf, checkpoint)
 
-        if conf["trainer"]["start_epoch"] > 0:
+        if conf["trainer"].get("start_epoch", 0) > 0 or conf["trainer"].get("resume_at_batch", 0) > 0:
             if scheduler is not None:
                 scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                if hasattr(scheduler, "get_last_lr"):
+                    for group, lr in zip(optimizer.param_groups, scheduler.get_last_lr()):
+                        group["lr"] = lr
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     if conf["trainer"].get("update_learning_rate", False):

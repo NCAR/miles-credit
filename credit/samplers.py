@@ -79,9 +79,20 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
 
         self.batch_size = batch_size
         self.num_forecast_steps = num_forecast_steps
+        self.skip_batches = 0
+
+    def skip_first_batches(self, n_batches: int) -> None:
+        """Skip the first *n_batches* init batches of the NEXT iteration only.
+
+        Used to resume mid-epoch; call it after set_epoch()
+        """
+        self.skip_batches = int(n_batches)
 
     def __iter__(self):
         index_subset = list(super().__iter__())
+        if self.skip_batches:
+            index_subset = index_subset[self.skip_batches * self.batch_size :]
+            self.skip_batches = 0
         logger.debug(f"num indices: {len(index_subset)}")
         batch_sampler = MultiStepBatchSamplerSubset(
             self.dataset,
