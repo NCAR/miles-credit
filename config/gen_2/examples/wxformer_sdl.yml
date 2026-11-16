@@ -342,11 +342,12 @@ inference:
 
 pbs: # derecho
   conda: "credit-derecho"
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "wxformer_sdl"
   walltime: "04:00:00"   # fine-tuning is much shorter than base training
   nodes: 1               # 1 node x 4 GPUs = trainer.ensemble_size
   ncpus: 64
   ngpus: 4
-  mem: '480GB'
+  mem: 'auto'               # size from this config (train/preprocess), never below the site default;
+                             # or a fixed request such as '480GB'. `credit check` reports the estimate.
   queue: 'main'
