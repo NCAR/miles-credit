@@ -29,10 +29,9 @@ dependencies = [
     "numcodecs",
     "echo-opt",
     "bridgescaler",
-    "segmentation-models-pytorch",
     "haversine",
     "pvlib",
-    "torch-harmonics<0.9",
+    "timm",
     "torch_geometric",
     "torchmetrics",
     "fsspec",
@@ -55,7 +54,14 @@ docs = ["sphinx",
     "sphinx-book-theme",
     "sphinx-design"]
 
-develop = ["pre-commit",
+# Spherical-harmonic features: SKEBS postblock, SphericalNoise, pole/diffusion filter,
+# spectral verification. torch-harmonics wheels are built per torch version, so pip picks
+# the release that matches the installed torch.
+spectral = ["torch-harmonics>=0.8",
+    "segmentation-models-pytorch"]
+
+develop = ["miles-credit[spectral]",
+    "pre-commit",
     "sphinx",
     "sphinx-autoapi",
     "myst_parser",

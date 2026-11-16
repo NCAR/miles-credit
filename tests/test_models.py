@@ -8,7 +8,6 @@ import torch
 
 from credit.models import load_model, register_model
 from credit.parser import load_custom_model_modules
-from credit.models.unet import SegmentationModel
 from credit.models.wxformer.crossformer import CrossFormer
 from credit.models.fuxi import Fuxi
 from credit.parser import credit_main_parser
@@ -19,38 +18,16 @@ CONFIG_FILE_DIR = os.path.join(
 )
 
 
-def test_unet():
-    """Test the unet model."""
-    # load config
+def test_unet_moved_to_credit_zoo():
+    """model.type 'unet' moved to credit-zoo; without custom_objects it fails with migration instructions."""
     config = os.path.join(CONFIG_FILE_DIR, "unet_1dg_test.yml")
     with open(config) as cf:
         conf = yaml.load(cf, Loader=yaml.FullLoader)
-
+    conf.pop("custom_objects", None)
     conf = credit_main_parser(conf)
-    model = load_model(conf)
 
-    assert isinstance(model, SegmentationModel)
-
-    image_height = conf["model"]["image_height"]
-    image_width = conf["model"]["image_width"]
-    variables = len(conf["data"]["variables"])
-    levels = conf["model"]["levels"]
-    frames = conf["model"]["frames"]
-    surface_variables = len(conf["data"]["surface_variables"])
-    input_only_variables = len(conf["data"]["static_variables"]) + len(conf["data"]["dynamic_forcing_variables"])
-    output_only_variables = conf["model"]["output_only_channels"]
-
-    in_channels = int(variables * levels + surface_variables + input_only_variables)
-    out_channels = int(variables * levels + surface_variables + output_only_variables)
-
-    assert in_channels != out_channels
-
-    input_tensor = torch.randn(1, in_channels, frames, image_height, image_width)
-
-    y_pred = model(input_tensor)
-
-    assert y_pred.shape == torch.Size([1, out_channels, 1, image_height, image_width])
-    assert not torch.isnan(y_pred).any()
+    with pytest.raises(ValueError, match="credit-zoo"):
+        load_model(conf)
 
 
 def test_crossformer():
@@ -211,5 +188,5 @@ def test_register_model_overwrite(caplog):
 
 
 if __name__ == "__main__":
-    test_unet()
+    test_unet_moved_to_credit_zoo()
     # test_crossformer()

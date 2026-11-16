@@ -167,6 +167,15 @@ def test_unknown_model_type_suggests_nearest(conf):
     assert "wxformer" in _text(rep)
 
 
+def test_model_moved_to_credit_zoo_points_at_custom_objects(conf):
+    conf["model"]["type"] = "unet"
+    rep = _run(conf)
+    assert "model.type" in _wheres(rep)
+    text = _text(rep)
+    assert "credit-zoo" in text
+    assert "module_path: credit_zoo.models.unet.unet" in text
+
+
 def test_unknown_dataset_type_suggests_nearest(conf):
     conf["data"]["source"]["ERA5"]["dataset_type"] = "arco_era"
     rep = _run(conf)

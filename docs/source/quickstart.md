@@ -73,6 +73,14 @@ cd miles-credit
 uv pip install -e ".[develop]"
 ```
 
+```{note}
+Spherical-harmonic features (the gen1 SKEBS postblock, `spherical` ensemble noise, the pole/diffusion
+filter, and spectral verification) need the optional `spectral` extra, which installs `torch-harmonics`
+and `segmentation-models-pytorch`: `uv pip install "miles-credit[spectral]"`. The `develop` extra
+already includes it. The `unet` and `unet_downscaling` models moved to
+[credit-zoo](https://github.com/NCAR/credit-zoo).
+```
+
 :::
 
 ::::

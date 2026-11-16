@@ -18,6 +18,7 @@ import numpy as np
 import pytest
 import torch
 
+from credit._optional import is_available
 from credit.ensemble.color import ColorNoise
 from credit.ensemble.gaussian import GaussianNoise
 from credit.ensemble.spherical import SphericalNoise
@@ -133,6 +134,7 @@ class TestColorNoise:
 # ===========================================================================
 
 
+@pytest.mark.skipif(not is_available("torch_harmonics"), reason="requires the 'spectral' extra (torch-harmonics)")
 class TestSphericalNoise:
     def test_output_shape(self, x):
         noise = SphericalNoise(amplitude=0.1, smoothness=2.0, length_scale=3.0)
