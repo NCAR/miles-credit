@@ -240,14 +240,48 @@ class GlobalWaterFixer(nn.Module):
     Mirrors ``gen1.GlobalWaterFixer``: the column-water tendency plus
     evaporation must balance precipitation; precip is rescaled to enforce it.
 
+    Units: ``precip_units`` and ``evapor_units`` are set independently, since
+    datasets often mix them (E3SM ``PRECT`` is ``m s-1`` but ``QFLX`` is
+    ``kg m-2 s-1``).  Each is one of
+
+    * ``"m"`` (default, gen1/ERA5 behavior): liquid-water depth accumulated
+      over the step;
+    * ``"kg m-2"``: water mass accumulated over the step;
+    * ``"m s-1"``: liquid-water depth rate (mean or instantaneous);
+    * ``"kg m-2 s-1"``: water mass flux.
+
+    Everything is converted to ``kg m-2 s-1`` internally, and the correction
+    is a ratio, so precipitation comes back out in its original units.
+
+    Sign convention: precipitation is positive.  Evaporation defaults to the
+    ERA5 convention (positive downward, so evaporation is negative); set
+    ``evapor_positive_up=True`` for datasets where evaporation is positive,
+    such as CESM/E3SM ``QFLX``.
+
     Args:
         q_var, sp_var, precip_var, evapor_var: variable keys.
         lead_time_periods: forecast step length in hours (sets ``N_seconds``).
+        precip_units: units of ``precip_var`` (see above).
+        evapor_units: units of ``evapor_var`` (see above).
+        evapor_positive_up: ``True`` if ``evapor_var`` is positive for
+            evaporation (upward), ``False`` for the ERA5 downward-positive sign.
         **physics: physics-core setup keys (see ``GlobalMassFixer``).
     """
 
+    _WATER_UNITS = ("m", "kg m-2", "m s-1", "kg m-2 s-1")
+
     def __init__(
-        self, q_var, sp_var, precip_var, evapor_var, lead_time_periods, input_source_key="x_physical", **physics
+        self,
+        q_var,
+        sp_var,
+        precip_var,
+        evapor_var,
+        lead_time_periods,
+        input_source_key="x_physical",
+        precip_units="m",
+        evapor_units="m",
+        evapor_positive_up=False,
+        **physics,
     ):
         super().__init__()
         self.q_var = q_var
@@ -256,9 +290,28 @@ class GlobalWaterFixer(nn.Module):
         self.evapor_var = evapor_var
         self.N_seconds = int(lead_time_periods) * 3600
         self.input_source_key = input_source_key
+        self.precip_units = precip_units
+        self.evapor_units = evapor_units
+        self.evapor_positive_up = bool(evapor_positive_up)
+        # factors that turn the configured units into a kg m-2 s-1 mass flux
+        self.precip_scale = self._to_mass_flux(precip_units, "precip_units")
+        # the budget below uses downward-positive evaporation (ERA5 sign)
+        self.evapor_scale = self._to_mass_flux(evapor_units, "evapor_units") * (
+            -1.0 if self.evapor_positive_up else 1.0
+        )
         self.core, self.flag_sigma, self.midpoint, self.N_levels, self.coef_a, self.coef_b = _setup_physics_core(
             physics
         )
+
+    def _to_mass_flux(self, units, arg_name):
+        if units not in self._WATER_UNITS:
+            raise ValueError(f"GlobalWaterFixer: {arg_name} must be one of {self._WATER_UNITS}, got {units!r}.")
+        return {
+            "m": RHO_WATER / self.N_seconds,
+            "kg m-2": 1.0 / self.N_seconds,
+            "m s-1": RHO_WATER,
+            "kg m-2 s-1": 1.0,
+        }[units]
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -275,8 +328,8 @@ class GlobalWaterFixer(nn.Module):
         if not self.flag_sigma:
             raise NotImplementedError("GlobalWaterFixer (gen2) currently supports the hybrid-sigma grid only.")
 
-        precip_flux = precip * RHO_WATER / self.N_seconds
-        evapor_flux = evapor * RHO_WATER / self.N_seconds
+        precip_flux = precip * self.precip_scale
+        evapor_flux = evapor * self.evapor_scale
 
         TWC_input = self.core.total_column_water(q_input.to(device), sp_input.to(device))
         TWC_pred = self.core.total_column_water(q_pred, sp_pred)

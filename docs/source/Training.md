@@ -38,6 +38,30 @@ automatically from the config.
 edits required to get started.
 :::
 
+### Config history in `save_loc`
+
+Every `credit train` and `credit preprocess` run copies its config to `<save_loc>/model.yml` when the job starts
+(on a batch system that is when the job begins running, not when you run `credit submit`), so that file always
+reflects the most recent run (rollout and evaluation read it). To keep an audit trail,
+`save_loc` is automatically turned into a small git repository that tracks only `model.yml`; each time the
+config changes a commit is made:
+
+```bash
+git -C <save_loc> log -p model.yml
+```
+
+**git must be installed and on your `PATH`** (on Casper/Derecho: `module load git`). If git is missing or the
+repository cannot be initialized, CREDIT logs a warning, still copies `model.yml`, but config history is not
+recorded. If `save_loc` is already a git repository that CREDIT did not create (for example your own
+project root), CREDIT leaves it alone: it logs a warning, copies `model.yml`, and makes no commits there. We
+recommend setting `save_loc` to a directory outside the `miles-credit` repository (and outside any other git
+repository), for example under your scratch space, so training outputs never mix with source code.
+
+If `save_loc` is owned by another user (a shared run directory), git's "dubious ownership" check can refuse to
+work in it. CREDIT then logs a warning on every run that names the fix (`model.yml` is still copied, but its
+history is not recorded). To enable history tracking there, run
+`git config --global --add safe.directory <save_loc>`.
+
 ## How many jobs do I need?
 
 Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.
@@ -362,6 +386,25 @@ The `pbsdsh` launcher passes the flags to each node's `torchrun`. Its per-node s
 written through an unquoted heredoc, so a `$` in the flags expands when that script is
 written. The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
 `torchrun_args`; `credit submit` and `credit check` both warn when that happens.
+
+### Derecho: `import torch` fails with `libcudart.so.13`
+
+Since the November 2026 Derecho maintenance, the Cray MPICH libraries in `/opt/cray/pe/lib64`
+come from MPICH 9.1.0, whose GTL library needs CUDA 13. The `cray-mpich` module doesn't put its
+own `gtl/lib` on `LD_LIBRARY_PATH`, so the loader falls back to that directory. As a result, torch,
+which is built against `cray-mpich/8.1.29` and CUDA 12, picks up the 9.1.0 GTL and fails with `OSError: libcudart.so.13: cannot open shared object file`.
+
+Every Derecho script that `credit submit` (and the `credit.pbs` launch helpers) writes loads
+`cray-mpich/8.1.29` and then puts that module's GTL first. The job log shows a line like
+`credit: using MPICH GTL from /opt/cray/pe/mpich/8.1.29/gtl/lib`. In an interactive session,
+Jupyter, or a hand-written job script, run this after `module load … cray-mpich/8.1.29 …` and
+`conda activate`:
+
+```bash
+export LD_LIBRARY_PATH="${CRAY_MPICH_ROOTDIR}/gtl/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+```
+
+This is a workaround until NCAR fixes the module or the shared environment is rebuilt.
 
 ## Job submission
 
