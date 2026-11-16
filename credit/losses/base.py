@@ -80,6 +80,7 @@ import inspect
 import logging
 import math
 import os
+import warnings
 
 import numpy as np
 import torch
@@ -126,42 +127,6 @@ def _scaler_channel_variance(scaler) -> "torch.Tensor | None":
     return None
 
 
-def exp_transform_specs(conf: dict) -> list:
-    """``exp_transform`` postblocks that write physical values into ``y_processed``.
-
-    Returns ``[{"variables": [...], "base": str, "eps": float}, ...]`` from
-    ``conf["postblocks"]["per_step"]``. A variable listed here is scored in
-    physical units, but its scaler statistics were fit on the log-transformed
-    values (the matching ``log_transform`` preblock), so its variance has to be
-    converted before it can weight the loss (see ``_load_target_variances``).
-    """
-    per_step = (conf.get("postblocks") or {}).get("per_step") or {}
-    specs = []
-    for block in per_step.values():
-        if not isinstance(block, dict) or block.get("type") != "exp_transform":
-            continue
-        args = block.get("args") or {}
-        if args.get("key", "y_processed") != "y_processed":
-            continue
-        specs.append(
-            {
-                "variables": list(args.get("variables") or []),
-                "base": str(args.get("base", "e")),
-                "eps": float(args.get("eps", 1e-8)),
-            }
-        )
-    return specs
-
-
-def _matching_exp_spec(var_key: str, specs: list) -> "dict | None":
-    """First spec selecting ``var_key``: exact, a "/"-delimited prefix, or ``[]`` (all)."""
-    for spec in specs:
-        variables = spec["variables"]
-        if not variables or any(var_key == v or var_key.startswith(v + "/") for v in variables):
-            return spec
-    return None
-
-
 def _physical_variance_from_log(mean: torch.Tensor, var: torch.Tensor, base: str, eps: float) -> torch.Tensor:
     """Per-channel variance of ``x`` given the mean/variance of ``y = log_b(x + eps) - log_b(eps)``.
 
@@ -181,6 +146,113 @@ def _physical_variance_from_log(mean: torch.Tensor, var: torch.Tensor, base: str
     return torch.exp(2 * m) * s2
 
 
+def _physical_variance_from_sqrt(mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
+    """Per-channel variance of ``x`` given the mean/variance of ``y = sqrt(x)``.
+
+    With ``m`` and ``s2`` the sqrt-space mean and variance,
+    ``Var(y^2) = 4 * m^2 * s2 + 2 * s2^2``, exact when ``y`` is normal. The first
+    term is the delta-method estimate; the second keeps the result positive for
+    zero-inflated fields whose sqrt-space mean is near zero. This is a fallback for
+    scalers fit before ``credit preprocess`` recorded exact physical-unit
+    statistics (``_load_physical_scalers``).
+    """
+    m = mean.double()
+    s2 = var.double()
+    return 4 * m**2 * s2 + 2 * s2**2
+
+
+# Postblocks that undo a variance-changing preblock, returning a variable to
+# physical units in ``y_processed``. A variable one of them covers is scored in
+# physical units while its scaler statistics are in the transformed space.
+#   preblock: the registry key of the preblock it inverts
+#   space:    name of the transformed space, for messages
+#   args:     ``{spec_key: (config_arg, cast, default)}`` copied from the postblock args
+#   variance: ``fn(mean, var, **spec_args)`` estimating the physical variance from the
+#             transformed-space statistics, when no ``*_physical.json`` sidecar exists
+# A new invertible transform needs an entry here and ``changes_units = True`` on
+# its preblock class (so ``credit preprocess`` records its physical statistics).
+UNIT_TRANSFORMS = {
+    "exp_transform": {
+        "preblock": "log_transform",
+        "space": "log",
+        "args": {"base": ("base", str, "e"), "eps": ("eps", float, 1e-8)},
+        "variance": _physical_variance_from_log,
+    },
+    "square_transform": {
+        "preblock": "sqrt_transform",
+        "space": "sqrt",
+        "args": {},
+        "variance": _physical_variance_from_sqrt,
+    },
+}
+
+
+def unit_transform_specs(conf: dict, types: "tuple | None" = None) -> list:
+    """Unit-restoring postblocks that write physical values into ``y_processed``.
+
+    Returns ``[{"type": str, "variables": [...], ...}, ...]`` from
+    ``conf["postblocks"]["per_step"]``, one per ``UNIT_TRANSFORMS`` postblock
+    (``exp_transform`` adds ``base`` and ``eps``). A variable listed here is scored
+    in physical units, but its scaler statistics were fit on the transformed
+    values (the matching ``log_transform`` / ``sqrt_transform`` preblock), so its
+    variance has to be converted before it can weight the loss (see
+    ``_load_target_variances``). ``types`` restricts the postblock types collected.
+    """
+    per_step = (conf.get("postblocks") or {}).get("per_step") or {}
+    specs = []
+    for block in per_step.values():
+        if not isinstance(block, dict) or block.get("type") not in UNIT_TRANSFORMS:
+            continue
+        if types is not None and block["type"] not in types:
+            continue
+        args = block.get("args") or {}
+        if args.get("key", "y_processed") != "y_processed":
+            continue
+        spec = {"type": block["type"], "variables": list(args.get("variables") or [])}
+        for spec_key, (arg, cast, default) in UNIT_TRANSFORMS[block["type"]]["args"].items():
+            spec[spec_key] = cast(args.get(arg, default))
+        specs.append(spec)
+    return specs
+
+
+def exp_transform_specs(conf: dict) -> list:
+    """``exp_transform`` specs only; kept for backward compatibility (see ``unit_transform_specs``)."""
+    return unit_transform_specs(conf, types=("exp_transform",))
+
+
+def _matching_unit_spec(var_key: str, specs: list) -> "dict | None":
+    """First spec selecting ``var_key``: exact, a "/"-delimited prefix, or ``[]`` (all)."""
+    for spec in specs:
+        variables = spec["variables"]
+        if not variables or any(var_key == v or var_key.startswith(v + "/") for v in variables):
+            return spec
+    return None
+
+
+_matching_exp_spec = _matching_unit_spec  # backward-compatible name
+
+
+def _spec_physical_variance(spec: dict, mean: torch.Tensor, var: torch.Tensor) -> torch.Tensor:
+    """Physical variance estimated from transformed-space ``mean``/``var`` for ``spec``.
+
+    A spec without ``"type"`` is an ``exp_transform`` one (the pre-``unit_transforms`` shape).
+    """
+    entry = UNIT_TRANSFORMS[spec.get("type", "exp_transform")]
+    return entry["variance"](mean, var, **{k: spec[k] for k in entry["args"]})
+
+
+def _resolve_unit_transforms(unit_transforms: "list | None", exp_transforms: "list | None") -> "list | None":
+    """Merge the deprecated ``exp_transforms`` argument into ``unit_transforms``."""
+    if exp_transforms is None:
+        return unit_transforms
+    warnings.warn(
+        "exp_transforms is deprecated; pass unit_transforms (credit.losses.base.unit_transform_specs).",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+    return exp_transforms if unit_transforms is None else unit_transforms
+
+
 def _load_physical_scalers(scaler_path: str) -> dict:
     """``{var_key: scaler}`` from the physical-unit stats sidecar of ``scaler_path``, or ``{}``."""
     from bridgescaler import load_scaler_dict
@@ -197,37 +269,40 @@ def _load_physical_scalers(scaler_path: str) -> dict:
     }
 
 
-def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = None) -> dict:
+def _load_target_variances(scaler_path: str, unit_transforms: "list | None" = None) -> dict:
     """Flatten a bridgescaler dict's ``"target"`` slice to ``{var_key: variance}``.
 
-    ``exp_transforms`` (from ``exp_transform_specs``) marks variables whose scaler
-    was fit in log space but which are scored in physical units; their variances
-    are converted to physical units so inverse-variance weights match the loss.
-    The exact physical variance from the ``*_physical.json`` sidecar that
-    ``credit preprocess`` writes (``credit.preblock.scaler.physical_stats_path``)
-    is used when present; otherwise it is estimated from the log-space statistics
-    (``_physical_variance_from_log``).
+    ``unit_transforms`` (from ``unit_transform_specs``) marks variables whose scaler
+    was fit in a transformed (log or sqrt) space but which are scored in physical
+    units; their variances are converted to physical units so inverse-variance
+    weights match the loss. The exact physical variance from the
+    ``*_physical.json`` sidecar that ``credit preprocess`` writes
+    (``credit.preblock.scaler.physical_stats_path``) is used when present;
+    otherwise it is estimated from the transformed-space statistics
+    (``UNIT_TRANSFORMS[type]["variance"]``).
     """
     from bridgescaler import load_scaler_dict
 
     from credit.preblock.scaler import physical_stats_path
 
-    exp_transforms = exp_transforms or []
+    unit_transforms = unit_transforms or []
     target_scalers = load_scaler_dict(os.path.expandvars(scaler_path))["target"]
-    physical_scalers = _load_physical_scalers(scaler_path) if exp_transforms else {}
+    physical_scalers = _load_physical_scalers(scaler_path) if unit_transforms else {}
     variances = {}
     for source_scalers in target_scalers.values():
         for var_key, scaler in source_scalers.items():
             channel_var = _scaler_channel_variance(scaler)
             if channel_var is None or not torch.isfinite(channel_var).all():
                 continue
-            spec = _matching_exp_spec(var_key, exp_transforms)
+            spec = _matching_unit_spec(var_key, unit_transforms)
+            space = UNIT_TRANSFORMS[spec.get("type", "exp_transform")]["space"] if spec is not None else None
             exact = _scaler_channel_variance(physical_scalers[var_key]) if var_key in physical_scalers else None
             if spec is not None and exact is not None and torch.isfinite(exact).all():
                 logger.info(
-                    "'%s' is scored in physical units but scaled in log space: using the exact "
+                    "'%s' is scored in physical units but scaled in %s space: using the exact "
                     "physical variance %.4g from %s.",
                     var_key,
+                    space,
                     float(exact.mean()),
                     physical_stats_path(scaler_path),
                 )
@@ -236,26 +311,32 @@ def _load_target_variances(scaler_path: str, exp_transforms: "list | None" = Non
                 mean = getattr(scaler, "mean_x_", None)
                 if mean is None:
                     logger.warning(
-                        "'%s' is exp-transformed back to physical units, but its scaler has no "
-                        "mean_x_ to convert the log-space variance; using the log-space variance. "
+                        "'%s' is transformed back to physical units, but its scaler has no "
+                        "mean_x_ to convert the %s-space variance; using the %s-space variance. "
                         "Set a variable_weights entry for it.",
                         var_key,
+                        space,
+                        space,
                     )
                 else:
                     mean = torch.as_tensor(mean, dtype=torch.float32).flatten()
-                    phys = _physical_variance_from_log(mean, channel_var, spec["base"], spec["eps"])
+                    phys = _spec_physical_variance(spec, mean, channel_var)
                     if not torch.isfinite(phys).all():
                         logger.warning(
-                            "'%s': log-to-physical variance conversion overflowed; using the "
-                            "log-space variance. Set a variable_weights entry for it.",
+                            "'%s': %s-to-physical variance conversion overflowed; using the "
+                            "%s-space variance. Set a variable_weights entry for it.",
                             var_key,
+                            space,
+                            space,
                         )
                     else:
                         logger.info(
-                            "'%s' is scored in physical units but scaled in log space: level-mean "
-                            "variance %.4g (log) -> %.4g (physical).",
+                            "'%s' is scored in physical units but scaled in %s space: level-mean "
+                            "variance %.4g (%s) -> %.4g (physical).",
                             var_key,
+                            space,
                             float(channel_var.mean()),
+                            space,
                             float(phys.mean()),
                         )
                         channel_var = phys
@@ -330,10 +411,13 @@ class BaseLoss(nn.Module):
             the state dict on the first forward pass.
         validation: construct the validation variant (uses ``validation_loss``
             when given).
-        exp_transforms: ``exp_transform`` postblock specs (``exp_transform_specs``;
-            ``load_loss`` fills this from the config). Variables they cover are
-            scored in physical units but scaled in log space, so their
-            inverse-variance weights use the variance converted to physical units.
+        unit_transforms: specs of the postblocks that return variables to physical
+            units (``exp_transform``, ``square_transform``; see
+            ``unit_transform_specs`` — ``load_loss`` fills this from the config).
+            Variables they cover are scored in physical units but scaled in log or
+            sqrt space, so their inverse-variance weights use the variance
+            converted to physical units.
+        exp_transforms: deprecated alias of ``unit_transforms``.
 
     Attributes:
         last_var_losses: ``{var_key: float}`` detached per-variable scores
@@ -360,6 +444,7 @@ class BaseLoss(nn.Module):
         latitude_weights: str | None = None,
         channel_schema=None,
         validation: bool = False,
+        unit_transforms: list | None = None,
         exp_transforms: list | None = None,
         **kwargs,
     ):
@@ -421,7 +506,9 @@ class BaseLoss(nn.Module):
         if self.var_weighting in ("inverse_variance", "learnable"):
             if not scaler_path:
                 raise ValueError(f"scaler_path is required for var_weighting='{self.var_weighting}'.")
-            self._variances = _load_target_variances(scaler_path, exp_transforms)
+            self._variances = _load_target_variances(
+                scaler_path, _resolve_unit_transforms(unit_transforms, exp_transforms)
+            )
 
         self._combination_weights = None  # {var_key: float} for static modes; built at first forward
         self.log_variance = None  # nn.Parameter for learnable mode

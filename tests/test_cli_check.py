@@ -330,6 +330,39 @@ def test_flatten_to_tensor_missing_spatial_variables_errors(conf):
     assert "spatial_variables" in _text(rep)
 
 
+def _water_fixer_block(**units):
+    args = {
+        "q_var": "ERA5/prognostic/3d/Q",
+        "sp_var": "ERA5/prognostic/2d/SP",
+        "precip_var": "ERA5/diagnostic/2d/TP",
+        "evapor_var": "ERA5/diagnostic/2d/TP",
+        "lead_time_periods": 6,
+        **units,
+    }
+    return {"type": "global_water_fixer", "args": args}
+
+
+def test_water_fixer_valid_units_ok(conf):
+    conf["postblocks"]["per_step"]["water"] = _water_fixer_block(
+        precip_units="m s-1", evapor_units="kg m-2 s-1", evapor_positive_up=True
+    )
+    rep = _run(conf)
+    assert not any(w.startswith("postblocks.per_step.water") for w in _wheres(rep)), _text(rep)
+
+
+def test_water_fixer_unknown_units_errors(conf):
+    conf["postblocks"]["per_step"]["water"] = _water_fixer_block(precip_units="m/s")
+    rep = _run(conf)
+    assert "postblocks.per_step.water.args.precip_units" in _wheres(rep)
+    assert "'m s-1'" in _text(rep)
+
+
+def test_net_energy_fixer_unknown_flux_units_errors(conf):
+    conf["postblocks"]["per_step"]["energy"] = {"type": "GlobalNetEnergyFixer", "args": {"flux_units": "W/m2"}}
+    rep = _run(conf)
+    assert "postblocks.per_step.energy.args.flux_units" in _wheres(rep)
+
+
 def test_block_without_type(conf):
     conf["postblocks"]["per_step"]["x"] = {"args": {}}
     assert "postblocks.per_step.x" in _wheres(_run(conf))
@@ -926,6 +959,46 @@ def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):
 def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
     """A log-space loss scores in log units, so the scaler variance applies as-is."""
     _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    assert not _log_variance_warnings(_run(conf))
+
+
+def _square_transform_q(conf):
+    for name, key in (("square", "y_processed"), ("square_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "square_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def test_sqrt_variance_weight_warns_without_physical_stats(conf, tmp_path):
+    """A square_transformed variable without the sidecar is weighted by an estimate."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "square_transformed" in found[0].message
+    assert "zero-inflated" not in found[0].message
+    assert "variable_weights" in found[0].fix and "credit preprocess" in found[0].fix
+
+
+def test_sqrt_variance_weight_flags_zero_inflated_fields(conf, tmp_path):
+    """A sqrt-space spread larger than the mean marks the estimate as least reliable."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [0.01, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and "zero-inflated" in found[0].message, found
+
+
+def test_sqrt_variance_weight_silent_with_exact_physical_stats(conf, tmp_path):
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    _write_standard_scaler(tmp_path / "scaler_physical.json", [9.0, 16.0], [9.0, 32.0])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_sqrt_variance_weight_skipped_without_square_transform(conf, tmp_path):
+    """A sqrt-space loss scores in sqrt units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
     assert not _log_variance_warnings(_run(conf))
 
 

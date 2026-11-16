@@ -16,7 +16,7 @@ validated separately on real Derecho hardware.
 import argparse
 
 from credit.cli import _build_pbs_script
-from credit.pbs import PBSDSH_DERECHO_MODULES, _build_pbsdsh_script, _pbsdsh_launch_block
+from credit.pbs import DERECHO_MPICH_GTL_FIX, PBSDSH_DERECHO_MODULES, _build_pbsdsh_script, _pbsdsh_launch_block
 
 FAKE_SCRIPT_PATH = "/glade/work/user/miles-credit/credit/applications/train_gen2.py"
 FAKE_CONFIG_SAVE_PATH = "/glade/derecho/scratch/user/CREDIT_runs/my_run/model.yml"
@@ -278,3 +278,10 @@ class TestSubmitLauncherSelection:
     def test_pbsdsh_uses_torchrun_mpiexec_uses_python(self):
         assert "torchrun" in _submit_script("pbsdsh", nodes=2)
         assert "mpiexec" in _submit_script("mpiexec", nodes=2)
+
+
+def test_pbsdsh_script_applies_mpich_gtl_fix_after_activate():
+    script = _build_pbsdsh_script({"nodes": 2, "ngpus": 4}, FAKE_SCRIPT_PATH, FAKE_CONFIG_SAVE_PATH)
+    assert script.count(DERECHO_MPICH_GTL_FIX) == 1
+    # Must come before the mother-superior snapshot of LD_LIBRARY_PATH so the remote ranks inherit it.
+    assert script.index("conda activate") < script.index(DERECHO_MPICH_GTL_FIX) < script.index("RESOLVED_LD=")
