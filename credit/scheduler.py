@@ -5,7 +5,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.optim.lr_scheduler import LambdaLR, ReduceLROnPlateau, CosineAnnealingLR
 from credit.models.checkpoint import FSDPOptimizerWrapper
 
-update_on_batch = ["cosine-annealing-restarts", "linear-warmup-cosine"]
+update_on_batch = ["cosine-annealing-restarts", "linear-warmup-cosine", "warmup-stable-decay"]
 update_on_epoch = ["lambda", "plateau", "cosine-annealing"]
 
 
@@ -50,6 +50,73 @@ class LinearWarmupCosineScheduler(LRScheduler):
         return lrs
 
 
+WSD_DECAYS = ("1-sqrt", "linear")
+
+
+def wsd_factor(step: int, warmup_steps: int, decay_start: int, total_steps: int, decay: str = "1-sqrt") -> float:
+    """Fraction ``u`` of the peak-to-min_lr span at ``step``: ``lr = min_lr + (peak − min_lr) u`` after warmup.
+
+    During warmup the LR is ``peak · step / warmup_steps``; see :meth:`WarmupStableDecayScheduler.get_lr`.
+    """
+    if step < decay_start:
+        return 1.0
+    span = total_steps - decay_start
+    t = min(step - decay_start, span) / span
+    return 1.0 - (math.sqrt(t) if decay == "1-sqrt" else t)
+
+
+class WarmupStableDecayScheduler(LRScheduler):
+    """Warmup-stable-decay (WSD): linear warmup, constant, then 1-sqrt (or linear) decay to ``min_lr``.
+
+    Linear warmup from 0 to the base LR over ``warmup_steps``, constant until ``decay_start``, then decay to
+    ``min_lr`` at ``total_steps`` and constant after that. ``decay="1-sqrt"`` (default) is
+    ``lr = min_lr + (base_lr - min_lr) * (1 - sqrt(t / T))`` with ``t`` steps since ``decay_start`` and
+    ``T = total_steps - decay_start`` (Hägele et al. 2024, arXiv:2405.18392); ``"linear"`` is the straight line.
+
+    Steps are batch-level, like ``LinearWarmupCosineScheduler``: the gen2 trainer steps it once per micro-batch,
+    so with gradient accumulation give the step counts in micro-batches (optimizer steps x grad_accum_every).
+    The state is ``last_epoch``, so resume through ``scheduler_state_dict`` continues the schedule.
+
+    Args:
+        optimizer: Wrapped optimizer.
+        warmup_steps: Steps to ramp the LR linearly from 0 to base_lr.
+        decay_start: Step at which the decay begins (end of the constant phase).
+        total_steps: Step at which the LR reaches min_lr.
+        min_lr: Final learning rate (absolute value).
+        decay: "1-sqrt" or "linear".
+        last_epoch: Used by LRScheduler for resume; -1 means start from scratch.
+    """
+
+    def __init__(
+        self,
+        optimizer,
+        warmup_steps: int,
+        decay_start: int,
+        total_steps: int,
+        min_lr: float = 1e-5,
+        decay: str = "1-sqrt",
+        last_epoch: int = -1,
+    ):
+        if not 0 <= warmup_steps <= decay_start < total_steps:
+            raise ValueError(f"wsd: need 0 <= warmup_steps <= decay_start < total_steps, got "
+                             f"{warmup_steps}, {decay_start}, {total_steps}")  # fmt: skip
+        if decay not in WSD_DECAYS:
+            raise ValueError(f"wsd: decay must be one of {WSD_DECAYS}, got {decay!r}")
+        self.warmup_steps = int(warmup_steps)
+        self.decay_start = int(decay_start)
+        self.total_steps = int(total_steps)
+        self.min_lr = float(min_lr)
+        self.decay = decay
+        super().__init__(optimizer, last_epoch=last_epoch)
+
+    def get_lr(self):
+        step = self.last_epoch
+        if step < self.warmup_steps:
+            return [base * step / self.warmup_steps for base in self.base_lrs]
+        u = wsd_factor(step, self.warmup_steps, self.decay_start, self.total_steps, self.decay)
+        return [self.min_lr + (base - self.min_lr) * u for base in self.base_lrs]
+
+
 def load_scheduler(optimizer, conf):
     """
     Load a learning rate scheduler based on the configuration.
@@ -79,6 +146,8 @@ def load_scheduler(optimizer, conf):
             scheduler = CosineAnnealingWarmupRestarts(optimizer, **conf["trainer"]["scheduler"])
         elif scheduler_type == "linear-warmup-cosine":
             scheduler = LinearWarmupCosineScheduler(optimizer, **conf["trainer"]["scheduler"])
+        elif scheduler_type == "warmup-stable-decay":
+            scheduler = WarmupStableDecayScheduler(optimizer, **conf["trainer"]["scheduler"])
         else:
             raise ValueError(f"Invalid scheduler_type: {scheduler_type}")
     else:
