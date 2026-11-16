@@ -16,6 +16,19 @@ build:
     # rust: "1.64"
     # golang: "1.19"
 
+  # Install with uv instead of pip: pip's resolve + install of the full dependency
+  # stack (.[docs]) was the slowest build step and where slow builds stalled.
+  # CPU-only torch skips the multi-GB CUDA wheels, which the docs never need.
+  # See https://docs.readthedocs.io/en/stable/build-customization.html#install-dependencies-with-uv
+  jobs:
+    pre_create_environment:
+      - asdf plugin add uv
+      - asdf install uv latest
+      - asdf global uv latest
+    create_environment:
+      - uv venv "${READTHEDOCS_VIRTUALENV_PATH}"
+    install:
+      - uv pip install --python "${READTHEDOCS_VIRTUALENV_PATH}/bin/python" --torch-backend cpu ".[docs]"
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
@@ -25,13 +38,3 @@ sphinx:
 # formats:
 #    - pdf
 #    - epub
-
-# Optional but recommended, declare the Python requirements required
-# to build your documentation
-# See https://docs.readthedocs.io/en/stable/guides/reproducible-builds.html
-python:
-  install:
-    - method: "pip"
-      path: "."
-      extra_requirements:
-        - docs
