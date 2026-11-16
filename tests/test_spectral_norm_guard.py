@@ -248,6 +248,64 @@ def test_a_degeneration_only_in_the_recompute_is_restored_but_not_counted():
     assert torch.equal(m.lin.weight_u, u0) and g.counts.tolist() == [0]
 
 
+def test_zero_weight_at_repair_does_not_lock_in_zeros():
+    """A first forward that repairs while W reads as zero keeps the seeded draw, not u = v = 0."""
+    m = _Lin()
+    g = S.install(m, CONF)
+    w = m.lin.weight_orig.detach().clone()
+    with torch.no_grad():
+        m.lin.weight_u.zero_()
+        m.lin.weight_orig.zero_()
+    m.train()
+    _fwd(m)  # repair + one power iteration, both on a zero W
+    assert float(m.lin.weight_u.norm()) == pytest.approx(1) and float(m.lin.weight_v.norm()) == pytest.approx(1)
+    assert g.total_reinits == 1 and g.poll(1) == 1
+    with torch.no_grad():
+        m.lin.weight_orig.copy_(w)
+    for step in range(2, 5):
+        assert torch.isfinite(_fwd(m)).all()
+        assert g.poll(step) == 0  # the counter stops climbing once W is back
+
+
+def test_degenerate_u_without_a_load_is_replaced_by_the_draw():
+    """u / v zeroed in place after the first forward (no load_state_dict): the seeded draw replaces them."""
+    m = _Lin()
+    g = S.install(m, CONF)
+    m.train()
+    _fwd(m)
+    with torch.no_grad():
+        m.lin.weight_u.zero_()
+    assert torch.isfinite(_fwd(m)).all()
+    du, _ = m.lin._forward_pre_hooks[next(iter(m.lin._forward_pre_hooks))]._draw(m.lin.weight_u, m.lin.weight_v)
+    assert torch.equal(m.lin.weight_u, du) and g.poll(1) == 1
+    assert torch.isfinite(_fwd(m)).all() and g.poll(2) == 0
+
+
+def test_gradients_are_bit_identical_under_activation_checkpointing():
+    from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl, checkpoint_wrapper
+
+    def build():
+        torch.manual_seed(0)
+        return torch.nn.Sequential(
+            checkpoint_wrapper(_Lin(), checkpoint_impl=CheckpointImpl.NO_REENTRANT), torch.nn.Linear(8, 1)
+        )
+
+    ref, net = build(), build()
+    S.install(net, CONF)
+    ref.train()
+    net.train()
+    torch.manual_seed(1)
+    for _ in range(3):
+        x = torch.randn(4, 8)
+        for m in (ref, net):
+            m.zero_grad()
+            m(x).sum().backward()
+        for (k, a), (_, b) in zip(ref.named_parameters(), net.named_parameters(), strict=True):
+            assert torch.equal(a.grad, b.grad), k
+    for k, v in ref.state_dict().items():
+        assert torch.equal(v, net.state_dict()[k]), k
+
+
 def test_guard_config():
     assert S.guard_config({"trainer": {}})["enabled"] is True and S.guard_config(None)["enabled"] is True
     assert S.guard_config({"trainer": {"sn_guard": None}})["min_norm"] == 0.5
@@ -299,7 +357,9 @@ def _two_rank_worker(rank, port, out):
         ok = torch.tensor([1.0 if torch.isfinite(y).all() else 0.0])
         dist.all_reduce(ok)
         g.poll(4)
+        epoch = g.epoch_results()  # every rank calls it: summed over ranks
         out[rank] = {
+            "epoch": epoch,
             "bad": float(bad),
             "ok": float(ok),
             "u_norm": float(m.lin.weight_u.norm()),
@@ -324,6 +384,8 @@ def test_two_ranks_the_collapsed_rank_recovers():
     assert r0["bad"] == 1.0  # one rank's forward was non-finite at the zero-W step
     assert r0["ok"] == 2.0  # and the next forward is finite on both ranks
     assert r1["recoveries"] == 1 and r0["recoveries"] == 0
+    for r in (r0, r1):  # rank 0 writes training_log.csv: it must see rank 1's recovery
+        assert r["epoch"] == {"train_sn_recoveries": [1.0], "train_sn_reinits": [0.0]}
     assert r1["u_norm"] == pytest.approx(1, abs=1e-5)
     # rank 1 kept its pre-collapse u (one power iteration behind rank 0), so the two agree to the iteration's step
     assert r1["u"] == pytest.approx(r0["u"], abs=1e-2)

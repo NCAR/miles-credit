@@ -16,21 +16,33 @@ structure, parameter and buffer names, and the checkpoint format are unchanged. 
   has norm in [0, 1); ``min_norm`` (default 0.5) catches exact zeros and partial collapses (which would inflate
   W / sigma) alike, with headroom for bf16 rounding. The check and the restore are branch-free tensor ops (no host
   sync per module), and when nothing degenerates the outputs, sigma and buffers are bit-identical to torch's hook.
-  A forward whose own ``W`` reads as zero still gives sigma = 0 for that forward (its output is non-finite), but u
-  and v survive it, so the next forward is finite again.
+  What this does and does not rescue:
+
+  - If only the power iteration sees a zero ``W`` (or ``W^T u`` = 0) while sigma is computed from a healthy ``W``
+    (e.g. an FSDP2 all-gather race), the forward is finite and the run carries on.
+  - If the forward's own ``W`` reads as zero, sigma = 0 and that forward's output is non-finite. u and v survive,
+    so the module is healthy again on the next forward, but the guard does not rescue the step: the non-finite
+    loss is backpropagated, the NaN gradients reach every shard through the reduce-scatter, and the optimizer
+    steps unless the trainer skips non-finite steps (the gen2 trainer's ``GradScaler`` is disabled outside fp16).
+    A NaN epoch train loss also prunes the trial unless ``skip_nan_prune`` is set.
+  - If u or v are degenerate before the iteration (not caught on load, e.g. buffers written in place), they are
+    replaced by the module's seeded unit draw rather than restored.
 * **Repairs degenerate state it starts from** (e.g. a checkpoint saved after a collapse): on its first forward, and
   on the first forward after any ``load_state_dict`` into the module, it checks u and v once; a degenerate vector is
   re-initialized (seeded normal draw, normalized: the same draw on every rank) and ``reinit_iters`` power iterations
-  run on the current ``W``. This happens inside the forward, where FSDP2 has gathered ``W``, so no collective is
-  needed.
+  run on the current ``W``. If those iterations leave a vector degenerate (``W`` reads as zero in that forward), the
+  draw itself is kept, so a zero ``W`` at repair time cannot lock in u = v = 0. This happens inside the forward,
+  where FSDP2 has gathered ``W``, so no collective is needed.
 * **Counts recoveries** in one device tensor shared by the model's hooks, in the original forward only: the
   activation-checkpoint recompute (``CheckpointImpl.NO_REENTRANT`` re-runs the forward, hooks included, during
   backward) restores u / v too but does not count (:func:`in_backward`).
 
-No collective is added. :meth:`SNGuard.poll` reads the counters (one small device-to-host copy; the trainer calls it
-once per optimizer step), logs a WARNING per module with the step, module, rank and the bad norms (the first
-``warn_first`` recoveries of a module, then every ``warn_every``-th), and keeps per-epoch and run totals that the gen2
-trainer writes as ``train_sn_recoveries`` / ``train_sn_reinits``.
+No collective is added to the forward or the step. :meth:`SNGuard.poll` reads the counters (one small
+device-to-host copy; the trainer calls it once per optimizer step), logs at most one WARNING per module per poll with
+the step, module, rank and the bad norms (when the module's count passes one of the first ``warn_first`` recoveries or
+a multiple of ``warn_every``), and keeps per-epoch and run totals. :meth:`SNGuard.epoch_results` sums the epoch's
+counts over ranks (one small all-reduce per epoch, every rank calls it) and the gen2 trainer writes them as
+``train_sn_recoveries`` / ``train_sn_reinits``.
 
 Config (``trainer.sn_guard``; on by default, ``sn_guard: false`` turns it off)::
 
@@ -44,6 +56,7 @@ import socket
 from typing import Any
 
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 from torch.nn.utils.spectral_norm import SpectralNorm
 
@@ -90,7 +103,21 @@ class GuardedSpectralNorm(SpectralNorm):
         new.__dict__.update(hook.__dict__)  # name, dim, n_power_iterations, eps
         new.guard, new.index, new.path = guard, index, path
         new.checked = False
+        new._draws = {}
         return new
+
+    def _draw(self, u, v):
+        """The module's seeded unit vectors for u and v (the same on every rank), cached per device and dtype."""
+        key = (u.device, u.dtype)
+        if key not in self._draws:
+            gen = torch.Generator(device=u.device).manual_seed(SEED + self.index)
+            self._draws[key] = tuple(
+                F.normalize(
+                    torch.randn(t.shape, generator=gen, device=t.device, dtype=torch.float32), dim=0, eps=self.eps
+                ).to(t.dtype)
+                for t in (u, v)
+            )
+        return self._draws[key]
 
     def _power(self, weight_mat, u, v, iters):
         for _ in range(iters):
@@ -103,15 +130,18 @@ class GuardedSpectralNorm(SpectralNorm):
         g = self.guard
         bad_u, bad_v = bool(degenerate(u, g.min_norm)), bool(degenerate(v, g.min_norm))
         self.checked = True
+        du, dv = self._draw(u, v)  # filled here, in the first forward, so later forwards only look it up
         if not (bad_u or bad_v):
             return
         nu, nv = float(torch.linalg.vector_norm(u.float())), float(torch.linalg.vector_norm(v.float()))
-        gen = torch.Generator(device=u.device).manual_seed(SEED + self.index)
-        for t, bad in ((u, bad_u), (v, bad_v)):
-            if bad:
-                draw = torch.randn(t.shape, generator=gen, device=t.device, dtype=torch.float32)
-                t.copy_(F.normalize(draw, dim=0, eps=self.eps).to(t.dtype))
+        if bad_u:
+            u.copy_(du)
+        if bad_v:
+            v.copy_(dv)
         self._power(weight_mat, u, v, g.reinit_iters)
+        # W may read as zero in this forward too: keep the draw rather than lock in u = v = 0
+        u.copy_(torch.where(degenerate(u, g.min_norm), du, u))
+        v.copy_(torch.where(degenerate(v, g.min_norm), dv, v))
         g.reinits[self.index] += 1
         logger.warning(
             "sn_guard: rank %d host %s step %s: re-initialized degenerate spectral-norm u/v of %s "
@@ -144,8 +174,10 @@ class GuardedSpectralNorm(SpectralNorm):
                     g.bad_norms[i, 0] = torch.where(bad, torch.linalg.vector_norm(u.float()), g.bad_norms[i, 0])
                     g.bad_norms[i, 1] = torch.where(bad, torch.linalg.vector_norm(v.float()), g.bad_norms[i, 1])
                     g.counts[i] += bad.to(g.counts.dtype)
-                u.copy_(torch.where(bad, u0, u))
-                v.copy_(torch.where(bad, v0, v))
+                # restore the previous u / v, or the seeded draw where those were degenerate themselves
+                du, dv = self._draw(u, v)
+                u.copy_(torch.where(bad, torch.where(degenerate(u0, g.min_norm), du, u0), u))
+                v.copy_(torch.where(bad, torch.where(degenerate(v0, g.min_norm), dv, v0), v))
                 if self.n_power_iterations > 0:  # as torch: use clones so a second forward can backprop
                     u = u.clone(memory_format=torch.contiguous_format)
                     v = v.clone(memory_format=torch.contiguous_format)
@@ -234,10 +266,19 @@ class SNGuard:
         return sum(self.reinits)
 
     def epoch_results(self) -> dict[str, list[float]]:
-        """This rank's recoveries and re-initializations in the epoch; resets the per-epoch counts."""
+        """Recoveries and re-initializations in the epoch, summed over ranks; resets the per-epoch counts.
+
+        Every rank must call it (one small all-reduce when a process group with more than one rank is up), so the
+        counts rank 0 writes include collapses on the other ranks. Each rank with a recovery also logs its own line.
+        """
         self.poll()
         reinits = self.total_reinits - self.epoch_reinits_base
-        out = {"train_sn_recoveries": [float(self.epoch_recoveries)], "train_sn_reinits": [float(reinits)]}
+        totals = [float(self.epoch_recoveries), float(reinits)]
+        if dist.is_available() and dist.is_initialized() and dist.get_world_size() > 1:
+            t = torch.tensor(totals, dtype=torch.float64, device=self.counts.device)
+            dist.all_reduce(t)
+            totals = t.tolist()
+        out = {"train_sn_recoveries": [totals[0]], "train_sn_reinits": [totals[1]]}
         if self.epoch_recoveries or reinits:
             logger.warning(
                 "sn_guard: rank %d host %s: %d spectral-norm u/v recoveries and %d re-initializations this epoch "

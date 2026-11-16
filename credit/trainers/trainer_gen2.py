@@ -540,7 +540,7 @@ class TrainerERA5Gen2(BaseTrainer):
         gc.collect()
 
         if sn_guard is not None:
-            results_dict.update(sn_guard.epoch_results())  # this rank's counts; rank 0 writes training_log.csv
+            results_dict.update(sn_guard.epoch_results())  # summed over ranks (every rank calls it)
         return results_dict
 
     # ------------------------------------------------------------------
