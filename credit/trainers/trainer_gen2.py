@@ -314,6 +314,10 @@ class TrainerERA5Gen2(BaseTrainer):
             )
 
         grad_accum_every = self.conf.get("trainer", {}).get("grad_accum_every", 1)
+        sn_guard = getattr(self, "sn_guard", None)
+        opt_step = epoch * -(-batches_per_epoch // grad_accum_every)  # optimizer steps before this epoch
+        if sn_guard is not None:
+            sn_guard.step = opt_step
 
         # Reseed the shared shuffle permutation each epoch. Without this the
         # sampler (now seeded identically on all ranks — required for disjoint
@@ -482,6 +486,9 @@ class TrainerERA5Gen2(BaseTrainer):
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
+                opt_step += 1
+                if sn_guard is not None:
+                    sn_guard.poll(opt_step)  # one small device-to-host copy; logs any spectral-norm recovery
 
                 if self.ema is not None:
                     self.ema.update(self.model)
@@ -532,6 +539,8 @@ class TrainerERA5Gen2(BaseTrainer):
         torch.cuda.empty_cache()
         gc.collect()
 
+        if sn_guard is not None:
+            results_dict.update(sn_guard.epoch_results())  # summed over ranks (every rank calls it)
         return results_dict
 
     # ------------------------------------------------------------------

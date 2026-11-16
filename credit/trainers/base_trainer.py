@@ -30,6 +30,7 @@ from tqdm import tqdm
 
 from credit.distributed import select_device
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
+from credit.models.spectral_norm_guard import install as install_sn_guard
 from credit.scheduler import update_on_epoch
 from credit.trainers.grad_clip import AdaptiveGradClipper
 from credit.trainers.preflight import check_dataloader_startup, check_model_gpu_memory
@@ -297,6 +298,12 @@ class BaseTrainer(ABC):
 
         logger.info(f"Training metric: {self.training_metric} (direction: {'min' if self.direction is min else 'max'})")
 
+        # ---- Spectral-norm guard (#576) ----
+        # Swap every nn.utils.spectral_norm hook for a fail-safe one (credit/models/spectral_norm_guard.py) once,
+        # here, so every model and parallel mode gets it without per-model changes; names, buffers and the
+        # checkpoint format are unchanged. On by default; trainer.sn_guard: false turns it off.
+        self.sn_guard = install_sn_guard(self.model, conf, rank)
+
         # ---- EMA setup ----
         # FSDP2 is supported: EMATracker detects DTensor state and EMAs each
         # rank's local shard (elementwise, so identical to full-weight EMA);
@@ -446,6 +453,8 @@ class BaseTrainer(ABC):
           - ``False`` or ``[]``: combined aggregates only.
         """
         required_metrics = ["loss", *self.display_metrics, "forecast_len", "history_len"]
+        if getattr(self, "sn_guard", None) is not None:
+            required_metrics += ["sn_recoveries", "sn_reinits"]
 
         # Union across phases so validation-only keys are not dropped.
         all_names = list(
