@@ -30,7 +30,9 @@ the model how many channels fall into each group:
 
 A 3D variable contributes `levels` channels; a 2D variable contributes one. The
 totals must match the data — `credit check` verifies this for you, so run it
-before training.
+before training. Or use [WXFormer-Simple](#wxformer-simple)
+(`type: wxformer_simple`), which measures all of these from the data and needs
+none of them in the config.
 
 Two more concepts recur in every architecture:
 
@@ -218,6 +220,86 @@ WXFormer also has ensemble and diffusion variants that reuse this backbone —
 `crossformer-ensemble` (noise-injection ensembles) and `crossformer-diffusion`
 (a score/diffusion model). See [Ensemble Training](Ensembles.md).
 
+### WXFormer-Simple
+
+**AutoAPI:** {py:obj}`credit.models.wxformer.wxformer_simple.WXFormerSimple` &nbsp;·&nbsp; **Config type:** `wxformer_simple`
+
+The same CrossFormer U-Net as WXFormer, minus every config key that repeats what
+the `data:` block already says. You give only the architecture; the model
+measures the rest from the first preprocessed batch:
+
+| Measured | From |
+|---|---|
+| input channels, `frames` | the concatenated input `x` (`B, C, T, H, W`) |
+| output channels | the concatenated target `y` |
+| grid height and width | the last two dimensions of `x` |
+| boundary padding | the smallest pad that makes the padded grid a multiple of `lcm` over stages *k* of `2^(k+1) × lcm(local_window_size, global_window_size / 2^k)` |
+
+`credit train` builds the model from one real sample right after creating it,
+before compiling, wrapping it for DDP/FSDP2, creating the optimizer, or taking
+the EMA snapshot. Every rank uses the same seed, so every rank gets identical
+weights. Calling the model on a batch in a notebook builds it too, but then set
+`output_channels` (the model cannot tell from the input alone how much to
+predict), or call `model.materialize(x, y)`.
+
+The resolved hyperparameters, including every default and every measured value,
+are written to **`save_loc/model_hparams.yml`**. Rollout and `credit plot`
+rebuild the model from that file rather than from the config. Later edits to the
+config or to this model's defaults therefore cannot silently change a trained
+model; if the config's model block differs, a warning lists the differences and
+the saved values are used. Keep `model_hparams.yml` next to the checkpoint when
+you copy a run.
+
+Every architecture setting is a single number. The four encoder stages are
+derived from it: each stage halves the grid (stride 2, fixed) and doubles the
+channels, which is what the decoder's skip connections need.
+
+| Setting (default) | Stage *k* = 0, 1, 2, 3 |
+|---|---|
+| `dim` (64) | `dim × 2^k` → 64, 128, 256, 512 |
+| `depth` (4) | `depth` blocks in every stage |
+| `global_window_size` (8) | `global_window_size / 2^k` → 8, 4, 2, 1 (must be a multiple of 8) |
+| `local_window_size` (4) | the same in every stage |
+| `cross_embed_kernel_size` (32), `cross_embed_num_kernels` (unset) | stage 0: powers of two ending at `cross_embed_kernel_size`; stages 1–3: 2, 4 |
+
+The kernel settings follow the original CrossFormer layout: stage 0 is a wide
+multi-scale stem and the later stages are two-scale patch merges. Give one
+number, `cross_embed_kernel_size`, and the stem runs from 4 up to it (32 gives
+4, 8, 16, 32, the WXFormer default; 16 gives 4, 8, 16). Add
+`cross_embed_num_kernels` to choose how many stem kernels there are instead
+(32 with 2 gives 16, 32; 32 with 5 gives 2, 4, 8, 16, 32). The largest kernel
+must be a power of two of at least 4, and the smallest at least 2. Per-stage
+lists, `cross_embed_kernel_sizes`, and `cross_embed_strides` are rejected with a
+message naming the single-number setting to use.
+
+```yaml
+model:
+  type: "wxformer_simple"
+  dim: 32                       # stage widths 32, 64, 128, 256
+  depth: 4                      # blocks per stage
+  global_window_size: 8         # 8, 4, 2, 1 across the stages
+  local_window_size: 4
+  cross_embed_kernel_size: 32   # stem kernels 4, 8, 16, 32; later stages 2, 4
+  use_spectral_norm: True       # with these windows: pad to a multiple of 64
+  padding:                      # a policy, not pad sizes
+    mode: earth                 # earth (default), mirror, or none
+    min_pad_lat: 0              # at least this many cells per side
+    min_pad_lon: 0
+```
+
+With these settings a 181×360 grid is padded to 192×384, and 721×1440 to
+768×1472. `credit check` reports the channel counts it expects the model to
+measure, and the padding when the grid size is known. Leftover keys such as
+`levels`, `channels`, or `image_height` trigger a warning and are otherwise
+ignored, but if they disagree with the data the model refuses to build. A full
+runnable example is `config/gen_2/examples/wxformer-simple.yml`, and
+`credit begin` offers `wxformer_simple` as a model choice.
+
+`wxformer_simple` is a separate model type: it is not meant to load
+`wxformer`/`wxformer_base` checkpoints, it has no patch embedding
+(`patch_height`/`patch_width` > 1), and it does not run Gen 1 postblocks
+(`post_conf`).
+
 ---
 
 ## CAMulator
@@ -369,6 +451,8 @@ stable time-stepping scheme at extra cost.
 
 - **WXFormer** — the default choice for weather forecasting; best skill, most
   actively developed.
+- **WXFormer-Simple** — the same network, with the data-dependent settings
+  measured instead of configured; a good default for new configs.
 - **WXFormerColumn** — experimental; try it when global teleconnections or
   vertical coupling matter and you can afford the extra cost.
 - **CubedWXFormer** — experimental; WXFormer on a CESM cubed-sphere SE grid,
