@@ -42,8 +42,20 @@ complete, valid CREDIT config file.  It detects whether you are on an NCAR
 system (Derecho/Casper), NERSC Perlmutter, or a laptop, and tailors the
 defaults accordingly (scratch paths, PBS/SLURM blocks, parallelism mode).
 
+On an HPC system it asks for the project code to charge.  Press Enter to skip
+it: the config then has no `pbs.project`, and `credit submit` uses
+`$PBS_ACCOUNT` (or `$SLURM_ACCOUNT` on Perlmutter) at submit time.  Skipping is
+the portable choice when you share configs or `$PBS_ACCOUNT` is already set in
+your shell profile.
+
 **When to use it:** the first time you set up an experiment, or when you want a
 known-good starting point that you can then hand-edit for advanced options.
+
+For ARCO-ERA5, the wizard asks which of the 137 model levels to use: `all`
+(the default, which needs a lot of memory at 0.25°), `wxformer` (the 16 WXFormer v1
+levels), or a comma-separated list of level numbers (1 = top, 137 = lowest). On
+NCAR systems it writes `mem: 'auto'` in the `pbs:` block, so `credit submit` sizes the
+memory request from the config (see `credit submit` below).
 
 > The wizard runs `credit check` on the generated file automatically, so you
 > know the config is valid before you leave the wizard.
@@ -80,6 +92,16 @@ type, dataset type, each pre/postblock), checks each block's arguments against
 the real constructor signatures, cross-checks the channel layout against the
 model geometry, verifies the loss postblock chain, and checks that every file
 the config points at exists.  Each finding comes with a suggested fix.
+For a `pbs:` block it also estimates the host memory the job needs: it reports what
+`mem: auto` will request, and warns when a numeric or unset `mem` is below the estimate
+or the estimate exceeds one node.
+
+A missing scaler file is reported as INFO, not as a warning or error, because a
+config fresh from `credit begin` has no scaler until you run `credit preprocess`.
+INFO findings don't fail `--strict`.  In `--json` output they appear in
+`findings` with `"severity": "info"` but aren't counted in `warnings`.  If you've already run `credit preprocess` and still see this
+message, check `scaler_path` and `save_loc`: training will fail when it tries to
+load the scaler.
 
 **When to use it:** before submitting a job, after editing a config, or in a
 CI pipeline.  A clean `credit check` means the config will at least start
@@ -96,6 +118,9 @@ credit preprocess -c my_run.yml
 Reads your training data and fits a BridgeScaler (standard scaler) JSON file
 that the preblocks, loss, and metrics all reference.  This must run once before
 training; the scaler file is written to `{save_loc}/standard_scaler.json`.
+
+Your config is also saved as `{save_loc}/model.yml` (with its change history tracked by git; see
+[Config history in `save_loc`](Training.md)). Git must be installed.
 
 **When to use it:** once, after `credit begin` and before `credit train`.  If
 you change your variable list or level selection, re-run it.
@@ -172,7 +197,26 @@ Generates a PBS (Casper/Derecho) or SLURM (Perlmutter and other sites) batch
 script and submits it.  For training, `--chain N` submits N back-to-back jobs
 with `afterok` dependencies so each job resumes from the previous checkpoint
 automatically.  `--reload` patches the config to resume from the last
-checkpoint after a failure.
+checkpoint after a failure.  `--torchrun-args=<flags>` (or `torchrun_args:` in the
+`pbs:`/`slurm:` block) adds extra flags such as `--numa-binding=node` to the
+generated `torchrun` line; `credit rollout-ensemble` accepts the same flag.
+`mem: auto` in the `pbs:` block (or `--mem auto`) sizes the memory request of train and
+preprocess jobs from the config, never below the site default and capped at one node.
+See [Memory requests](Training.md#memory-requests-mem-auto).
+
+`credit submit` charges the first account it finds, in this order:
+
+1. `--account <PROJECT>` on the command line
+2. `pbs.project` (or its alias `pbs.account`) in the config
+3. the `$PBS_ACCOUNT` environment variable (`$SLURM_ACCOUNT` for SLURM sites)
+
+Blank values (`--account ""`, `project: ""`, an empty variable) count as unset,
+so they fall through to the next source.  There is no built-in default.  If none
+of these is set, a PBS submit stops with an error that lists all three options;
+`--dry-run` instead shows `#PBS -A <UNSET>` in the preview and prints a warning.
+`credit check` reports which account will be charged, notes when `pbs.project`
+overrides a different `$PBS_ACCOUNT`, and notes when a config has no `pbs:` block
+and `$PBS_ACCOUNT` is unset.
 
 **When to use it:** on any HPC system where jobs must go through a scheduler.
 On a laptop or interactive node, use `credit preprocess` / `credit train` /
@@ -189,7 +233,8 @@ credit convert -c old_v1_config.yml -o new_v2_config.yml
 
 Interactively converts a legacy CREDIT v1 config to the gen2 nested data
 schema, adding the new trainer features (EMA, TensorBoard, scheduler) and PBS
-settings along the way.
+settings along the way.  As in `credit begin`, leave the PBS account blank to
+charge `$PBS_ACCOUNT` at submit time instead of writing it into the config.
 
 **When to use it:** when you have an older config from a previous CREDIT
 version and want to bring it up to the current schema.

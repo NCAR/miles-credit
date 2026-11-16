@@ -222,6 +222,61 @@ def test_flatten_to_tensor_scales_with_preprocess_scaler(tmp_path):
         assert torch.allclose(v, originals[k], atol=1e-4), k
 
 
+def test_flatten_to_tensor_spatial_scaler_round_trip(tmp_path):
+    """FlattenToTensor with `spatial_variables` applies a per-gridpoint scaler
+    (PS fit with one mean/variance per grid cell): the variable is flattened to
+    (B, H*W) for scaling, so the column-count check passes, and the result
+    round-trips through Reconstruct + the spatial inverse postblock scaler. The
+    physical y_processed stays untouched and keeps its shape."""
+    from bridgescaler import save_scaler_dict
+    from credit.preblock.scaler import BridgeScalerTransform as PreScalerBlock
+    from credit.postblock.scaler import BridgeScalerTransform as PostScalerBlock
+
+    cmap, n_ch = build_channel_map()
+    ps = key("prognostic", "2d", "PS")
+
+    def rand_super():
+        return {SRC: {k: torch.randn(B, info["orig_shape"][0], 1, H, W) * 3.0 + 5.0 for k, info in cmap.items()}}
+
+    scaler_path = str(tmp_path / "scaler_spatial.json")
+    pre = PreScalerBlock(
+        scaler_path=scaler_path,
+        variables=[],
+        method="transform",
+        scaler_params={"channels_last": False},
+        spatial_variables=[ps],
+    )
+    for _ in range(3):  # several batches so per-gridpoint variances are well defined
+        pre.fit_scaler_batch({"target": rand_super()})
+    save_scaler_dict(pre.scaler, scaler_path)
+
+    y_processed = rand_super()
+    originals = {k: v.clone() for k, v in y_processed[SRC].items()}
+    batch = {"y_processed": y_processed, "metadata": {"target": {"_channel_map": cmap}}}
+
+    # without spatial_variables, PS has 1 column but the scaler was fit with H*W
+    with pytest.raises(AssertionError, match="does not match scaler"):
+        FlattenToTensor(scaler_path=scaler_path, variables=list(cmap))(
+            {"y_processed": rand_super(), "metadata": {"target": {"_channel_map": cmap}}}
+        )
+
+    # partial path exercises the same prefix expansion as the scaler blocks
+    flat = FlattenToTensor(scaler_path=scaler_path, variables=list(cmap), spatial_variables=[f"{SRC}/prognostic/2d/PS"])
+    batch = flat(batch)
+    assert batch["y_pred"].shape == (B, n_ch, H, W)
+
+    for k, v in batch["y_processed"][SRC].items():
+        assert v.shape == originals[k].shape, k
+        assert torch.equal(v, originals[k]), k
+
+    batch = Reconstruct(detach=True)(batch)
+    inv = PostScalerBlock(scaler_path=scaler_path, variables=[], method="inverse_transform", spatial_variables=[ps])
+    batch = inv(batch)
+    for k, v in batch["y_processed"][SRC].items():
+        assert v.shape == originals[k].shape, k
+        assert torch.allclose(v, originals[k], atol=1e-4), k
+
+
 # --------------------------------------------------------------------------- #
 # TracerFixer
 # --------------------------------------------------------------------------- #
@@ -308,6 +363,87 @@ def test_water_fixer_runs_and_grad(statics_file):
     assert torch.isfinite(out).all()
     out.sum().backward()
     assert precip_in.grad is not None
+
+
+N_SECONDS_6H = 6 * 3600
+# factor from each supported unit to a kg m-2 s-1 mass flux over a 6 h step
+_TO_MASS_FLUX = {
+    "m": 1000.0 / N_SECONDS_6H,
+    "kg m-2": 1.0 / N_SECONDS_6H,
+    "m s-1": 1000.0,
+    "kg m-2 s-1": 1.0,
+}
+
+
+@pytest.mark.parametrize(
+    "precip_units,evapor_units,evapor_positive_up",
+    [
+        ("m", "m", False),  # ERA5 / gen1 default
+        ("kg m-2", "kg m-2", False),
+        ("m s-1", "kg m-2 s-1", True),  # E3SM PRECT / QFLX
+        ("kg m-2 s-1", "m s-1", True),
+    ],
+)
+def test_water_fixer_units_close_budget(statics_file, precip_units, evapor_units, evapor_positive_up):
+    """Every units/sign combination closes the same physical budget.
+
+    The same physical fluxes (precip 4e-5, evaporation 3e-5 kg m-2 s-1) are
+    expressed in each set of units; after fixing, the precip mass flux must
+    satisfy dTWC/dt = E_up - P and match across units.
+    """
+    pk, ek = key("diagnostic", "2d", "PRECT"), key("diagnostic", "2d", "QFLX")
+    qk, spk = key("prognostic", "3d", "Qtot"), key("prognostic", "2d", "PS")
+    batch, _, _ = build_super_dict()
+    # moisten the predicted column so the budget has a nonzero tendency
+    batch["y_processed"][SRC][qk] = batch["y_processed"][SRC][qk] * 1.001
+
+    precip_mass_flux, evap_up_mass_flux = 4.0e-5, 3.0e-5
+    evap_signed = evap_up_mass_flux if evapor_positive_up else -evap_up_mass_flux
+    batch["y_processed"][SRC][pk] = torch.full((B, 1, 1, H, W), precip_mass_flux / _TO_MASS_FLUX[precip_units])
+    batch["y_processed"][SRC][ek] = torch.full((B, 1, 1, H, W), evap_signed / _TO_MASS_FLUX[evapor_units])
+
+    fixer = GlobalWaterFixer(
+        q_var=qk,
+        sp_var=spk,
+        precip_var=pk,
+        evapor_var=ek,
+        lead_time_periods=6,
+        precip_units=precip_units,
+        evapor_units=evapor_units,
+        evapor_positive_up=evapor_positive_up,
+        **_physics_args(statics_file),
+    )
+    core = fixer.core
+    batch = fixer(batch)
+    precip_out = batch["y_processed"][SRC][pk][:, 0, 0, ...] * _TO_MASS_FLUX[precip_units]
+
+    twc_in = core.total_column_water(
+        batch["x_physical"][SRC][qk][:, :, -1, ...], batch["x_physical"][SRC][spk][:, 0, -1]
+    )
+    twc_out = core.total_column_water(
+        batch["y_processed"][SRC][qk][:, :, 0, ...], batch["y_processed"][SRC][spk][:, 0, 0]
+    )
+    dtwc_dt = core.weighted_sum((twc_out - twc_in) / N_SECONDS_6H, axis=(-2, -1))
+    evap_up = core.weighted_sum(torch.full_like(precip_out, evap_up_mass_flux), axis=(-2, -1))
+    p_sum = core.weighted_sum(precip_out, axis=(-2, -1))
+
+    assert torch.allclose(dtwc_dt, evap_up - p_sum, rtol=1e-4)
+    # the moistening must have changed precip, so the check above is not vacuous
+    assert not torch.allclose(precip_out, torch.full_like(precip_out, precip_mass_flux))
+
+
+@pytest.mark.parametrize("bad", [{"precip_units": "mm"}, {"evapor_units": "W m-2"}])
+def test_water_fixer_rejects_unknown_units(statics_file, bad):
+    with pytest.raises(ValueError, match="GlobalWaterFixer"):
+        GlobalWaterFixer(
+            q_var=key("prognostic", "3d", "Qtot"),
+            sp_var=key("prognostic", "2d", "PS"),
+            precip_var=key("diagnostic", "2d", "PRECT"),
+            evapor_var=key("diagnostic", "2d", "QFLX"),
+            lead_time_periods=6,
+            **bad,
+            **_physics_args(statics_file),
+        )
 
 
 # --------------------------------------------------------------------------- #

@@ -110,6 +110,7 @@ from credit.losses.base import (
     BaseLoss,
     _cos_lat_weights,
     _load_target_variances,
+    _resolve_unit_transforms,
 )
 
 logger = logging.getLogger(__name__)
@@ -152,6 +153,11 @@ class BaseVariableMetric(nn.Module, ABC):
         channel_schema: optional :class:`ChannelSchema` fixing the data target
             variable layout; when None the scored variables are discovered from
             the state dict on the first forward pass.
+        unit_transforms: specs of the postblocks that return variables to
+            physical units (``exp_transform``, ``square_transform``;
+            :func:`credit.losses.base.unit_transform_specs`); variables they cover
+            get inverse-variance weights from the physical-unit variance.
+        exp_transforms: deprecated alias of ``unit_transforms``.
 
     Attributes:
         last_var_scores: ``{var_key: float}`` detached per-variable scores
@@ -186,6 +192,8 @@ class BaseVariableMetric(nn.Module, ABC):
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
         channel_schema=None,
+        unit_transforms: list | None = None,
+        exp_transforms: list | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -227,7 +235,9 @@ class BaseVariableMetric(nn.Module, ABC):
                     f"scaler_path is required for var_weighting='{self.var_weighting}' "
                     f"with metric '{metric_name}' (scale_power={self.scale_power})."
                 )
-            self._variances = _load_target_variances(scaler_path)
+            self._variances = _load_target_variances(
+                scaler_path, _resolve_unit_transforms(unit_transforms, exp_transforms)
+            )
 
         self._combination_weights = None  # {var_key: float}; built at first forward
         self.var_keys = None  # full scoring list, resolved at first forward
@@ -429,6 +439,11 @@ class BaseCombinedMetric(nn.Module):
         latitude_weights: path to a dataset with a ``latitude`` coordinate.
         channel_schema: optional :class:`ChannelSchema` fixing the data target
             variable layout.
+        unit_transforms: specs of the postblocks that return variables to
+            physical units (``exp_transform``, ``square_transform``;
+            :func:`credit.losses.base.unit_transform_specs`); variables they cover
+            get inverse-variance weights from the physical-unit variance.
+        exp_transforms: deprecated alias of ``unit_transforms``.
 
     Attributes:
         metric_modules: ``{metric_name: BaseVariableMetric}`` child instances.
@@ -465,6 +480,8 @@ class BaseCombinedMetric(nn.Module):
         use_latitude_weights: bool = False,
         latitude_weights: str | None = None,
         channel_schema=None,
+        unit_transforms: list | None = None,
+        exp_transforms: list | None = None,
         **kwargs,
     ):
         super().__init__()
@@ -481,6 +498,7 @@ class BaseCombinedMetric(nn.Module):
             "use_latitude_weights": use_latitude_weights,
             "latitude_weights": latitude_weights,
             "channel_schema": channel_schema,
+            "unit_transforms": _resolve_unit_transforms(unit_transforms, exp_transforms),
         }
 
         # Local import to avoid a circular import at module load

@@ -413,6 +413,55 @@ class TestFsdp2Helpers:
         with pytest.raises(ValueError):
             _build_mp_policy(conf)
 
+    @pytest.mark.parametrize("output_dtype", ["float32", "bfloat16"])
+    def test_output_dtype_applies_only_to_model_output(self, output_dtype):
+        """A per-block shard's output feeds an unsharded bf16 layer; only the
+        model's final output may be cast to output_dtype (float32 used to raise
+        'Input type (float) and bias type (c10::BFloat16) should be the same')."""
+        import os
+        import subprocess
+        import sys
+        import textwrap
+
+        code = textwrap.dedent(
+            f"""
+            import socket, torch, torch.nn as nn, torch.distributed as dist
+            from torch.distributed.device_mesh import init_device_mesh
+            from credit.parallel.fsdp2 import apply_fsdp2
+
+            s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
+            dist.init_process_group("gloo", init_method=f"tcp://127.0.0.1:{{port}}", rank=0, world_size=1)
+
+            class Block(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self._fsdp2_shard = True
+                    self.conv = nn.Conv2d(4, 4, 3, padding=1)
+                def forward(self, x):
+                    return self.conv(x)
+
+            class Net(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.block = Block()
+                    self.head = nn.Conv2d(4, 2, 1)
+                def forward(self, x):
+                    return self.head(self.block(x))
+
+            conf = {{"trainer": {{"amp": True, "fsdp2_mp_policy": {{
+                "param_dtype": "bfloat16", "reduce_dtype": "float32", "output_dtype": "{output_dtype}"}}}}}}
+            model = apply_fsdp2(Net(), init_device_mesh("cpu", (1,)), conf)
+            y = model(torch.randn(1, 4, 8, 8))
+            y.float().sum().backward()
+            assert y.dtype == getattr(torch, "{output_dtype}"), y.dtype
+            dist.destroy_process_group()
+            """
+        )
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ, PYTHONPATH=repo_root + os.pathsep + os.environ.get("PYTHONPATH", ""))
+        result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, timeout=300)
+        assert result.returncode == 0, result.stderr[-2000:]
+
 
 # ---------------------------------------------------------------------------
 # Per-instance opt-in for FSDP2 sharding / TP paths (review: no hardcoding)

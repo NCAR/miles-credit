@@ -2,15 +2,64 @@ import torch
 from bridgescaler import load_scaler_dict, scale_var_dict
 from bridgescaler.distributed_tensor import DStandardScalerTensor, DQuantileScalerTensor, DMinMaxScalerTensor
 from credit.preblock.base import BasePreblock
-from os.path import exists, expandvars
+from os.path import exists, expandvars, splitext
 from os import makedirs
-from ._utils import _parse_variable_selection, _flatten_spatial_tensors, _unflatten_spatial_tensors
+from ._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+    _any_mps,
+    _to_cpu,
+)
 
 _SCALER_REGISTRY = {
     "standard": DStandardScalerTensor,
     "quantile": DQuantileScalerTensor,
     "minmax": DMinMaxScalerTensor,
 }
+
+
+def physical_stats_path(scaler_path: str) -> str:
+    """Sidecar file holding physical-unit target statistics for a scaler file.
+
+    ``credit preprocess`` writes it next to ``scaler_path`` (``scaler.json`` ->
+    ``scaler_physical.json``) when log- or sqrt-transformed target variables are
+    scaled there: a standard scaler fit on their values *before* the
+    ``log_transform`` / ``sqrt_transform`` preblock (any preblock with
+    ``changes_units = True``), so the loss and metrics can weight them by their exact
+    physical-unit variance (see ``credit.losses.base._load_target_variances``).
+    """
+    root, ext = splitext(expandvars(scaler_path))
+    return f"{root}_physical{ext or '.json'}"
+
+
+def fit_physical_target_stats(
+    unit_block, batch: dict, accumulated: dict | None = None, spatial_variables: list | None = None
+) -> dict | None:
+    """Fit standard scalers on the target variables a unit-changing preblock transforms.
+
+    ``unit_block`` is a preblock with ``changes_units = True`` (``LogTransform``,
+    ``SqrtTransform``); ``batch`` is the batch as it reaches it (still in physical
+    units). ``spatial_variables`` are the full keys a scaler preblock scales per
+    grid point; those are fit per grid point here too, so their level-mean variance
+    is the mean of each point's variance over time, as for their transformed-space
+    scaler, rather than a variance pooled over the whole map.
+    Returns ``{"target": {source: {var_key: scaler}}}`` merged into ``accumulated``,
+    or ``accumulated`` unchanged when the block transforms no target variables.
+    """
+    if "target" not in unit_block.data_types or "target" not in batch:
+        return accumulated
+    variables = _parse_variable_selection(unit_block.variables, batch, ["target"])
+    fit_batch, _ = _flatten_spatial_tensors({"target": batch["target"]}, spatial_variables or [])
+    if _any_mps(fit_batch):
+        # bridgescaler accumulates stats in float64, which MPS (e.g., on macOS system)
+        # doesn't support, so move to CPU. For more details see issue #548.
+        fit_batch = _to_cpu(fit_batch)
+    fitted = scale_var_dict(fit_batch, DStandardScalerTensor(channels_last=False), "fit", variables)
+    fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
+    if not fitted["target"]:
+        return accumulated
+    return fitted if accumulated is None else _combine_scaler_dicts(accumulated, fitted)
 
 
 def _move_leaf_scaler_to_cpu(scaler):

@@ -6,6 +6,8 @@ This script takes the gathered ERA5 zarr data and creates the scaling libraries
 """
 
 # Scientific python
+import os
+import sys
 import xarray as xr
 import matplotlib.pyplot as plt
 import bokeh
@@ -30,8 +32,13 @@ else:
 from distributed import Client
 from dask_jobqueue import PBSCluster
 
+if not os.environ.get("PBS_ACCOUNT"):
+    sys.exit(
+        "ERROR: $PBS_ACCOUNT is not set. This script charges its Dask PBS workers to that project code.\n"
+        "Set it and rerun, e.g.:  export PBS_ACCOUNT=<YOUR_PROJECT_CODE>"
+    )
 cluster = PBSCluster(
-    account="NAML0001",
+    account=os.environ["PBS_ACCOUNT"],  # your PBS project code
     walltime="12:00:00",
     cores=1,
     memory="100GB",

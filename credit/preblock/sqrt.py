@@ -35,6 +35,8 @@ class SqrtTransform(BasePreblock):
             variables: []
     """
 
+    changes_units = True  # credit preprocess records physical-unit target stats
+
     def __init__(self, variables: list[str], data_types: list[str] = None):
         super().__init__()
         self.variables = variables

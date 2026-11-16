@@ -38,6 +38,30 @@ automatically from the config.
 edits required to get started.
 :::
 
+### Config history in `save_loc`
+
+Every `credit train` and `credit preprocess` run copies its config to `<save_loc>/model.yml` when the job starts
+(on a batch system that is when the job begins running, not when you run `credit submit`), so that file always
+reflects the most recent run (rollout and evaluation read it). To keep an audit trail,
+`save_loc` is automatically turned into a small git repository that tracks only `model.yml`; each time the
+config changes a commit is made:
+
+```bash
+git -C <save_loc> log -p model.yml
+```
+
+**git must be installed and on your `PATH`** (on Casper/Derecho: `module load git`). If git is missing or the
+repository cannot be initialized, CREDIT logs a warning, still copies `model.yml`, but config history is not
+recorded. If `save_loc` is already a git repository that CREDIT did not create (for example your own
+project root), CREDIT leaves it alone: it logs a warning, copies `model.yml`, and makes no commits there. We
+recommend setting `save_loc` to a directory outside the `miles-credit` repository (and outside any other git
+repository), for example under your scratch space, so training outputs never mix with source code.
+
+If `save_loc` is owned by another user (a shared run directory), git's "dubious ownership" check can refuse to
+work in it. CREDIT then logs a warning on every run that names the fix (`model.yml` is still copied, but its
+history is not recorded). To enable history tracking there, run
+`git config --global --add safe.directory <save_loc>`.
+
 ## How many jobs do I need?
 
 Rule of thumb: `--chain = ceil(total_epochs / epochs_per_job)`.
@@ -113,7 +137,8 @@ trainer:
 
 `activation_checkpoint: True` checkpoints every block that opts in through a
 `_fsdp2_shard = True` attribute (the CrossFormer/WXFormer `Transformer` and
-`UpBlock` blocks do by default). For a model whose blocks do not opt in, list the
+`UpBlock` blocks, and CrossFormer's final full-resolution pixel-shuffle
+`up_block4`, do by default). For a model whose blocks do not opt in, list the
 block class names instead. Names must match exactly, so `Block` does not also
 catch `UpBlock`, and `Layer` does not catch `LayerNorm`:
 
@@ -160,7 +185,18 @@ comfortably in one GPU's memory. With `fsdp2`, `amp: True` enables FSDP2's own
 instead of manual autocast — the trainer disables autocast and the GradScaler
 automatically because the policy replaces both. With spectral norm the policy
 is skipped (fp32 compute, sharding only) unless `fsdp2_mp_policy` is set
-explicitly.
+explicitly. `output_dtype` applies to the model's final output only; the
+per-block shards keep their outputs in `param_dtype`, so `output_dtype: float32`
+gives a full-precision `y_pred` for the postblocks while the blocks compute in bf16.
+
+```yaml
+trainer:
+  amp: True
+  fsdp2_mp_policy:
+    param_dtype: bfloat16
+    reduce_dtype: float32
+    output_dtype: float32
+```
 
 **Tensor parallelism (`tensor:`)** — splits each weight matrix column-wise across
 `tensor` GPUs within a node. This reduces per-GPU activation memory at the cost of
@@ -322,6 +358,54 @@ fully-resolved conda/module environment into a per-node script, because pbsdsh's
 shell does not inherit the job's loaded modules; NCCL uses the aws-ofi-nccl plugin over
 libfabric for inter-node communication. Use `--dry-run` to compare the two scripts.
 
+### Extra torchrun flags
+
+`torchrun_args` in the `pbs:` or `slurm:` block (a string or a list of flags) is appended
+to every `torchrun` line `credit submit` generates, single- and multi-node, in every
+`--mode`. The `--torchrun-args` flag overrides it; write it with `=` because the value
+starts with `--`. For example, to bind each rank to its GPU's CPU socket:
+
+```yaml
+slurm:
+  torchrun_args: "--numa-binding=node"
+```
+
+```bash
+credit submit --cluster horizon --scheduler slurm -c config.yml --torchrun-args=--numa-binding=node --dry-run
+```
+
+A string is inserted as written, so it can hold several flags. In a list, each element
+is shell-quoted and stays one argument, even with spaces or shell metacharacters:
+
+```yaml
+pbs:
+  torchrun_args: ["--numa-binding=node", "--log-dir=/glade/derecho/scratch/me/my logs"]
+```
+
+The `pbsdsh` launcher passes the flags to each node's `torchrun`. Its per-node script is
+written through an unquoted heredoc, so a `$` in the flags expands when that script is
+written. The derecho multi-node `mpiexec` launcher runs `python` directly and ignores
+`torchrun_args`; `credit submit` and `credit check` both warn when that happens.
+
+### Derecho: `import torch` fails with `libcudart.so.13`
+
+Since the November 2026 Derecho maintenance, the Cray MPICH libraries in `/opt/cray/pe/lib64`
+come from MPICH 9.1.0, whose GTL library needs CUDA 13. The `cray-mpich` module doesn't put its
+own `gtl/lib` on `LD_LIBRARY_PATH`, so the loader falls back to that directory. As a result, torch,
+which is built against `cray-mpich/8.1.29` and CUDA 12, picks up the 9.1.0 GTL and fails with `OSError: libcudart.so.13: cannot open shared object file`.
+
+Every Derecho script that `credit submit` (and the `credit.pbs` launch helpers) writes loads
+`cray-mpich/8.1.29` and then puts that module's GTL first. The job log shows a line like
+`credit: using MPICH GTL from /opt/cray/pe/mpich/8.1.29/gtl/lib`. In an interactive session,
+Jupyter, or a hand-written job script, run this after `module load … cray-mpich/8.1.29 …` and
+`conda activate`:
+
+```bash
+export LD_LIBRARY_PATH="${CRAY_MPICH_ROOTDIR}/gtl/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+```
+
+This is a workaround until NCAR fixes the module or the shared environment is rebuilt.
+
 ## Job submission
 
 The `credit submit` command generates a ready-to-use PBS script and optionally calls `qsub`.
@@ -333,6 +417,14 @@ override them when provided.
 `nodes: 8` for training, `--mode rollout` / `realtime` / `preprocess` will also request
 8 nodes unless you pass `--nodes 1`. The job plan printed before submission shows the
 node count; use `--dry-run` to check the `select=` line first.
+```
+
+The account to charge comes from `--account`, then `pbs.project` in the config,
+then `$PBS_ACCOUNT`; there is no built-in default.  Exporting it once in your
+shell profile keeps configs portable:
+
+```bash
+export PBS_ACCOUNT=YOUR_ACCOUNT   # e.g. in ~/.bashrc
 ```
 
 ```bash
@@ -353,6 +445,48 @@ credit submit --cluster casper -c config.yml
 ```
 
 See `credit submit --help` for the full option list.
+
+### Memory requests (`mem: auto`)
+
+`credit begin` writes `mem: 'auto'` in the `pbs:` block. For train and preprocess jobs,
+`credit submit` then sizes the per-node host-memory request from the config:
+
+```text
+need = GPUs/node × (training DataLoader + validation DataLoader
+                    + 4 GiB runtime + 1 GiB × DataLoader workers) × 1.3
+DataLoader = (workers × prefetch_factor + 1) × batch_size × H × W × channels × 4 bytes
+```
+
+- **Channels** are summed over every data source. A sample's input holds the prognostic,
+  static and dynamic_forcing channels over `history_len` steps; its target holds the
+  prognostic and diagnostic channels at one step. Every value is assumed to be float32,
+  which is what the gen2 datasets produce.
+- **Training** uses `thread_workers` / `train_batch_size`; **validation** uses
+  `valid_thread_workers` / `valid_batch_size` and the `validation_data` sources. Both
+  loaders are counted because the trainer keeps both sets of workers and prefetched
+  batches alive. Validation is left out for preprocess jobs and when
+  `trainer.skip_validation` is set.
+- **The request** is `need` rounded up to a multiple of 32GB, but **never less than the
+  site default** (Casper's GPU-scaled default, Derecho's 480GB), so `auto` only raises a
+  request a large config needs. It is capped at what one node offers; on Casper that is
+  the smallest node that the job's `gpu_type` and GPU count can land on (704GB for up
+  to 4 GPUs with `gpu_type` unset, because 4x V100 nodes have 768GB). A capped request
+  is logged as a warning: reduce batch sizes, workers or `prefetch_factor`, use fewer
+  levels, or on Casper set `gpu_type` to a larger node.
+- `--mem auto` on the command line works the same way. An explicit `--mem 200GB` or a
+  numeric `mem` always wins. Rollout and realtime jobs treat `auto` as unset and keep
+  their own default, and SLURM (`slurm.mem: auto`) uses the site default.
+
+The overheads and the 1.3 safety factor are rough allowances, not yet calibrated
+against measured job memory. Treat the estimate as a sanity check, and compare it with
+`qstat -fx <jobid> | grep resources_used.mem` for your own runs.
+
+`credit check` reports the request `auto` will make, using `pbs.ngpus` (a
+`credit submit --gpus` override changes it). With a numeric or unset `mem` it warns when
+the request is below the estimate, and it always warns when the estimate exceeds a node.
+When `pbs.queue` does not name a single cluster, it shows the request for both Casper and
+Derecho. `credit submit` logs the calculation, and the job plan shows the resolved
+`Memory` line.
 
 ## Resuming training
 

@@ -20,6 +20,13 @@ class ExpTransform(BasePostblock):
     to all variables under that hierarchy. Expansion happens lazily on the first
     forward call.
 
+    ``max_value`` optionally caps the output in physical units. The cap is applied
+    as a clamp on the log-space input before exponentiation, so a large log-space
+    prediction cannot overflow or produce unphysical values (e.g. specific
+    humidity of 100 kg/kg) that blow up a physical-units loss. It is either one
+    float for every variable or a ``{variable: max}`` dict (unlisted variables are
+    not clamped). Values above the cap get zero gradient.
+
     Config example::
 
         type: "exp_transform"
@@ -28,6 +35,8 @@ class ExpTransform(BasePostblock):
                 - "era5/prognostic/3d/Q"
             eps: 1.0e-8      # must match LogTransform eps
             base: "e"        # must match LogTransform base
+            max_value:       # optional physical-unit cap, per variable
+                "era5/prognostic/3d/Q": 0.05
 
         # or inverse-transform all variables:
         type: "exp_transform"
@@ -41,6 +50,7 @@ class ExpTransform(BasePostblock):
         eps: float = 1e-8,
         base: str = "e",
         key: str = "y_processed",
+        max_value: float | dict[str, float] | None = None,
     ):
         super().__init__()
         self.variables = variables
@@ -60,6 +70,26 @@ class ExpTransform(BasePostblock):
             raise ValueError(f"Unsupported base '{base}'. Choose from: 'e', '2', '10'.")
 
         self._base = base
+        self.max_value = max_value
+
+    def _log(self, x: float) -> float:
+        """Apply base-specific logarithm to a Python float."""
+        if self._base == "e":
+            return math.log(x)
+        elif self._base == "2":
+            return math.log2(x)
+        else:  # "10"
+            return math.log10(x)
+
+    def _log_space_max(self, var_key: str) -> float | None:
+        """Log-space bound y_max such that exp(y_max) maps to max_value for var_key."""
+        if isinstance(self.max_value, dict):
+            max_value = self.max_value.get(var_key)
+        else:
+            max_value = self.max_value
+        if max_value is None:
+            return None
+        return self._log(max_value + self._eps) - self._log_eps  # forward LogTransform of max_value
 
     def _exp(self, x: torch.Tensor) -> torch.Tensor:
         """Apply base-specific exponentiation: e^x, 2^x, or 10^x."""
@@ -78,11 +108,20 @@ class ExpTransform(BasePostblock):
             wrapped = {"_": batch_dict[self.key]}
             self.variables = _parse_variable_selection(self.variables, wrapped, data_types=["_"])
             self.variables_expanded = True
+            if isinstance(self.max_value, dict):
+                unknown = sorted(set(self.max_value) - set(self.variables))
+                if unknown:
+                    raise ValueError(
+                        f"exp_transform max_value keys {unknown} are not in the selected variables {self.variables}."
+                    )
         nested = batch_dict[self.key]  # {source: {var_key: tensor}}
         for var_key in self.variables:
             source = var_key.split("/")[0]  # e.g. "era5" from "era5/prognostic/3d/Q"
             if source not in nested or var_key not in nested[source]:
                 continue  # variable not present in this batch — skip silently
             y = nested[source][var_key]  # value in log-space (to be inverted to physical space)
+            y_max = self._log_space_max(var_key)
+            if y_max is not None:
+                y = y.clamp(max=y_max)
             nested[source][var_key] = self._exp(y + self._log_eps) - self._eps  # x = base^(y + log_base(eps)) - eps
         return batch_dict

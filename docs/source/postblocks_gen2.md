@@ -102,12 +102,22 @@ flattening, yielding a normalized `y_pred` for the loss while leaving the
 physical `y_processed` untouched for autoregressive rollout assembly. Omit
 `scaler_path` to flatten as-is with no scaling.
 
+If the scaler stores some variables per grid point (fit with `spatial_variables`
+in the `bridgescaler_transform` preblock), list the same variables under
+`spatial_variables` here. They are flattened to `(B, H*W)` before scaling and
+restored afterward, as in the scaler pre/postblocks. Without it, bridgescaler's
+column-count check fails on the first training batch. `credit check` reports a
+`flatten_to_tensor` block whose `spatial_variables` differ from those of the
+preblock that fits the same `scaler_path`.
+
 ```yaml
 type: "flatten_to_tensor"
 args:
   scaler_path: "/path/to/scaler.json"
   variables: []          # variables the scaler should transform
   method: "transform"    # physical -> normalized
+  spatial_variables:     # optional: grid-wise variables, must match the preblock
+    - "cesm/prognostic/2d/PS"
 ```
 
 ## Inverse Transforms
@@ -157,7 +167,16 @@ args:
     - "era5/prognostic/3d/specific_humidity"
   eps: 1.0e-8      # must match the LogTransform eps
   base: "e"        # must match the LogTransform base
+  max_value:       # optional: cap the physical output (float, or per-variable dict)
+    "era5/prognostic/3d/specific_humidity": 0.05
 ```
+
+`max_value` clamps the log-space input before exponentiating, so an outlier
+prediction cannot become an unphysical (or infinite) value. Without it, a
+modest log-space error can turn into specific humidity of ~100 kg/kg, which
+makes a physical-units loss (and any diagnostic computed from it, such as
+geopotential) explode. Values above the cap receive zero gradient.
+Variables missing from a `max_value` dict are not clamped.
 
 ### `square_transform` (SquareTransform)
 
@@ -174,6 +193,11 @@ args:
   variables:
     - "era5/prognostic/3d/specific_humidity"
 ```
+
+A variable this block (or `exp_transform`) returns to physical units in
+`y_processed` is weighted by its physical-unit variance in `BaseLoss` and the
+gen2 metrics, not the scaler's transformed-space variance (see
+[Losses](Losses.md)).
 
 ## Diagnostics
 
@@ -333,6 +357,22 @@ Closes the global water budget by rescaling precipitation so the column-water
 tendency plus evaporation balances precipitation over the forecast step.
 `lead_time_periods` is the step length in hours.
 
+`precip_units` and `evapor_units` are set independently, because datasets often
+mix them. Each takes one of:
+
+| Value | Meaning |
+|---|---|
+| `"m"` (default) | liquid-water depth accumulated over the step (ERA5 `tp`/`e`) |
+| `"kg m-2"` | water mass accumulated over the step |
+| `"m s-1"` | liquid-water depth rate (e.g. CESM/E3SM `PRECT`) |
+| `"kg m-2 s-1"` | water mass flux (e.g. CESM/E3SM `QFLX`) |
+
+Both are converted to `kg m-2 s-1` internally. The correction is a ratio, so
+precipitation comes back out in its original units. Evaporation defaults to the
+ERA5 sign (positive downward, so evaporation is negative); set
+`evapor_positive_up: true` for datasets where evaporation is positive, such as
+`QFLX`. `credit check` rejects unknown unit strings.
+
 ```yaml
 type: "global_water_fixer"
 args:
@@ -345,6 +385,16 @@ args:
   lon_lat_level_name: ["lon2d", "lat2d", "a_half", "b_half"]
   grid_type: "sigma"
   midpoint: false
+```
+
+For E3SM/CESM rate output, change just the units and sign:
+
+```yaml
+  precip_var: "E3SM_ATM/diagnostic/2d/PRECT"   # m s-1
+  evapor_var: "E3SM_ATM/diagnostic/2d/QFLX"    # kg m-2 s-1, positive up
+  precip_units: "m s-1"
+  evapor_units: "kg m-2 s-1"
+  evapor_positive_up: true
 ```
 
 ### `global_energy_fixer` / `global_energy_fixer_updown` (GlobalEnergyFixerUpDown)

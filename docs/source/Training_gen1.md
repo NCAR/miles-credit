@@ -111,6 +111,12 @@ table](https://ncar-hpc-docs.readthedocs.io/en/latest/compute-systems/casper/#ca
 | unset (any GPGPU) / `v100` | 8 (1152GB) | 64GB | 224GB | 512GB | 1088GB |
 | `a100_80gb` / `h100` | 4 (1024GB) | 64GB | 368GB | 960GB | — |
 
+**Config-derived memory (`mem: auto`)** — `credit begin` writes `mem: 'auto'`, which makes
+`credit submit` size train and preprocess requests from the config's DataLoader settings. It
+never asks for less than the defaults above, and it is capped at one node. See
+[Memory requests](Training.md#memory-requests-mem-auto) for the formula and what `credit check`
+reports.
+
 **Queue / cluster mismatch** — a `pbs:` block written for one machine is easy to reuse against the
 other, and PBS only rejects the bad queue after the job is submitted. `credit submit` therefore fails
 up front when the resolved queue belongs to the other cluster:
@@ -134,8 +140,11 @@ reports which cluster a config's queue implies.
 | 2 | `pbs:` section in config | `project: "NCAR0001"` |
 | 3 | Built-in cluster default | 4 GPUs, 12 h walltime, etc. |
 
-You can also export `PBS_ACCOUNT` in your shell as a global fallback for the account code
-(useful if you work across multiple configs but always charge the same project).
+The account has no built-in default: it comes from `--account`, then `pbs.project`, then the
+`PBS_ACCOUNT` environment variable. Exporting `PBS_ACCOUNT` in your shell is the easiest option if you
+always charge the same project — `credit begin` leaves `project:` out of the config when you skip its
+account prompt, so the variable applies at submit time. If none of the three is set, `credit submit`
+exits with an error before calling `qsub`.
 
 ## Running on Casper vs. Derecho
 

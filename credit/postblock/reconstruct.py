@@ -30,6 +30,11 @@ The same ``batch_dict`` with ``"y_processed"`` added as a nested dict:
 import os
 import torch
 from credit.postblock.base import BasePostblock
+from credit.preblock._utils import (
+    _parse_variable_selection,
+    _flatten_spatial_tensors,
+    _unflatten_spatial_tensors,
+)
 
 
 class Reconstruct(BasePostblock):
@@ -118,6 +123,11 @@ class FlattenToTensor(BasePostblock):
         method: scaler method (default ``"transform"`` — physical -> normalized).
         key: source nested dict (default ``"y_processed"``).
         out_key: flat tensor destination (default ``"y_pred"``).
+        spatial_variables: full keys or partial paths of variables the scaler
+            stores per gridpoint rather than per level. They are flattened to
+            ``(B, H*W)`` before scaling and restored afterward, as in the
+            ``bridgescaler_transform`` pre/postblocks. Must match the
+            ``spatial_variables`` of the preblock that fit ``scaler_path``.
     """
 
     def __init__(
@@ -127,8 +137,11 @@ class FlattenToTensor(BasePostblock):
         method: str = "transform",
         key: str = "y_processed",
         out_key: str = "y_pred",
+        spatial_variables: list[str] | None = None,
     ):
         super().__init__()
+        self.spatial_variables = spatial_variables or []
+        self.spatial_expanded = False
         self.scaler_path = os.path.expandvars(scaler_path) if scaler_path is not None else None
         self.variables = variables
         self.method = method
@@ -150,7 +163,16 @@ class FlattenToTensor(BasePostblock):
             # shallow-copy the nested structure so scale_var_dict (which reassigns
             # leaves in place) does not normalize the physical y_processed.
             work = {source: dict(vars_) for source, vars_ in nested.items()}
+            if self.spatial_variables and not self.spatial_expanded:
+                # expand partial paths against {source: {var_key: tensor}}, wrapped
+                # with a dummy data-type level as in the postblock scaler.
+                self.spatial_variables = _parse_variable_selection(
+                    self.spatial_variables, {"_": nested}, data_types=["_"]
+                )
+                self.spatial_expanded = True
+            work, spatial_shapes = _flatten_spatial_tensors(work, self.spatial_variables)
             work = scale_var_dict(work, self.scaler, self.method, self.variables)
+            work = _unflatten_spatial_tensors(work, spatial_shapes)
         else:
             work = nested
 

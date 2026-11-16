@@ -204,16 +204,22 @@ def load_metric(conf, validation=False):
     mode = "validation" if validation else "train"
     logger.info(f"Loaded the {metric_type} metric ({mode}) with parameters: {args}")
 
+    from credit.losses.base import unit_transform_specs
+
     if metric_type == "combined":
         from credit.datasets.gen_2.channel_utils import ChannelSchema
         from credit.metrics.base import BaseCombinedMetric
 
+        args.setdefault("unit_transforms", unit_transform_specs(conf))
         return BaseCombinedMetric(channel_schema=ChannelSchema.load_or_from_config(conf), **args)
 
     cls = _load_metric_entry(metric_type)
     args.setdefault("metric_name", metric_type)
-    if "channel_schema" in inspect.signature(cls.__init__).parameters:
+    params = inspect.signature(cls.__init__).parameters
+    if "channel_schema" in params:
         from credit.datasets.gen_2.channel_utils import ChannelSchema
 
         args.setdefault("channel_schema", ChannelSchema.load_or_from_config(conf))
+    if "unit_transforms" in params:
+        args.setdefault("unit_transforms", unit_transform_specs(conf))
     return cls(**args)

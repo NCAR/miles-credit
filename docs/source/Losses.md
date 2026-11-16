@@ -187,7 +187,52 @@ Variances are read from `DStandardScalerTensor.var_x_` directly, estimated from
 t-digest centroid moments for `DQuantileScalerTensor`, or taken from `sd_²` for the
 numpy `DeepStandardScaler`. A variable with no entry in the scaler falls back to
 weight 1.0 with a logged warning — worth watching for, since a silent 1.0 among
-1/σ² weights effectively drops that variable from the objective.
+1/σ² weights effectively drops that variable from the objective. Postblock-computed
+diagnostics (e.g. `geopotential_diagnostic`) are never in the scaler, so give them
+a `variable_weights` entry of about `1 / σ²` in their physical units.
+
+Log- and sqrt-transformed variables are handled automatically. When a
+`log_transform` (or `sqrt_transform`) preblock feeds the scaler and an
+`exp_transform` (or `square_transform`) postblock converts the variable back to
+physical units in `y_processed`, the scaler's variance is in log (sqrt) space
+while the loss is scored in physical units. `credit preprocess` therefore also fits
+a standard scaler on each such target variable *before* the transform and saves
+it next to the scaler file as `<scaler>_physical.json`
+(e.g. `scaler.json` → `scaler_physical.json`). `load_loss` reads the
+`exp_transform` and `square_transform` postblocks from the config and weights
+those variables by the exact physical-unit variance from that file. A variable the scaler scales per grid
+point (`spatial_variables`) is fit per grid point there too, so its weight uses the
+mean of each point's variance, like the other grid-wise variables, rather than a
+variance pooled over the whole map. The choice is logged at startup, and
+the same applies to metrics. Remove any `variable_weights` you added to
+hand-correct these variables' units, or they apply twice.
+
+Scaler files fit before this sidecar existed fall back to an estimate from the
+log-space statistics: each level's natural-log mean `m` and variance `s²` give the
+first-order estimate `Var(x) ≈ exp(2m) · s²`. (The lognormal moment is avoided
+on purpose: skewed fields such as specific humidity have log variances above 2 near
+the surface, where it overestimates by an order of magnitude.) The estimate is
+reliable only while the log-space spread is small. `credit check` warns for each
+such variable where it and the lognormal moment differ by more than 3× (a log
+variance of about 0.9 or more); the weight is then uncertain by at least that
+factor. It is worst for zero-inflated fields (precipitation, cloud water), where
+the first-order value can be orders of magnitude too small and the variable
+dominates the loss. The fix is to re-run `credit preprocess` (it refuses to
+overwrite an existing scaler, so move the old one aside first), or to set a
+`variable_weights` multiplier from a measured physical variance.
+
+For a `square_transform`ed variable without the sidecar, the estimate is
+`Var(x) ≈ 4·m²·s² + 2·s⁴` from the sqrt-space mean `m` and variance `s²`, which is
+exact only when the sqrt-space values are normally distributed. `credit check`
+warns for every such variable, and notes when `s² > 2·m²` — a zero-inflated or
+strongly skewed field, where the estimate is least reliable. The fix is the same.
+A scaler with no stored mean (quantile, min-max) cannot be converted at all: the
+transformed-space variance is used and a warning is logged.
+
+Both pairs are listed in `credit.losses.base.UNIT_TRANSFORMS`. To add another
+invertible transform, set `changes_units = True` on the preblock class (so
+`credit preprocess` records its targets' physical statistics) and add the inverse
+postblock to that table with a fallback variance function.
 
 ```yaml
 loss:

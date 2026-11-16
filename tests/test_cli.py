@@ -63,7 +63,7 @@ def _make_minimal_conf(tmp_path, extra=None):
             "valid_forecast_len": 1,
         },
         "pbs": {
-            "project": "NAML0001",
+            "project": "TEST0000",
             "walltime": "06:00:00",
             "job_name": "test_job",
             "conda": "/glade/u/home/testuser/.conda/envs/credit",
@@ -88,7 +88,7 @@ def _casper_args(**kwargs):
         queue="casper",
         gpu_type="a100_80gb",
         walltime="06:00:00",
-        account="NAML0001",
+        account="TEST0000",
         conda_env="/some/env",
         torchrun="/usr/bin/torchrun",
         job_name="credit_gen2",
@@ -112,7 +112,7 @@ def _derecho_args(**kwargs):
         queue="main",
         gpu_type="a100_80gb",
         walltime="12:00:00",
-        account="NAML0001",
+        account="TEST0000",
         conda_env="/glade/work/benkirk/conda-envs/credit-derecho-torch28-nccl221",
         torchrun=None,
         job_name="credit_gen2",
@@ -149,6 +149,12 @@ class TestPrompt:
         monkeypatch.setattr("builtins.input", lambda s: calls.append(s) or "")
         _prompt("My question", default="42")
         assert "[42]" in calls[0]
+
+    def test_prompt_empty_default_shows_no_brackets(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("builtins.input", lambda s: calls.append(s) or "")
+        assert _prompt("My question", default="") == ""
+        assert "[]" not in calls[0]
 
     def test_prompt_bool_yes(self, monkeypatch):
         for val in ("y", "yes", "Y", "YES"):
@@ -329,6 +335,41 @@ class TestResolvePbsOpts:
         pbs_cfg = {"project": "OTHER"}
         r = _resolve_pbs_opts(args, pbs_cfg)
         assert r.account == "MYACCT"
+
+    def test_cli_flag_beats_config_and_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        r = _resolve_pbs_opts(self._minimal_args(account="MYACCT"), {"project": "OTHER"})
+        assert r.account == "MYACCT"
+
+    def test_config_beats_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(), {"project": "FROMCONFIG"}).account == "FROMCONFIG"
+
+    def test_empty_config_account_falls_through_to_env(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(), {"project": ""}).account == "ENV_ACCOUNT"
+
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_blank_cli_account_falls_through(self, monkeypatch, blank):
+        # A wrapper passing --account "$PROJ" with $PROJ unset must not block the config/env fallback.
+        monkeypatch.setenv("PBS_ACCOUNT", "ENV_ACCOUNT")
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {}).account == "ENV_ACCOUNT"
+        assert _resolve_pbs_opts(self._minimal_args(account=blank), {"project": "CFG"}).account == "CFG"
+
+    def test_blank_env_account_is_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "  ")
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(self._minimal_args(), {})
+
+    def test_account_is_stripped(self, monkeypatch):
+        assert _resolve_pbs_opts(self._minimal_args(account=" MYACCT "), {}).account == "MYACCT"
+
+    def test_dry_run_without_account_uses_placeholder(self, monkeypatch, capsys):
+        # A preview shouldn't need an account: render a placeholder and warn instead of exiting.
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+        r = _resolve_pbs_opts(self._minimal_args(dry_run=True), {})
+        assert r.account == "<UNSET>"
+        assert "PBS_ACCOUNT" in capsys.readouterr().err
 
     def test_falls_back_to_pbs_cfg(self):
         args = self._minimal_args(cluster="casper", account=None)
@@ -1249,7 +1290,7 @@ class TestConvertAutoTransform:
                 "y",
                 # cluster, account, conda, walltime, job_name
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1282,7 +1323,7 @@ class TestConvertAutoTransform:
                 "0.9999",
                 "y",
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1326,7 +1367,7 @@ class TestConvertAutoTransform:
                 "y",
                 "4",  # keep ensemble, size
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1363,7 +1404,7 @@ class TestConvertAutoTransform:
                 "n",  # EMA + no TensorBoard
                 "n",  # do NOT keep ensemble
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1392,7 +1433,7 @@ class TestConvertAutoTransform:
                 "0.9999",
                 "y",
                 "derecho",
-                "NAML0001",
+                "TEST0000",
                 "credit-env",
                 "12:00:00",
                 "credit_gen2",
@@ -1503,6 +1544,9 @@ class TestSubmitReload:
             cli._submit(args)
 
         assert len(qsub_calls) == 1
+        out = capsys.readouterr().out
+        assert "[SUCCESS] Job 99999 submitted to Casper (PBS).\n" in out
+        assert f"  Logs:   {tmp_path / 'save' / 'logs'}\n" in out
 
     def test_submit_chain_calls_qsub_multiple(self, tmp_path, capsys, monkeypatch):
         """Chain=3 should call _qsub 3 times."""
@@ -1530,6 +1574,7 @@ class TestSubmitReload:
             cli._submit(args)
 
         assert len(qsub_calls) == 3
+        assert "[SUCCESS] Jobs 1000, 2000, 3000 submitted to Casper (PBS).\n" in capsys.readouterr().out
 
 
 # ===========================================================================
@@ -1557,8 +1602,8 @@ class TestResolvePbsOptsEnv:
         r = _resolve_pbs_opts(args, {})
         assert r.account == "ENV_ACCOUNT"
 
-    def test_ultimate_fallback_naml0001(self, monkeypatch):
-        # Remove PBS_ACCOUNT if set
+    def test_missing_account_exits(self, monkeypatch, capsys):
+        # No flag, no pbs.project, no $PBS_ACCOUNT: there is no built-in account to fall back to.
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1572,11 +1617,29 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
-        assert r.account == "NAML0001"
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
+        assert "PBS_ACCOUNT" in capsys.readouterr().err
+
+    def test_empty_env_account_treated_as_unset(self, monkeypatch):
+        monkeypatch.setenv("PBS_ACCOUNT", "")
+        args = argparse.Namespace(
+            cluster="casper",
+            account=None,
+            walltime=None,
+            gpus=None,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            queue=None,
+            gpu_type=None,
+            conda_env=None,
+        )
+        with pytest.raises(SystemExit):
+            _resolve_pbs_opts(args, {})
 
     def test_all_none_uses_hardcoded_defaults(self, monkeypatch):
-        """All fields None + empty pbs_cfg → _first() returns None path is exercised."""
+        """All CLI fields None and no pbs_cfg settings except the account → cluster defaults fill the rest."""
         monkeypatch.delenv("PBS_ACCOUNT", raising=False)
         args = argparse.Namespace(
             cluster="casper",
@@ -1590,7 +1653,7 @@ class TestResolvePbsOptsEnv:
             gpu_type=None,
             conda_env=None,
         )
-        r = _resolve_pbs_opts(args, {})
+        r = _resolve_pbs_opts(args, {"project": "TEST_ACCOUNT"})
         # gpu_type has no Casper default — unset means "any NVIDIA GPGPU"
         assert r.gpu_type is None
         assert r.walltime == "12:00:00"
@@ -1621,7 +1684,7 @@ class TestConvertCasperPath:
                 "0.9999",  # EMA
                 "n",  # TensorBoard
                 "casper",  # cluster
-                "NAML0001",  # account
+                "TEST0000",  # account
                 "credit-casper",  # conda
                 "04:00:00",  # walltime
                 "my_job",  # job_name
@@ -1640,6 +1703,31 @@ class TestConvertCasperPath:
         with open(out_path) as f:
             result = yaml.safe_load(f)
         assert result["pbs"]["queue"] == "casper"
+        assert result["pbs"]["project"] == "TEST0000"
+
+    @pytest.mark.parametrize("env_account", [None, "ENV_ACCOUNT"])
+    def test_blank_account_is_omitted(self, tmp_path, monkeypatch, env_account):
+        # Like `credit begin`: a blank answer leaves the key out so $PBS_ACCOUNT applies at submit time.
+        if env_account:
+            monkeypatch.setenv("PBS_ACCOUNT", env_account)
+        else:
+            monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+        conf = {
+            "trainer": {"type": "era5"},
+            "data": {"forecast_len": 0, "valid_forecast_len": 0},
+            "loss": {"training_loss": "mse"},
+        }
+        p = tmp_path / "v1.yml"
+        p.write_text(yaml.dump(conf))
+        out_path = str(tmp_path / "v2.yml")
+        answers = iter(["y", "0.9999", "n", "casper", "", "credit-casper", "04:00:00", "my_job"])
+        # Remaining prompts (gpus, cpus, ...) take their defaults; the last one is the output path.
+        monkeypatch.setattr("builtins.input", lambda _: next(answers, ""))
+        cli._convert(argparse.Namespace(config=str(p), output=out_path))
+
+        with open(out_path) as f:
+            result = yaml.safe_load(f)
+        assert "project" not in result["pbs"] and "account" not in result["pbs"]
 
 
 # ===========================================================================
@@ -1885,3 +1973,176 @@ class TestCondaEnvShared:
             if path.name != "conda_env.py" and "conda info --envs" in path.read_text()
         ]
         assert offenders == [], f"inline conda lookup duplicated in: {offenders}"
+
+
+# ===========================================================================
+# mem: auto — config-derived PBS memory requests
+# ===========================================================================
+
+
+def _mem_conf(train_channels=10, **trainer):
+    """A config whose DataLoader estimate is exact: 1 GiB per float32 channel, one buffered batch.
+
+    Each prognostic variable is counted in both the input and the target, so a
+    DataLoader with batch size 1 holds ``2 * train_channels`` GiB.
+    """
+    variables = {"prognostic": {"vars_2D": [f"v{i}" for i in range(train_channels)]}}
+    return {
+        "trainer": {"thread_workers": 0, "valid_thread_workers": 0, **trainer},
+        "model": {"image_height": 1, "image_width": 2**28},
+        "data": {"source": {"ERA5": {"variables": variables}}},
+    }
+
+
+class TestAutoMem:
+    from credit.cli._common import auto_mem, node_mem_cap_gb
+
+    auto_mem = staticmethod(auto_mem)
+    node_mem_cap_gb = staticmethod(node_mem_cap_gb)
+
+    def test_estimate_formula(self):
+        assert self.auto_mem({}, "derecho", 4) is None
+        # 10 GiB per loader x 2 loaders + 4 GiB runtime, no workers; x 2 GPUs x 1.3.
+        est = self.auto_mem(_mem_conf(5), "casper", 2, "a100_80gb")
+        assert est.need_gb == pytest.approx((10 + 10 + 4) * 2 * 1.3)
+        # 3 workers x prefetch 1: 3 + 1 buffered batches and 3 x 1 GiB of worker processes.
+        workers = self.auto_mem(_mem_conf(5, skip_validation=True, thread_workers=3, prefetch_factor=1), "derecho", 1)
+        assert workers.need_gb == pytest.approx((4 * 10 + 4 + 3) * 1.3)
+
+    def test_validation_counted_only_for_train_jobs(self):
+        conf = _mem_conf(5, valid_batch_size=3)
+        train = self.auto_mem(conf, "derecho", 1).need_gb
+        preprocess = self.auto_mem(conf, "derecho", 1, include_validation=False).need_gb
+        skipped = self.auto_mem(_mem_conf(5, valid_batch_size=3, skip_validation=True), "derecho", 1).need_gb
+        assert train - preprocess == pytest.approx(30 * 1.3)
+        assert skipped == pytest.approx(preprocess)
+
+    def test_never_below_site_default_and_rounded_above_it(self):
+        assert self.auto_mem(_mem_conf(1), "casper", 1).mem == "64GB"
+        assert self.auto_mem(_mem_conf(1), "casper", 4).mem == "512GB"
+        assert self.auto_mem(_mem_conf(1), "derecho", 4).mem == "480GB"
+        # (100 + 4) x 1.3 = 135.2 GB -> 160GB, above Casper's 64GB single-GPU default.
+        est = self.auto_mem(_mem_conf(50, skip_validation=True), "casper", 1)
+        assert (est.mem, est.exceeds_node) == ("160GB", False)
+
+    def test_capped_at_every_eligible_node(self):
+        est = self.auto_mem(_mem_conf(500), "derecho", 4)
+        assert (est.mem, est.exceeds_node) == ("480GB", True)
+        # Unset gpu_type with <= 4 GPUs can land on a 4x V100 / 768 GB node;
+        # only the 8x V100 / 1152 GB nodes take more than 4 GPUs.
+        assert self.auto_mem(_mem_conf(500), "casper", 4).mem == "704GB"
+        assert self.node_mem_cap_gb("casper", None, 8) == 1088
+        assert self.node_mem_cap_gb("casper", "a100_80gb", 4) == 960
+        assert self.node_mem_cap_gb("casper", "a100", 1) == 352
+
+
+class TestResolveAutoMem:
+    def _args(self, tmp_path, conf, **kwargs):
+        p = tmp_path / "config.yml"
+        p.write_text(yaml.dump(conf))
+        defaults = dict(
+            cluster="casper",
+            account=None,
+            walltime=None,
+            gpus=1,
+            nodes=None,
+            cpus=None,
+            mem=None,
+            queue=None,
+            gpu_type=None,
+            conda_env=None,
+            config=str(p),
+            submit_mode="train",
+        )
+        defaults.update(kwargs)
+        return argparse.Namespace(**defaults)
+
+    def test_pbs_precedence(self, tmp_path):
+        conf = _mem_conf(50, skip_validation=True)  # auto -> 160GB on one Casper GPU
+        assert _resolve_pbs_opts(self._args(tmp_path, conf), {"mem": "AUTO"}).mem == "160GB"
+        assert _resolve_pbs_opts(self._args(tmp_path, conf, mem="200GB"), {"mem": "auto"}).mem == "200GB"
+        # --mem auto is resolved, not passed through, and overrides a numeric pbs.mem
+        assert _resolve_pbs_opts(self._args(tmp_path, conf, mem="auto"), {"mem": "100GB"}).mem == "160GB"
+        # nothing to estimate from -> the Casper default
+        assert _resolve_pbs_opts(self._args(tmp_path, {}), {"mem": "auto"}).mem == "64GB"
+
+    def test_rollout_ignores_auto(self, tmp_path, monkeypatch):
+        args = self._args(tmp_path, _mem_conf(50), mem="auto", submit_mode="rollout")
+        assert _resolve_pbs_opts(args, {"mem": "128GB"}).mem == "128GB"
+
+        submit = sys.modules["credit.cli._submit"]  # credit.cli re-exports a _submit function
+        seen = {}
+
+        class _Stop(Exception):
+            pass
+
+        def _resolve(args, cfg):
+            seen.update(cfg)
+            raise _Stop
+
+        ctx = {"load": lambda path: {"mem": "Auto"}, "resolve": _resolve}
+        monkeypatch.setattr(submit, "_scheduler_ctx", lambda args: ctx)
+        with pytest.raises(_Stop):
+            submit._do_submit_rollout(argparse.Namespace(cluster="casper", config="unused.yml"))
+        assert seen["mem"] == "128GB"
+
+    def test_slurm_treats_auto_as_unset(self, tmp_path):
+        from credit.cli._common import _SLURM_DEFAULTS
+        from credit.cli._submit import _resolve_slurm_opts
+
+        args = self._args(tmp_path, {}, mem="Auto", gpus=None)
+        assert _resolve_slurm_opts(args, {"mem": "auto"}).mem == _SLURM_DEFAULTS["mem"]
+
+
+class TestArcoLevels:
+    from credit.cli._begin import _arco_levels
+
+    _arco_levels = staticmethod(_arco_levels)
+
+    def _answers(self, monkeypatch, *answers):
+        it = iter(answers)
+        monkeypatch.setattr("builtins.input", lambda _: next(it))
+
+    def test_choices(self, monkeypatch):
+        from credit.cli._common import _DEFAULT_LEVELS_16
+
+        self._answers(monkeypatch, "", "WXFormer", "137, 10 50,10", "16")
+        assert self._arco_levels() == list(range(1, 138))
+        assert self._arco_levels() == _DEFAULT_LEVELS_16
+        assert self._arco_levels() == [10, 50, 137]
+        assert self._arco_levels() == [16]  # a number is a level, not a count
+
+    def test_invalid_input_reprompts(self, monkeypatch, capsys):
+        self._answers(monkeypatch, "0", "138", "ten", "1,x", " , ", "all")
+        assert self._arco_levels() == list(range(1, 138))
+        assert capsys.readouterr().out.count("between 1 and 137") == 5
+
+
+# ===========================================================================
+# Account handling for SLURM and the job plan (issue #486)
+# ===========================================================================
+
+
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_slurm_blank_cli_account_falls_through(monkeypatch, blank):
+    from credit.cli._submit import _resolve_slurm_opts
+
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    fields = ("walltime", "gpus", "nodes", "cpus", "mem", "queue", "gpu_type", "conda_env")
+    args = argparse.Namespace(cluster="perlmutter", account=blank, **dict.fromkeys(fields))
+    assert _resolve_slurm_opts(args, {}).account == "m0000_g"
+
+
+@pytest.mark.parametrize(
+    ("scheduler", "account", "expected"),
+    [
+        ("pbs", "ABCD0001", "ABCD0001"),
+        ("slurm", "m0000_g", "m0000_g"),
+        ("slurm", None, "default allocation"),  # used to print "None"
+        ("pbs", None, "<UNSET>"),
+    ],
+)
+def test_job_plan_account_label(scheduler, account, expected):
+    from credit.cli._submit import _account_label
+
+    assert expected in _account_label(argparse.Namespace(scheduler=scheduler, account=account))

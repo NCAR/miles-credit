@@ -320,11 +320,12 @@ inference:
 
 pbs: #derecho
   conda: "credit-derecho"
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "wxformer_1deg_6hr_gen2"
   walltime: "12:00:00"
   nodes: 8
   ncpus: 64
   ngpus: 4
-  mem: '480GB'
+  mem: 'auto'               # size from this config (train/preprocess), never below the site default;
+                             # or a fixed request such as '480GB'. `credit check` reports the estimate.
   queue: 'main'

@@ -12,7 +12,7 @@ pbs:
   batch:
     N: "echo-vit"
     l: ["select=1:ncpus=8:ngpus=1:mem=128GB:cpu_type=milan", "walltime=12:00:00", "gpu_type=a100"]
-    A: "NAML0001"
+    A: "YOUR_ACCOUNT"  # your PBS project code
     q: "casper"
     o: "out"
     e: "out"
