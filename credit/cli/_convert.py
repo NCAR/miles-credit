@@ -148,11 +148,12 @@ def _zarr_dims(glob_path: str) -> list[str] | None:
         return None
 
 
-def _write_reload_config(config_path: str) -> str:
+def _write_reload_config(config_path: str, out_path: str | None = None) -> str:
     """Patch trainer reload fields and write a reload config next to the checkpoint.
 
     Reads the YAML at *config_path*, sets the five fields required for a clean
-    resume, and writes the result to ``<save_loc>/config_reload.yml``.
+    resume, and writes the result to *out_path* (default ``<save_loc>/config_reload.yml``;
+    ``credit submit`` passes the run directory's ``config_reload.yml``).
 
     Returns the path to the written reload config.
     """
@@ -166,9 +167,12 @@ def _write_reload_config(config_path: str) -> str:
     trainer["load_scheduler"] = True
     trainer["reload_epoch"] = True
 
-    save_loc = os.path.expandvars(conf.get("save_loc", "."))
-    os.makedirs(save_loc, exist_ok=True)
-    reload_path = os.path.join(save_loc, "config_reload.yml")
+    if out_path:
+        reload_path = out_path
+    else:
+        save_loc = os.path.expandvars(conf.get("save_loc", "."))
+        os.makedirs(save_loc, exist_ok=True)
+        reload_path = os.path.join(save_loc, "config_reload.yml")
 
     with open(reload_path, "w") as f:
         _yaml_dump(conf, f)

@@ -1,0 +1,1674 @@
+"""Tests for ``python -m credit.remote``: every verb through a real subprocess, plus the delta readers.
+
+No real scheduler is used: PBS / SLURM tools are fake shell scripts on a temp
+dir that ``CREDIT_PBS_BIN`` / ``CREDIT_SLURM_BIN`` point to, and the ``local``
+scheduler runs a fake trainer through ``CREDIT_REMOTE_LOCAL_CMD``.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+
+import pytest
+import yaml
+
+from credit import runs
+from credit.remote import _delta, _sched
+from tests.conftest import REPO, SENTINEL, _write_exe, call, make_config, make_run, submit_req
+
+# ---------------------------------------------------------------------------
+# Helpers (the `env` fixture, `call`, `make_config`, `make_run` and `submit_req` are in conftest.py)
+# ---------------------------------------------------------------------------
+
+
+def ev_line(type_, job="11", **data):
+    return runs.encode_line(runs.make_event(type_, data, "proc", job=job))
+
+
+def wait_for(predicate, timeout=30.0, interval=0.1):
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = predicate()
+        if value:
+            return value
+        time.sleep(interval)
+    raise AssertionError("timed out")
+
+
+# ---------------------------------------------------------------------------
+# Envelope and framing
+# ---------------------------------------------------------------------------
+
+
+def test_envelope_framing_and_errors(env):
+    result = call("hello")
+    assert result["protocol"] == 1 and result["system"] in ("local", "casper", "derecho", "ncar", "perlmutter")
+    assert result["credit_home"] == str(env["home"] / ".credit")
+    assert result["repo_root"] == REPO
+    assert result["schedulers"]["pbs"] is True
+    assert os.path.realpath(env["home"]) in result["allowed_roots"]
+    assert call("nope", check_ok=False)["error"]["code"] == "bad_request"
+    assert call("hello", raw=b"[1, 2]", check_ok=False)["error"]["code"] == "bad_request"
+    assert call("hello", raw=b"{not json", check_ok=False)["error"]["code"] == "bad_request"
+    assert call("hello", raw=b"")["protocol"] == 1  # empty stdin means {}
+    assert call("render", {}, check_ok=False)["error"]["code"] == "unsupported"
+
+
+def test_stdout_noise_goes_to_stderr(env):
+    code = "import sys; from credit.remote import main; print('noise from bashrc'); sys.exit(main(['hello']))"
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", code], input=b"{}", capture_output=True, env=os.environ.copy(), timeout=60
+    )
+    # noise printed before credit.remote starts (.bashrc) precedes the sentinel line clients look for
+    assert proc.stdout.startswith(b"noise from bashrc\n" + SENTINEL) and proc.stdout.endswith(b"}\n")
+    code2 = "import sys; from credit.remote import _Out; o = _Out(); print('late noise', flush=True); o.send({'x': 1})"
+    proc = subprocess.run([sys.executable, "-P", "-c", code2], capture_output=True, env=os.environ.copy(), timeout=60)
+    assert proc.stdout == SENTINEL + b'{"x":1}\n' and b"late noise" in proc.stderr
+
+
+LIGHT_VERBS = {
+    "hello": {},
+    "sync": {"ledger_offset": 0},
+    "ls": None,
+    "read": None,
+    "plan": None,
+    "examples": {},
+    "docs": {},
+}
+
+
+@pytest.mark.parametrize("verb", sorted(LIGHT_VERBS))
+def test_light_verbs_do_not_import_heavy_modules(env, verb):
+    cfg = make_config(env)
+    req = LIGHT_VERBS[verb]
+    if verb == "ls":
+        req = {"path": str(cfg.parent)}
+    elif verb == "read":
+        req = {"path": str(cfg)}
+    elif verb == "plan":
+        req = {"kind": "rollout", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {}}
+    code = (
+        "import sys, json; from credit.remote import main; rc = main([sys.argv[1]]); "
+        "bad = sorted({m.split('.')[0] for m in sys.modules} & {'torch', 'numpy', 'xarray', 'pandas'}); "
+        "sys.stderr.write('HEAVY=' + json.dumps(bad))"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", code, verb],
+        input=json.dumps(req).encode(),
+        capture_output=True,
+        env=os.environ.copy(),
+        timeout=60,
+    )
+    assert b'"ok":true' in proc.stdout, proc.stdout
+    assert proc.stderr.decode().rsplit("HEAVY=", 1)[1] == "[]"
+
+
+# ---------------------------------------------------------------------------
+# read / ls / write and path scope
+# ---------------------------------------------------------------------------
+
+
+def test_read_text_binary_and_ranges(env):
+    f = env["home"] / "notes.txt"
+    f.write_text("hello world\n")
+    r = call("read", {"path": str(f)})
+    assert r["data"] == "hello world\n" and r["encoding"] == "utf-8" and r["eof"]
+    assert r["sha256"] == runs.sha256_file(str(f)) and r["size"] == 12
+    r = call("read", {"path": str(f), "offset": 6, "length": 3})
+    assert r["data"] == "wor" and not r["eof"]
+    b = env["home"] / "blob.bin"
+    b.write_bytes(b"\x00\x01\x02")
+    r = call("read", {"path": str(b)})
+    assert r["encoding"] == "base64" and r["data"] == "AAEC"
+    assert call("read", {"path": str(env["home"] / "nope")}, check_ok=False)["error"]["code"] == "not_found"
+
+
+def test_ls(env):
+    d = env["home"] / "dir"
+    (d / "sub").mkdir(parents=True)
+    for name in ("a.yml", "b.yml", "c.txt", ".hidden.yml"):
+        (d / name).write_text("x")
+    r = call("ls", {"path": str(d)})
+    assert [(e["name"], e["type"]) for e in r["entries"]] == [
+        ("a.yml", "file"),
+        ("b.yml", "file"),
+        ("c.txt", "file"),
+        ("sub", "dir"),
+    ]
+    r = call("ls", {"path": str(d), "pattern": "*.yml", "limit": 1})
+    assert [e["name"] for e in r["entries"]] == ["a.yml"] and r["truncated"]
+    assert call("ls", {"path": str(d), "pattern": "sub/*"}, check_ok=False)["error"]["code"] == "bad_request"
+
+
+def test_path_scope_denials(env):
+    outside = env["tmp"] / "outside"
+    outside.mkdir()
+    (outside / "secret.yml").write_text("s: 1\n")
+    (env["home"] / "escape").symlink_to(outside)
+    (env["home"] / ".ssh").mkdir()
+    (env["home"] / ".ssh" / "config").write_text("Host x\n")
+    denied = [
+        ("read", {"path": str(outside / "secret.yml")}),
+        ("read", {"path": str(env["home"] / ".." / "outside" / "secret.yml")}),
+        ("read", {"path": str(env["home"] / "escape" / "secret.yml")}),
+        ("read", {"path": str(env["home"] / ".ssh" / "config")}),
+        ("ls", {"path": str(env["home"] / "escape")}),
+        ("ls", {"path": "/"}),
+        ("write", {"path": str(env["home"] / "escape" / "new.yml"), "text": "x", "if_sha256": None}),
+        ("write", {"path": str(env["home"] / "x.json"), "text": "{}", "if_sha256": None}),
+        ("write", {"path": str(env["home"] / ".credit" / "x.yml"), "text": "x", "if_sha256": None}),
+    ]
+    for verb, req in denied:
+        resp = call(verb, req, check_ok=False)
+        assert resp["error"]["code"] == "forbidden_path", (verb, req, resp)
+    assert not (outside / "new.yml").exists()
+
+
+def test_run_dir_readable_but_not_writable(env):
+    run_id, run_dir, _ = make_run(env)
+    r = call("read", {"path": os.path.join(run_dir, "run.json")})
+    assert json.loads(r["data"])["run_id"] == run_id
+    assert call("ls", {"path": os.path.join(run_dir, "events")})["entries"][0]["name"] == "submit.jsonl"
+    resp = call("write", {"path": os.path.join(run_dir, "config.yml"), "text": "x", "if_sha256": None}, check_ok=False)
+    assert resp["error"]["code"] == "forbidden_path"
+
+
+def test_write_conflicts_and_atomic_update(env):
+    path = env["home"] / "cfg" / "new.yml"
+    r = call("write", {"path": str(path), "text": "a: 1\n", "if_sha256": None})
+    assert path.read_text() == "a: 1\n" and r["sha256"] == runs.sha256_file(str(path))
+    assert (
+        call("write", {"path": str(path), "text": "a: 2\n", "if_sha256": None}, check_ok=False)["error"]["code"]
+        == "conflict"
+    )
+    resp = call("write", {"path": str(path), "text": "a: 2\n", "if_sha256": "0" * 64}, check_ok=False)
+    assert resp["error"]["code"] == "conflict" and path.read_text() == "a: 1\n"
+    r2 = call("write", {"path": str(path), "text": "a: 2\n", "if_sha256": r["sha256"]})
+    assert path.read_text() == "a: 2\n" and r2["sha256"] != r["sha256"]
+    resp = call("write", {"path": str(env["home"] / "gone.yml"), "text": "x", "if_sha256": r["sha256"]}, check_ok=False)
+    assert resp["error"]["code"] == "conflict"
+
+
+# ---------------------------------------------------------------------------
+# Delta readers: logs, csv, events
+# ---------------------------------------------------------------------------
+
+
+def test_read_log_collapses_tqdm_frames(tmp_path):
+    log = tmp_path / "job.o11"
+    log.write_bytes(
+        b"start\r\nEpoch 0:  10%|#\rEpoch 0:  20%|##\rEpoch 0: 100%|####\nnext line\nEpoch 1:   5%|\rEpoch 1:  7%|"
+    )
+    r = _delta.read_log(str(log), 0, 65536)
+    assert r["text"] == "start\nEpoch 0: 100%|####\nnext line\n"
+    assert r["current_frame"] == "Epoch 1:  7%|"
+    # the offset stops after the last \r, so the live frame is re-read next time
+    assert r["off"] == log.read_bytes().rfind(b"\r") + 1
+    with open(log, "ab") as f:
+        f.write(b"\rEpoch 1: 100%|####\ndone\n")
+    r2 = _delta.read_log(str(log), r["off"], 65536)
+    assert r2["text"] == "Epoch 1: 100%|####\ndone\n" and r2["current_frame"] is None
+
+
+def test_read_log_cap_skips_ahead_and_reset(tmp_path):
+    log = tmp_path / "job.o11"
+    log.write_bytes(b"".join(b"line %04d\n" % i for i in range(100)))
+    r = _delta.read_log(str(log), 0, 25)
+    assert r["truncated"] and r["text"] == "line 0098\nline 0099\n"
+    assert r["off"] == log.stat().st_size
+    log.write_bytes(b"new\n")
+    r = _delta.read_log(str(log), 1000, 65536)
+    assert r["reset"] and r["text"] == "new\n"
+
+
+def test_read_log_holds_back_a_trailing_cr(tmp_path):
+    log = tmp_path / "job.o11"
+    log.write_bytes(b"a\r")
+    r = _delta.read_log(str(log), 0, 65536)
+    assert r["off"] == 0 and r["text"] == ""
+    with open(log, "ab") as f:
+        f.write(b"\n")
+    assert _delta.read_log(str(log), 0, 65536)["text"] == "a\n"
+
+
+def test_find_log_pbs_naming(tmp_path):
+    # Casper's PBS with `-k eod` and `-o <dir>/` writes <jobid>.OU, not <jobname>.o<number>.
+    record = {"target": {"scheduler": "pbs", "log_dir": str(tmp_path)}}
+    assert _delta.find_log(record, "6460503") is None
+    (tmp_path / "6460503.casper-pbs.OU").write_text("log\n")
+    (tmp_path / "64605031.casper-pbs.OU").write_text("other job\n")
+    assert _delta.find_log(record, "6460503") == str(tmp_path / "6460503.casper-pbs.OU")
+    (tmp_path / "credit_gen2.o6460504").write_text("classic\n")
+    assert _delta.find_log(record, "6460504") == str(tmp_path / "credit_gen2.o6460504")
+
+
+def test_csv_delta_settle_rows_and_reset(tmp_path):
+    p = tmp_path / "training_log.csv"
+    p.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n")
+    now = time.time()
+    assert _delta.read_csv_delta(str(p), None, now=p.stat().st_mtime + 1) == (None, None, True)  # too fresh
+    d, cur, pending = _delta.read_csv_delta(str(p), None, now=now + 10)
+    assert not pending
+    assert d == {
+        "columns": ["index", "epoch", "train_loss"],
+        "rows": [[0.0, 0.0, 1.5], [1.0, 1.0, 1.2]],
+        "first_row": 0,
+        "reset": False,
+    }
+    p.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n2,2,nan\n3,3,")  # unterminated
+    assert _delta.read_csv_delta(str(p), cur, now=now + 10) == (None, cur, True)
+    p.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n2,2,nan\n")
+    d, cur, _ = _delta.read_csv_delta(str(p), cur, now=now + 20)
+    assert d["first_row"] == 2 and not d["reset"]
+    assert json.loads(runs.encode_line(d))["rows"] == [[2.0, 2.0, "NaN"]]  # NaN is encoded as a string
+    p.write_text("index,epoch,train_loss\n0,0,9.9\n")  # a new run reused save_loc
+    d, cur, _ = _delta.read_csv_delta(str(p), cur, now=now + 30)
+    assert d["reset"] and d["first_row"] == 0 and d["rows"] == [[0.0, 0.0, 9.9]]
+    p.write_text("index,epoch,valid_loss\n0,0,9.9\n")  # header changed
+    d, _, _ = _delta.read_csv_delta(str(p), cur, now=now + 40)
+    assert d["reset"]
+
+
+def test_a_new_run_starts_after_the_csv_rows_already_in_save_loc(env):
+    """Trial S4: a run in a save_loc with an earlier run's training_log.csv showed that run's epochs as its own."""
+    save = env["home"] / "exp" / "save"
+    save.mkdir(parents=True)
+    csv_path = save / "training_log.csv"
+    csv_path.write_text("index,epoch,train_loss\n0,0,1.5\n1,1,1.2\n")  # the previous run's two epochs
+    old = time.time() - 60
+    os.utime(csv_path, (old, old))
+    run_id, run_dir, _ = make_run(env, save=save)
+    assert runs.read_run(run_dir)["csv_baseline"]["rows"] == 2
+    d = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d["csv"] is None  # nothing of its own yet
+    with open(csv_path, "a") as f:  # resumed training appends
+        f.write("2,2,1.1\n")
+    os.utime(csv_path, (old + 1, old + 1))
+    d = call("sync", {"runs": {run_id: d["cursor"]}, "scheduler": False})["runs"][run_id]
+    assert d["csv"]["rows"] == [[2.0, 2.0, 1.1]] and not d["csv"]["reset"]
+    # A fresh (non-reload) run rewrites the file: every row is its own.
+    run2, _, _ = make_run(env, save=save)
+    csv_path.write_text("index,epoch,train_loss\n0,0,9.9\n1,1,9.1\n2,2,8.8\n")
+    os.utime(csv_path, (old + 2, old + 2))
+    d = call("sync", {"runs": {run2: None}, "scheduler": False})["runs"][run2]
+    assert d["csv"]["reset"] and [r[2] for r in d["csv"]["rows"]] == [9.9, 9.1, 8.8]
+
+
+def test_adopt_keeps_the_csv_history(env):
+    save = env["home"] / "old_run"
+    save.mkdir()
+    (save / "model.yml").write_text("save_loc: x\ntrainer: {epochs: 10, num_epoch: 5}\n")
+    (save / "training_log.csv").write_text("index,epoch,train_loss\n0,0,1.5\n")
+    os.utime(save / "training_log.csv", (time.time() - 60, time.time() - 60))
+    out = call("adopt", {"save_loc": str(save), "scheduler": "pbs"})
+    assert "csv_baseline" not in runs.read_run(out["run_dir"])
+    d = call("sync", {"runs": {out["run_id"]: None}, "scheduler": False})["runs"][out["run_id"]]
+    assert d["csv"]["rows"] == [[0.0, 0.0, 1.5]]
+
+
+def test_sync_cursor_resume_no_duplicates_no_gaps(env):
+    run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
+    proc = os.path.join(run_dir, "events", "11.proc.jsonl")
+    with open(proc, "wb") as f:
+        for i in range(5):
+            f.write(ev_line("train.progress", batch=i))
+        f.write(b'{"v":1,"ts":"2026')  # partial last line
+    open(env["tmp"] / "qstat.json", "w").write('{"Jobs": {}}')
+    r1 = call("sync", {"ledger_offset": 0, "progress": "all"})
+    assert [ln["run_id"] for ln in r1["ledger"]] == [run_id]
+    d1 = r1["runs"][run_id]
+    assert d1["run"]["run_id"] == run_id and not d1["missing"]
+    batches = [e["data"]["batch"] for e in d1["events"] if e["type"] == "train.progress"]
+    assert batches == [0, 1, 2, 3, 4]
+    assert all("file" in e and "off" in e for e in d1["events"])
+    assert d1["cursor"]["events"]["11.proc.jsonl"] == os.path.getsize(proc) - len(b'{"v":1,"ts":"2026')
+    # finish the partial line (it was not consumed), then add more
+    with open(proc, "r+b") as f:
+        f.truncate(d1["cursor"]["events"]["11.proc.jsonl"])
+        f.seek(0, 2)
+        for i in range(5, 8):
+            f.write(ev_line("train.progress", batch=i))
+    r2 = call("sync", {"ledger_offset": r1["ledger_offset"], "runs": {run_id: d1["cursor"]}})
+    assert r2["ledger"] == []
+    d2 = r2["runs"][run_id]
+    assert d2["run"] is None  # run.json unchanged
+    assert [e["data"]["batch"] for e in d2["events"]] == [5, 6, 7]
+    r3 = call("sync", {"ledger_offset": r2["ledger_offset"], "runs": {run_id: d2["cursor"]}})
+    assert r3["runs"][run_id]["events"] == []
+
+
+def test_sync_progress_modes_and_max_bytes(env):
+    run_id, run_dir, _ = make_run(env, jobs=["11.desched1"])
+    open(env["tmp"] / "qstat.json", "w").write('{"Jobs": {}}')
+    proc = os.path.join(run_dir, "events", "11.proc.jsonl")
+    with open(proc, "wb") as f:
+        for i in range(50):
+            f.write(ev_line("train.progress", batch=i))
+            f.write(ev_line("train.vars", values=[i]))
+        f.write(ev_line("checkpoint.saved", path="/x", epoch=0, kind="latest"))
+    latest = call("sync", {"runs": {run_id: None}, "progress": "latest", "scheduler": False})["runs"][run_id]
+    types = [e["type"] for e in latest["events"] if e["file"] == "11.proc.jsonl"]
+    assert sorted(types) == ["checkpoint.saved", "train.progress", "train.vars"]
+    assert [e["data"]["batch"] for e in latest["events"] if e["type"] == "train.progress"] == [49]
+    assert latest["cursor"]["events"]["11.proc.jsonl"] == os.path.getsize(proc)
+    assert call("sync", {"progress": "none"}, check_ok=False)["error"]["code"] == "bad_request"
+    # all + a small byte budget pages through without gaps or duplicates
+    seen, cursor, pages = [], None, 0
+    while True:
+        d = call("sync", {"runs": {run_id: cursor}, "max_bytes": 3000, "scheduler": False})["runs"][run_id]
+        seen += [(e["file"], e["off"]) for e in d["events"]]
+        cursor, pages = d["cursor"], pages + 1
+        if not d["more"]:
+            break
+    assert pages > 3
+    proc_offs = [off for f, off in seen if f == "11.proc.jsonl"]
+    assert len(proc_offs) == 101 and len(set(proc_offs)) == 101
+
+
+def test_sync_logs_csv_and_missing(env):
+    run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
+    (save / "logs" / "credit_gen2.o11").write_bytes(b"hello\nEpoch 0: 1%\rEpoch 0: 2%")
+    csv_path = save / "training_log.csv"
+    csv_path.write_text("index,epoch,train_loss\n0,0,1.5\n")
+    os.utime(csv_path, (time.time() - 60, time.time() - 60))
+    open(env["tmp"] / "qstat.json", "w").write('{"Jobs": {}}')
+    r = call("sync", {"runs": {run_id: None, "train-20990101T000000-dead": None}, "log_tail_bytes": 1000})
+    d = r["runs"][run_id]
+    assert d["logs"]["11"]["text"] == "hello\n" and d["logs"]["11"]["current_frame"] == "Epoch 0: 2%"
+    assert d["csv"]["rows"] == [[0.0, 0.0, 1.5]]
+    assert r["runs"]["train-20990101T000000-dead"]["missing"]
+    cursor = d["cursor"]
+    assert cursor["logs"]["11"]["off"] == len(b"hello\nEpoch 0: 1%\r")
+    # nothing new: no logs, no csv
+    d2 = call("sync", {"runs": {run_id: cursor}, "scheduler": False})["runs"][run_id]
+    assert d2["logs"] == {} and d2["csv"] is None and d2["events"] == []
+
+
+# ---------------------------------------------------------------------------
+# Scheduler queries (fixtures hand-written from the PBS Pro / SLURM docs)
+# ---------------------------------------------------------------------------
+
+# unverified against Derecho
+QSTAT_JSON = {
+    "timestamp": 1793400000,
+    "pbs_version": "2022.1.3",
+    "pbs_server": "desched1",
+    "Jobs": {
+        "1001.desched1": {
+            "Job_Name": "credit_gen2",
+            "job_state": "R",
+            "exec_host": "dec0123/0*64+dec0124/0*64",
+            "Resource_List": {"walltime": "12:00:00", "select": "2:ncpus=64:ngpus=4"},
+            "resources_used": {"walltime": "01:02:03"},
+            "comment": "Job run at Thu Oct 30 at 09:00 on (dec0123:ncpus=64)",
+        },
+        "1002.desched1": {
+            "job_state": "H",
+            "Hold_Types": "s",
+            "Resource_List": {"walltime": "12:00:00"},
+            "estimated": {"start_time": "Fri Oct 31 09:00:00 2026"},
+        },
+        "1000.desched1": {"job_state": "F", "Exit_status": 271, "Resource_List": {"walltime": "12:00:00"}},
+    },
+}
+
+# unverified against Derecho
+QSTAT_TEXT = """\
+Job Id: 1001.desched1
+    Job_Name = credit_gen2
+    job_state = R
+    exec_host = dec0123/0*64
+    Resource_List.walltime = 12:00:00
+    resources_used.walltime = 00:10:00
+    comment = Job run at Thu Oct 30 at 09:00 on (dec0123:ncpus=64)
+\t and more
+
+"""
+
+
+def test_query_pbs_batches_per_server_and_maps_states(env):
+    (env["tmp"] / "qstat.json").write_text(json.dumps(QSTAT_JSON))
+    ids = ["1000.desched1", "1001.desched1", "1002.desched1", "1003.desched1", "9.casper-pbs"]
+    states, errors = _sched.query_pbs(ids)
+    calls = env["calls"].read_text().splitlines()
+    assert calls == [
+        "qstat -x -f -F json 1000.desched1 1001.desched1 1002.desched1 1003.desched1",
+        "qstat -x -f -F json 9.casper-pbs",
+    ]
+    assert states["1001.desched1"]["state"] == "running"
+    assert states["1001.desched1"]["exec_host"] == "dec0123"
+    assert states["1001.desched1"]["walltime_used"] == "01:02:03"
+    assert states["1001.desched1"]["walltime_limit"] == "12:00:00"
+    assert states["1002.desched1"]["state"] == "held" and states["1002.desched1"]["hold_types"] == "s"
+    assert states["1002.desched1"]["estimated_start"].endswith("Z")
+    assert states["1000.desched1"] == {**states["1000.desched1"], "state": "finished", "exit_status": 271}
+    assert states["1003.desched1"]["state"] == "gone"
+    assert states["9.casper-pbs"]["state"] == "gone"  # same fixture, no such job there
+    assert errors == {}
+
+
+def test_query_pbs_text_fallback():
+    jobs = _sched.parse_qstat_text(QSTAT_TEXT)
+    attrs = jobs["1001.desched1"]
+    assert attrs["Resource_List"]["walltime"] == "12:00:00"
+    assert attrs["comment"].endswith("and more")
+    st = _sched._pbs_job_state(attrs)
+    assert st["state"] == "running" and st["walltime_used"] == "00:10:00"
+
+
+def test_query_pbs_reports_errors(env):
+    _write_exe(env["tmp"] / "bin" / "qstat", "#!/bin/bash\necho 'qstat: cannot connect to server' >&2\nexit 1\n")
+    states, errors = _sched.query_pbs(["1.desched1"])
+    assert states == {} and "cannot connect" in errors["desched1"]
+
+
+def test_query_slurm(env):
+    # unverified against Perlmutter
+    sacct = {
+        "jobs": [
+            {
+                "job_id": 77,
+                "state": {"current": ["RUNNING"], "reason": "None"},
+                "nodes": "nid001",
+                "time": {"elapsed": 3723, "limit": {"set": True, "number": 720}},
+                "exit_code": {"return_code": {"set": True, "number": 0}},
+            },
+            {"job_id": 78, "state": {"current": ["COMPLETED"]}, "exit_code": {"return_code": {"number": 0}}},
+        ]
+    }
+    (env["tmp"] / "sacct.json").write_text(json.dumps(sacct))
+    states, errors = _sched.query_slurm(["77", "78", "79"])
+    assert states["77"]["state"] == "running" and states["77"]["walltime_used"] == "01:02:03"
+    assert states["77"]["walltime_limit"] == "12:00:00" and states["77"]["exec_host"] == "nid001"
+    assert states["78"]["state"] == "finished" and states["78"]["exit_status"] == 0
+    assert states["79"]["state"] == "gone" and errors == {}
+    assert env["calls"].read_text().splitlines() == ["sacct --json -j 77,78,79"]
+
+
+def test_sync_skips_finished_jobs_and_queries_once(env):
+    (env["tmp"] / "qstat.json").write_text(json.dumps(QSTAT_JSON))
+    run_id, run_dir, _ = make_run(env, jobs=["1000.desched1", "1001.desched1", "1002.desched1"])
+    runs.append_line(
+        os.path.join(run_dir, "events", "1000.script.jsonl"),
+        runs.make_event("job.exited", {"code": 0}, "script", job="1000"),
+    )
+    r = call("sync", {"runs": {run_id: None}})
+    assert set(r["scheduler"]) == {"1001.desched1", "1002.desched1"}
+    assert env["calls"].read_text().splitlines() == ["qstat -x -f -F json 1001.desched1 1002.desched1"]
+
+
+# ---------------------------------------------------------------------------
+# plan / submit / cancel with fake PBS and SLURM
+# ---------------------------------------------------------------------------
+
+
+def test_pbs_plan_is_pure_and_submit_chains_on_command_line(env):
+    cfg = make_config(env)
+    save = env["home"] / "exp" / "save"
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"gpus": 4}}
+    plan = call("plan", req)["plan"]
+    assert not save.exists()  # plan is pure
+    assert len(plan["jobs"]) == 2 and plan["jobs"][1]["depends_on_index"] == 1
+    run_dir = plan["run_dir"]
+    assert plan["jobs"][0]["config"] == os.path.join(run_dir, "config.yml")
+    assert plan["jobs"][1]["config"] == os.path.join(run_dir, "config_reload.yml")
+    for job in plan["jobs"]:
+        script = job["script"]
+        assert "depend=afterok" not in script
+        assert f"export CREDIT_RUN_DIR={run_dir}" in script and "export CREDIT_JOB_KEY=${PBS_JOBID%%.*}" in script
+        assert f"#PBS -o {save}/logs" in script and "job.started" in script and "trap _credit_on_term TERM" in script
+        assert script.index("#PBS -q") < script.index("export CREDIT_RUN_ID")  # directives stay first
+        assert subprocess.run(["bash", "-n"], input=script.encode()).returncode == 0
+    assert plan["target"]["server"] == "desched1" and plan["target"]["queue"] == "main@desched1"
+    assert plan["gpu_hours_estimate"] == 12 * 4 * 2
+    assert plan["log_dir"] == str(save / "logs") and plan["request"]["run_id"] == plan["run_id"]
+    assert plan["cli"].startswith("credit submit --cluster derecho -c ") and "--chain 2" in plan["cli"]
+    # deterministic: same request + run_id gives the same scripts
+    again = call("plan", plan["request"])["plan"]
+    assert again["scripts_sha256"] == plan["scripts_sha256"]
+
+    out = call("submit", submit_req(plan))
+    assert out["errors"] == [] and [j["job_id"] for j in out["jobs"]] == ["1001.desched1", "1002.desched1"]
+    assert env["calls"].read_text().splitlines() == [
+        f"qsub -N {plan['run_id']}-1 {run_dir}/scripts/job-1.sh",
+        f"qsub -N {plan['run_id']}-2 -W depend=afterok:1001.desched1 {run_dir}/scripts/job-2.sh",
+    ]
+    record = runs.read_run(run_dir)
+    assert [j["depends_on"] for j in record["jobs"]] == [None, "1001.desched1"]
+    assert record["epochs_total"] == 4 and record["epochs_per_job"] == 2 and record["created_by"] == "mcp"
+    assert os.path.exists(os.path.join(run_dir, "config_reload.yml"))
+    assert yaml.safe_load(open(os.path.join(run_dir, "config_reload.yml")))["trainer"]["load_weights"] is True
+    assert not os.path.exists(save / "config_reload.yml")
+    assert (save / "logs").is_dir()
+    lines = runs.read_lines(os.path.join(run_dir, "events", "submit.jsonl"))[0]
+    assert [ev["type"] for _, _, ev in lines] == [
+        "run.created",
+        "job.submitting",
+        "job.submitted",
+        "job.submitting",
+        "job.submitted",
+    ]
+    assert runs.find_run(plan["run_id"])["created_by"] == "mcp"
+
+    # idempotent
+    again = call("submit", submit_req(plan))
+    assert again["already_submitted"] and len(again["jobs"]) == 2
+    assert len(env["calls"].read_text().splitlines()) == 2
+
+
+_CLI_VS_REMOTE = [
+    ("train", "pbs", "derecho", [], {}),
+    ("train", "pbs", "derecho", ["--reload", "--chain", "1", "--gpus", "2"], {"reload": True, "chain": 1, "gpus": 2}),
+    ("train", "slurm", "perlmutter", ["--nodes", "2"], {"nodes": 2}),
+    ("preprocess", "pbs", "derecho", ["--walltime", "01:00:00"], {"walltime": "01:00:00"}),
+    ("rollout", "pbs", "derecho", ["--jobs", "2"], {"jobs": 2}),
+    ("realtime", "slurm", "horizon", ["--init-time", "2024-01-15T00", "--steps", "8"], {"init_time": "2024-01-15T00", "steps": 8}),
+]  # fmt: skip
+
+
+@pytest.mark.parametrize("kind, scheduler, cluster, argv, options", _CLI_VS_REMOTE)
+def test_cli_submit_and_remote_submit_write_the_same_run(env, kind, scheduler, cluster, argv, options):
+    """``credit submit`` and ``credit.remote plan`` + ``submit`` of one config give the same scripts and run record.
+
+    What differs is only what the CLI has always done on top: it submits a copy of each
+    script from ``<save_loc>/pbs_scripts/`` (``slurm_scripts/``) with the ``afterok``
+    dependency written into the script and the job name the script sets, where
+    ``credit.remote`` puts both on the ``qsub``/``sbatch`` command line.
+    """
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import _submit
+
+    cfg = make_config(env)
+    save = env["home"] / "exp" / "save"
+    cli_argv = ["submit", "--cluster", cluster, "--scheduler", scheduler, "--mode", kind, "-c", str(cfg), *argv]
+    _submit(_build_parser().parse_args(cli_argv))
+    cli_calls = env["calls"].read_text().splitlines()
+    env["calls"].unlink()
+    (cli_entry,) = runs.ledger_index().values()
+
+    req = {"kind": kind, "config": str(cfg), "scheduler": scheduler, "cluster": cluster, "options": options}
+    plan = call("plan", req)["plan"]
+    out = call("submit", submit_req(plan))
+    assert out["errors"] == []
+
+    cli_dir, remote_dir = cli_entry["run_dir"], plan["run_dir"]
+    cli_rec, remote_rec = runs.read_run(cli_dir), runs.read_run(remote_dir)
+    assert len(cli_rec["jobs"]) == len(remote_rec["jobs"]) == len(plan["jobs"])
+
+    def same(text):
+        return text.replace(cli_rec["run_id"], remote_rec["run_id"])
+
+    depend = "#SBATCH --dependency=afterok:" if scheduler == "slurm" else "#PBS -W depend=afterok:"
+    for cli_job, remote_job, planned in zip(cli_rec["jobs"], remote_rec["jobs"], plan["jobs"]):
+        cli_script = open(os.path.join(cli_dir, cli_job["script"])).read()
+        remote_script = open(os.path.join(remote_dir, remote_job["script"])).read()
+        assert remote_script == planned["script"]
+        if cli_job["depends_on"]:
+            assert f"{depend}{cli_job['depends_on']}\n" in cli_script
+        assert same("".join(ln for ln in cli_script.splitlines(True) if not ln.startswith(depend))) == remote_script
+        assert set(cli_job) == set(remote_job)
+        assert same(cli_job["config"]) == remote_job["config"]
+        assert bool(cli_job["depends_on"]) == bool(remote_job["depends_on"]) == bool(planned["depends_on_index"])
+
+    assert set(cli_rec) == set(remote_rec)
+    for key in ("kind", "name", "save_loc", "target", "epochs_total", "epochs_per_job", "config_sha256", "cancelled"):
+        assert cli_rec[key] == remote_rec[key], key
+    assert os.path.realpath(cli_rec["config"]) == os.path.realpath(remote_rec["config"])
+    assert (cli_rec["created_by"], remote_rec["created_by"]) == ("cli", "mcp")
+
+    def events(run_dir):
+        return [ev for _, _, ev in runs.read_lines(os.path.join(run_dir, "events", runs.SUBMIT_EVENTS))[0]]
+
+    cli_events, remote_events = events(cli_dir), events(remote_dir)
+    assert [e["type"] for e in cli_events] == [e["type"] for e in remote_events]
+    assert [e["data"]["job_name"] for e in remote_events if e["type"] == "job.submitting"] == [
+        f"{remote_rec['run_id']}-{j['index']}" for j in plan["jobs"]
+    ]
+    assert [e["data"]["job_name"] for e in cli_events if e["type"] == "job.submitting"] == [
+        j["job_name"] for j in _cli_plan_jobs(cli_argv, cli_rec["run_id"])
+    ]
+    assert os.path.exists(os.path.join(os.path.dirname(cli_dir), f"{cli_rec['run_id']}.submit.lock"))
+
+    copies = "slurm_scripts" if scheduler == "slurm" else "pbs_scripts"
+    tool = "sbatch --parsable" if scheduler == "slurm" else "qsub"
+    assert all(line.startswith(f"{tool} {save}/{copies}/submit_") for line in cli_calls)
+    assert len(cli_calls) == len(plan["jobs"])
+    assert all(f"{remote_dir}/scripts/job-" in line for line in env["calls"].read_text().splitlines())
+
+
+def _cli_plan_jobs(cli_argv, run_id):
+    """The jobs ``credit submit`` planned for *cli_argv* (re-planned with the same run id)."""
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import _cli_request, _plan
+
+    args = _build_parser().parse_args(cli_argv)
+    return _plan({**_cli_request(args), "run_id": run_id}, cli=args)["jobs"]
+
+
+def test_cli_plan_keeps_cli_only_behaviour(env, tmp_path):
+    """``_plan(..., cli=args)`` accepts what the CLI always has and a remote plan refuses."""
+    from credit.cli._parser import _build_parser
+    from credit.cli._submit import SubmitError, _cli_request, _plan
+
+    outside = tmp_path / "elsewhere"  # outside CREDIT_REMOTE_ALLOW
+    outside.mkdir()
+    cfg = outside / "config.yml"
+    cfg.write_text(yaml.safe_dump({"save_loc": str(outside / "save"), "pbs": {"conda": "/env", "queue": "main"}}))
+    argv = ["submit", "--cluster", "derecho", "-c", str(cfg), "--conda-env", "~/envs/my-env", "--chain", "2"]
+    args = _build_parser().parse_args([*argv, "--torchrun-args=--numa-binding=node"])
+    request = _cli_request(args)
+    with pytest.raises((SubmitError, runs.PathScopeError)):
+        _plan(request)
+    jobs = _plan(request, cli=args)["jobs"]
+    assert "conda activate ~/envs/my-env" in jobs[0]["script"]
+    assert "--numa-binding=node" in jobs[0]["script"]
+    assert "#PBS -W depend=afterok:<job_1_id>\n" in jobs[1]["script"] and jobs[1]["depend_placeholder"] == "<job_1_id>"
+    assert [j["job_name"] for j in jobs] == ["credit_gen2", "credit_gen2"]  # the script's #PBS -N
+
+
+def test_submit_conflicts(env):
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 1}}
+    plan = call("plan", req)["plan"]
+    bad = submit_req(plan)
+    bad["scripts_sha256"] = ["0" * 64]
+    assert call("submit", bad, check_ok=False)["error"]["code"] == "conflict"
+    cfg.write_text(cfg.read_text() + "# edited\n")
+    assert call("submit", submit_req(plan), check_ok=False)["error"]["code"] == "conflict"
+    assert not os.path.exists(plan["run_dir"])
+
+
+def test_plan_config_errors(env):
+    cfg = make_config(env)
+    no_pbs = yaml.safe_load(cfg.read_text())
+    no_pbs.pop("pbs")
+    cfg.write_text(yaml.safe_dump(no_pbs))
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {}}
+    assert call("plan", req, check_ok=False)["error"]["code"] == "config_error"
+    # options alone are enough
+    req["options"] = {"conda_env": "/opt/envs/credit", "account": "X"}
+    assert call("plan", req)["plan"]["target"]["account"] == "X"
+    req["options"]["queue"] = "casper"  # a Casper queue on Derecho
+    assert call("plan", req, check_ok=False)["error"]["code"] == "config_error"
+    rt = {
+        "kind": "realtime",
+        "config": str(cfg),
+        "scheduler": "pbs",
+        "cluster": "casper",
+        "options": {"conda_env": "e"},
+    }
+    assert call("plan", rt, check_ok=False)["error"]["code"] == "config_error"
+
+
+INJECTIONS = ["x\nqsub /glade/work/u/big.pbs", "x; rm -rf ~", "x $(id)", "x`id`", "x y", "-lselect=9", ""]
+
+
+@pytest.mark.parametrize(
+    "key, values",
+    [
+        ("account", INJECTIONS),
+        ("queue", INJECTIONS + ["main -l select=9", "main@desched1@x"]),
+        ("gpu_type", INJECTIONS + ["a100:ngpus=64"]),
+        ("qos", INJECTIONS),
+        ("constraint", INJECTIONS + ["gpu\n#SBATCH --nodes=64"]),
+        ("mem", INJECTIONS + ["64GB:ngpus=64", "64GB\n#PBS -l select=9"]),
+        ("conda_env", INJECTIONS + ["/opt/env\nqsub big.pbs", "/opt/env && qsub x"]),
+        ("init_time", INJECTIONS + ["2024-01-15T00\nqsub x", "2024-01-15 00"]),
+        ("launcher", INJECTIONS + ["srun"]),
+        ("resume_from", INJECTIONS + ["train-20260101T000000-abcd\nqsub x"]),
+        ("walltime", INJECTIONS + ["12:00:00\n#PBS -l select=99", "12h", "1-12:00:00", True]),
+        ("gpus", ["4", True, 0, -1, 2.5]),
+        ("nodes", ["2", 0]),
+        ("cpus", ["8"]),
+        ("chain", ["3", 0]),
+        ("jobs", [0, "2"]),
+        ("steps", ["40"]),
+        ("reload", ["yes", 1]),
+    ],
+)
+def test_plan_refuses_unsafe_option_values(env, key, values):
+    from credit import remote
+
+    cfg = make_config(env)
+    for value in values:
+        req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {key: value}}
+        with pytest.raises(remote.RemoteError) as exc:
+            remote.plan(req)
+        assert exc.value.code == "config_error" and f"options.{key}" in exc.value.message, (key, value)
+        assert exc.value.data == {"field": key}, (key, value)
+
+
+@pytest.mark.parametrize("key", ["env_setup", "modules", "torchrun", "select", "config"])
+def test_plan_refuses_unknown_option_keys(env, key):
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": {key: "x"}}
+    err = call("plan", req, check_ok=False)["error"]
+    assert err["code"] == "config_error" and f"unknown option {key!r}" in err["message"]
+    assert "config file" in err["message"]
+    assert err["data"] == {"field": key}
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho\nqsub x", "options": {}}
+    assert call("plan", req, check_ok=False)["error"]["code"] == "config_error"
+
+
+def test_plan_option_errors_name_their_field(env):
+    """``error.data.field`` names the bad option on the wire, so a form can mark it; other config errors have none."""
+    cfg = make_config(env)
+    base = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho"}
+    err = call("plan", {**base, "options": {"walltime": "12h"}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] == {"field": "walltime"}
+    err = call("plan", {**base, "options": {"walltime": "01:00:00", "bogus": 1}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] == {"field": "bogus"}
+    err = call("plan", {**base, "config": None, "options": {}}, check_ok=False)["error"]
+    assert err["code"] == "config_error" and err["data"] is None
+
+
+def test_plan_refuses_bad_torchrun_args_cleanly(env):
+    """A malformed ``pbs.torchrun_args`` is a config_error, not an exit of the verb process."""
+    cfg = make_config(env, pbs={"conda": "/opt/envs/credit", "account": "NAML0001", "torchrun_args": 3})
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {}}
+    err = call("plan", req, check_ok=False)["error"]
+    assert err["code"] == "config_error" and "pbs.torchrun_args must be a string" in err["message"]
+    assert "ERROR:" not in err["message"]
+
+
+def test_remote_plans_size_mem_auto_per_kind(env):
+    """``pbs.mem: auto`` is sized per run kind on the remote path too: preprocess has no validation loader, and
+    realtime keeps the default request (as ``credit submit`` does)."""
+    from credit.cli._common import auto_mem
+
+    variables = {"prognostic": {"vars_2D": [f"v{i}" for i in range(20)]}}
+    sized = {
+        "trainer": {"epochs": 4, "num_epoch": 2, "train_batch_size": 1, "thread_workers": 0, "valid_thread_workers": 0},
+        "model": {"image_height": 1, "image_width": 2**28},
+        "data": {"source": {"ERA5": {"variables": variables}}},
+    }
+    cfg = make_config(env, pbs={"conda": "/opt/envs/credit", "account": "NAML0001", "mem": "auto"}, **sized)
+    conf = yaml.safe_load(cfg.read_text())
+    train, pre = (auto_mem(conf, "casper", 1, "a100", include_validation=v).mem for v in (True, False))
+    assert train != pre  # the case only means something if validation changes the estimate
+
+    def mem(kind, **options):
+        req = {"kind": kind, "config": str(cfg), "scheduler": "pbs", "cluster": "casper",
+               "options": {"gpus": 1, "gpu_type": "a100", "queue": "casper", **options}}  # fmt: skip
+        return call("plan", req)["plan"]["target"]["mem"]
+
+    assert mem("train") == train
+    assert mem("preprocess") == pre
+    assert mem("realtime", init_time="2024-01-01T00") == "64GB"  # the Casper default for one GPU
+
+
+def test_build_config_without_torch_needs_a_dependency(monkeypatch):
+    import importlib
+
+    from credit import remote
+
+    _begin = importlib.import_module("credit.cli._begin")  # credit.cli re-exports a _begin function
+
+    def needs_torch(state):
+        raise ModuleNotFoundError("No module named 'torch'")
+
+    monkeypatch.setattr(_begin, "_build_config", needs_torch)
+    with pytest.raises(remote.RemoteError) as exc:
+        remote.build_config({"state": {"preset": "wxformer"}})
+    assert exc.value.code == "needs_dependency"
+
+
+def test_plan_accepts_ordinary_option_values(env):
+    from credit import remote
+
+    cfg = make_config(env)
+    opts = {
+        "account": "NAML0001",
+        "queue": "main@desched1",
+        "gpu_type": "a100_80gb",
+        "mem": "480GB",
+        "conda_env": "/glade/work/u/conda-envs/credit-2.1",
+        "walltime": "06:30:00",
+        "gpus": 4,
+        "nodes": 2,
+        "cpus": 64,
+        "chain": 2,
+        "reload": False,
+        "launcher": "pbsdsh",
+        "qos": None,
+    }
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": opts}
+    plan = remote.plan(req)["plan"]
+    assert plan["gpu_hours_estimate"] == 6.5 * 2 * 4 * 2
+    slurm = {"constraint": "gpu&hbm80g", "qos": "regular", "account": "m1234", "walltime": "1-00:00", "gpus": 4}
+    req = {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": slurm}
+    plan = remote.plan(req)["plan"]
+    assert "#SBATCH --constraint=gpu&hbm80g" in plan["jobs"][0]["script"]
+    assert plan["gpu_hours_estimate"] == 24 * 4 * len(plan["jobs"])
+
+
+@pytest.mark.parametrize(
+    "walltime, scheduler, hours",
+    [
+        ("600", "pbs", 600 / 3600),
+        ("10:00", "pbs", 10 / 60),
+        ("12:00:00", "pbs", 12),
+        (43200, "pbs", 12),  # YAML reads an unquoted 12:00:00 as base-60 seconds
+        ("600", "slurm", 10),  # minutes
+        (600, "slurm", 10),
+        ("90:30", "slurm", 90 / 60 + 30 / 3600),  # MM:SS
+        ("12:00:00", "slurm", 12),
+        ("2-00", "slurm", 48),  # D-HH
+        ("1-06:30", "slurm", 30.5),  # D-HH:MM
+        ("1-00:00:36", "slurm", 24.01),  # D-HH:MM:SS
+        ("UNLIMITED", "slurm", None),
+        ("12h", "pbs", None),
+        ("1-12:00:00", "pbs", None),
+        ("", "pbs", None),
+        (None, "slurm", None),
+        (True, "pbs", None),
+        ("1:2:3:4", "slurm", None),
+    ],
+)
+def test_walltime_hours_per_scheduler(walltime, scheduler, hours):
+    import importlib
+
+    got = importlib.import_module("credit.cli._submit")._walltime_hours(walltime, scheduler)
+    assert got == (None if hours is None else pytest.approx(hours))
+
+
+def test_slurm_estimate_reads_bare_walltime_as_minutes(env):
+    cfg = make_config(env)
+    opts = {"walltime": "600", "gpus": 4, "chain": 1}
+    slurm = call(
+        "plan", {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": opts}
+    )
+    assert slurm["plan"]["gpu_hours_estimate"] == 10 * 4
+    pbs = call("plan", {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": opts})
+    assert pbs["plan"]["gpu_hours_estimate"] == round(600 / 3600 * 4, 2)
+
+
+def test_plan_every_kind_builds_valid_scripts(env):
+    cfg = make_config(env)
+    for scheduler, cluster in (("pbs", "casper"), ("pbs", "derecho"), ("slurm", "perlmutter")):
+        for kind, opts in (
+            ("preprocess", {}),
+            ("rollout", {"jobs": 2}),
+            ("realtime", {"init_time": "2024-01-15T00", "steps": 4}),
+            ("train", {"nodes": 2, "launcher": "pbsdsh"} if cluster == "derecho" else {}),
+        ):
+            opts = {**opts, "queue": "casper"} if cluster == "casper" else opts
+            req = {"kind": kind, "config": str(cfg), "scheduler": scheduler, "cluster": cluster, "options": opts}
+            plan = call("plan", req)["plan"]
+            for job in plan["jobs"]:
+                assert "export CREDIT_RUN_ID=" in job["script"], (scheduler, cluster, kind)
+                assert subprocess.run(["bash", "-n"], input=job["script"].encode()).returncode == 0
+            if kind == "rollout":
+                assert len(plan["jobs"]) == 2 and plan["warnings"]
+
+
+def test_slurm_submit_chain_dependency(env):
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "slurm", "cluster": "perlmutter", "options": {}}
+    plan = call("plan", req)["plan"]
+    assert "--dependency" not in plan["jobs"][1]["script"]
+    assert "export CREDIT_JOB_KEY=${SLURM_JOB_ID}" in plan["jobs"][0]["script"]
+    out = call("submit", submit_req(plan))
+    calls = env["calls"].read_text().splitlines()
+    run_id = plan["run_id"]
+    assert (
+        calls[1]
+        == f"sbatch --parsable --job-name={run_id}-2 --dependency=afterok:77 {plan['run_dir']}/scripts/job-2.sh"
+    )
+    assert out["jobs"][0]["job_key"] == "77"
+
+
+def test_submit_partial_failure_keeps_earlier_jobs(env):
+    cfg = make_config(env)
+    _write_exe(
+        env["tmp"] / "bin" / "qsub",
+        f"""\
+        #!/bin/bash
+        echo "qsub $*" >> {env["calls"]}
+        if [[ "$*" == *depend* ]]; then echo "qsub: Job violates queue limits" >&2; exit 1; fi
+        echo 1001.desched1
+        """,
+    )
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 3}}
+    plan = call("plan", req)["plan"]
+    out = call("submit", submit_req(plan))
+    assert [j["job_id"] for j in out["jobs"]] == ["1001.desched1"]
+    assert len(out["errors"]) == 2 and "queue limits" in out["errors"][0]
+    assert len(runs.read_run(plan["run_dir"])["jobs"]) == 1
+
+
+def test_cancel_pbs(env):
+    (env["tmp"] / "qstat.json").write_text(json.dumps(QSTAT_JSON))
+    run_id, run_dir, _ = make_run(env, jobs=["1001.desched1", "1002.desched1"])
+    out = call("cancel", {"run_id": run_id, "scope": "pending"})
+    assert out == {"cancelled": ["1002.desched1"], "errors": {}}
+    assert "qdel 1002.desched1" in env["calls"].read_text()
+    record = runs.read_run(run_dir)
+    assert record["cancelled"]["scope"] == "pending" and record["cancelled"]["job_ids"] == ["1002.desched1"]
+    out = call("cancel", {"run_id": run_id, "scope": "all"})
+    assert set(out["cancelled"]) == {"1001.desched1", "1002.desched1"}
+    assert call("cancel", {"run_id": "train-20990101T000000-dead"}, check_ok=False)["error"]["code"] == "not_found"
+
+
+def test_resume_from_counts_remaining_epochs(env):
+    run_id, run_dir, save = make_run(env)
+    (save / "training_log.csv").write_text("index,epoch,train_loss\n0,0,1.0\n")
+    req = {"kind": "train", "scheduler": "pbs", "cluster": "derecho", "options": {"resume_from": run_id}}
+    plan = call("plan", req)["plan"]
+    assert plan["config"] == os.path.join(run_dir, "config.yml") and plan["parent_run_id"] == run_id
+    assert len(plan["jobs"]) == 2  # ceil((4 - 1) / 2)
+    assert all(j["config"].endswith("config_reload.yml") for j in plan["jobs"])
+    out = call("submit", submit_req(plan))
+    assert runs.read_run(out["run_dir"])["parent_run_id"] == run_id
+    assert runs.find_run(out["run_id"])["parent_run_id"] == run_id
+
+
+# ---------------------------------------------------------------------------
+# The local scheduler, end to end
+# ---------------------------------------------------------------------------
+
+FAKE_TRAINER = """\
+import os, sys, time
+from credit.events import EventSink
+
+sink = EventSink(conf={"events": {"progress_every_s": 0}})
+sink.process_started(1)
+results = {"train_loss": []}
+for i in range(5):
+    results["train_loss"].append(1.0 / (i + 1))
+    sys.stdout.write(f"\\rEpoch 0: {i + 1}/5 loss {results['train_loss'][-1]:.3f}")
+    sys.stdout.flush()
+    sink.train_progress(0, results, i + 1, 5, lr=0.1)
+sys.stdout.write("\\n")
+print("args", " ".join(sys.argv[1:3]))
+sink.emit("train.stopped", {"reason": "completed", "epoch": 0})
+deadline = time.time() + float(os.environ.get("FAKE_SLEEP", "0"))
+while time.time() < deadline:
+    time.sleep(0.05)
+"""
+
+
+def _local_plan(env, monkeypatch, sleep="0"):
+    fake = env["tmp"] / "fake_trainer.py"
+    fake.write_text(FAKE_TRAINER)
+    monkeypatch.setenv("CREDIT_REMOTE_LOCAL_CMD", f"{sys.executable} {fake}")
+    monkeypatch.setenv("FAKE_SLEEP", sleep)
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "local", "options": {"chain": 1}}
+    return call("plan", req)["plan"]
+
+
+def test_local_lifecycle(env, monkeypatch):
+    plan = _local_plan(env, monkeypatch)
+    assert "export CREDIT_JOB_KEY=local-$$" in plan["jobs"][0]["script"]
+    assert plan["target"]["scheduler"] == "local"
+    out = call("submit", submit_req(plan))
+    (job,) = out["jobs"]
+    assert job["job_id"].startswith("local-")
+    run_id, run_dir = out["run_id"], out["run_dir"]
+
+    def finished():
+        return _delta.job_finished(run_dir, job["job_key"])
+
+    assert wait_for(finished)["code"] == 0
+    r = call("sync", {"ledger_offset": 0, "progress": "all"})
+    d = r["runs"][run_id]
+    types = [e["type"] for e in d["events"]]
+    for t in ("run.created", "job.submitted", "job.started", "process.started", "train.progress", "job.exited"):
+        assert t in types, (t, types)
+    assert len([t for t in types if t == "train.progress"]) == 5
+    log = d["logs"][job["job_key"]]
+    assert "Epoch 0: 5/5 loss 0.200\n" in log["text"] and "Epoch 0: 1/5" not in log["text"]
+    assert "args train -c\n" in log["text"]
+    assert job["job_id"] not in r["scheduler"]  # final per the markers
+    # backfill with only the last progress line
+    latest = call("sync", {"runs": {run_id: None}, "progress": "latest", "scheduler": False})["runs"][run_id]
+    assert [e["type"] for e in latest["events"]].count("train.progress") == 1
+    hist = call("history", {"run_id": run_id, "fields": ["loss.mean", "lr"], "buckets": 3})
+    assert hist["points"] == 5 and len(hist["t"]) <= 3 and hist["fields"]["lr"]["max"][0] == 0.1
+    logs = call("logs", {"run_id": run_id, "grep": "^args"})
+    assert logs["text"] == "args train -c\n" and logs["job_key"] == job["job_key"]
+    status = subprocess.run(
+        [sys.executable, "-m", "credit.cli", "status", "--json"], capture_output=True, env=os.environ.copy(), timeout=60
+    )
+    (summary,) = json.loads(status.stdout)
+    assert summary["run_id"] == run_id and summary["state"] == "completed"
+
+
+def test_local_cancel_writes_signal_marker(env, monkeypatch):
+    plan = _local_plan(env, monkeypatch, sleep="60")
+    out = call("submit", submit_req(plan))
+    (job,) = out["jobs"]
+    run_dir = out["run_dir"]
+    wait_for(lambda: os.path.exists(os.path.join(run_dir, "events", f"{job['job_key']}.proc.jsonl")))
+    states, _ = _sched.query([("local", job["job_id"], run_dir)])
+    assert states[job["job_id"]]["state"] == "running"
+    res = call("cancel", {"run_id": out["run_id"], "scope": "all"})
+    assert res["cancelled"] == [job["job_id"]]
+    done = wait_for(lambda: _delta.job_finished(run_dir, job["job_key"]))
+    assert done["signal"] == "TERM"
+    wait_for(lambda: (_delta.job_finished(run_dir, job["job_key"]) or {}).get("code") is not None)
+    pid = int(job["job_id"].split("-")[1])
+    wait_for(lambda: not _sched._pid_alive(pid))
+    types = [ev["type"] for _, _, ev in runs.read_lines(os.path.join(run_dir, "events", "submit.jsonl"))[0]]
+    assert types[-1] == "run.cancelled"
+
+
+# ---------------------------------------------------------------------------
+# follow
+# ---------------------------------------------------------------------------
+
+
+class _Follower:
+    def __init__(self):
+        self.proc = subprocess.Popen(
+            [sys.executable, "-P", "-m", "credit.remote", "follow"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=os.environ.copy(),
+        )
+        self.frames = []
+        self.lock = threading.Lock()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        for line in self.proc.stdout:
+            if line.startswith(SENTINEL):
+                with self.lock:
+                    self.frames.append(json.loads(line[len(SENTINEL) :]))
+
+    def send(self, msg):
+        self.proc.stdin.write((json.dumps(msg) + "\n").encode())
+        self.proc.stdin.flush()
+
+    def wait(self, predicate, timeout=20):
+        def find():
+            with self.lock:
+                return next((f for f in self.frames if predicate(f)), None)
+
+        return wait_for(find, timeout=timeout, interval=0.05)
+
+
+def test_follow_frames_add_remove_and_eof(env):
+    run_a, dir_a, _ = make_run(env, jobs=["11.desched1"])
+    run_b, dir_b, _ = make_run(env, save=env["home"] / "exp" / "save_b", jobs=["12.desched1"])
+    proc_a = os.path.join(dir_a, "events", "11.proc.jsonl")
+    f = _Follower()
+    try:
+        assert f.wait(lambda fr: fr["type"] == "hello")["protocol"] == 1
+        f.send({"runs": {run_a: None}, "interval_s": 0.2, "log_tail_bytes": 4096})
+        first = f.wait(lambda fr: fr["type"] == "frame" and run_a in fr["runs"])
+        delta = first["runs"][run_a]
+        assert delta["run"]["run_id"] == run_a and "scheduler" not in first
+        with open(proc_a, "ab") as fh:
+            fh.write(ev_line("train.progress", batch=1))
+        fr = f.wait(
+            lambda fr: (
+                fr["type"] == "frame"
+                and any(e["type"] == "train.progress" for e in fr["runs"].get(run_a, {}).get("events", []))
+            )
+        )
+        assert fr["runs"][run_a]["run"] is None  # run.json did not change
+        f.send({"add": {run_b: None, "train-20990101T000000-dead": None}})
+        err = f.wait(lambda fr: fr["type"] == "error")
+        assert err["run_id"] == "train-20990101T000000-dead" and err["error"]["code"] == "not_found"
+        f.wait(lambda fr: fr["type"] == "frame" and run_b in fr["runs"])
+        f.send({"remove": [run_a]})
+        time.sleep(0.6)
+        with f.lock:
+            n = len(f.frames)
+        with open(proc_a, "ab") as fh:
+            fh.write(ev_line("train.progress", batch=2))
+        time.sleep(0.8)
+        with f.lock:
+            assert not any(run_a in fr.get("runs", {}) for fr in f.frames[n:])
+        f.proc.stdin.close()
+        assert f.proc.wait(timeout=10) == 0
+    finally:
+        if f.proc.poll() is None:
+            f.proc.kill()
+
+
+# ---------------------------------------------------------------------------
+# adopt / diagnose / outputs / examples / docs
+# ---------------------------------------------------------------------------
+
+
+def test_adopt(env):
+    save = env["home"] / "old_run"
+    save.mkdir()
+    (save / "model.yml").write_text("save_loc: x\ntrainer: {epochs: 10, num_epoch: 5}\n")
+    out = call("adopt", {"save_loc": str(save), "job_ids": ["555.desched1"], "scheduler": "pbs"})
+    record = runs.read_run(out["run_dir"])
+    assert record["jobs"][0]["job_key"] == "555" and record["epochs_total"] == 10
+    assert record["target"]["server"] == "desched1"
+    outside = env["tmp"] / "elsewhere"
+    outside.mkdir()
+    resp = call("adopt", {"save_loc": str(outside), "config": str(save / "model.yml")}, check_ok=False)
+    assert resp["error"]["code"] == "forbidden_path"
+
+
+def test_diagnose_and_outputs(env):
+    run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
+    (save / "logs" / "credit_gen2.o11").write_text(
+        "INFO starting\n"
+        "Traceback (most recent call last):\n"
+        '  File "train.py", line 1, in <module>\n'
+        "    main()\n"
+        "torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 2 GiB\n"
+        "after\n"
+    )
+    runs.append_line(
+        os.path.join(run_dir, "events", "11.script.jsonl"),
+        runs.make_event("job.exited", {"code": 1}, "script", job="11"),
+    )
+    d = call("diagnose", {"run_id": run_id})
+    assert d["exit_status"] == 1 and d["job_key"] == "11"
+    assert d["traceback"].startswith("Traceback") and d["traceback"].endswith("Tried to allocate 2 GiB")
+    assert any("CUDA out of memory" in b for b in d["banners"])
+    (save / "checkpoint.pt").write_bytes(b"x")
+    out = call("outputs", {"run_id": run_id})
+    assert [os.path.basename(c["path"]) for c in out["checkpoints"]] == ["checkpoint.pt"]
+    assert out["forecast_dir"] is None and out["files"] == []
+
+
+def test_examples_docs_and_unsupported_verbs(env):
+    names = call("examples")["examples"]
+    assert "example-end-to-end" in names and "example-v2026.2" in names
+    ex = call("examples", {"name": "example-v2026.2"})
+    assert ex["name"] == "example-v2026.2" and "save_loc" in ex["text"]
+    pages = call("docs")["pages"]
+    assert "cli" in pages and "remote" in pages
+    assert "credit status" in call("docs", {"page": "cli"})["text"]
+    page = call("docs", {"page": "remote"})
+    assert page["page"] == "remote" and "credit.remote" in page["text"]
+    assert call("docs", {"page": "../../README"}, check_ok=False)["error"]["code"] == "not_found"
+    for verb in ("convert", "render"):
+        assert call(verb, {}, check_ok=False)["error"]["code"] == "unsupported"
+
+
+def test_logs_returns_the_cursor_offset(env):
+    run_id, _, save = make_run(env, jobs=["11.desched1"])
+    (save / "logs" / "credit_gen2.o11").write_bytes(b"line 1\nEpoch 0: 1%\rEpoch 0: 2%")
+    out = call("logs", {"run_id": run_id})
+    # A snapshot includes the unfinished last line; the offset stops before it, where a sync would continue.
+    assert out["text"] == "line 1\nEpoch 0: 2%" and out["current_frame"] == "Epoch 0: 2%"
+    assert out["offset"] == len(b"line 1\nEpoch 0: 1%\r")
+    d = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d["cursor"]["logs"]["11"]["off"] == out["offset"]  # the same cursor a sync continues from
+
+
+def test_pbsdsh_jobs_read_rank0_node_log(env):
+    run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
+    (save / "logs" / "credit_gen2.o11").write_text("mother superior\n")
+    d1 = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d1["logs"]["11"]["text"] == "mother superior\n"
+    node0 = save / "logs" / "pbsdsh_logs" / "11" / "node_0.out"
+    node0.parent.mkdir(parents=True)
+    node0.write_text("rank 0 says hi\n")
+    d2 = call("sync", {"runs": {run_id: d1["cursor"]}, "scheduler": False})["runs"][run_id]
+    assert d2["logs"]["11"]["path"] == str(node0) and d2["logs"]["11"]["text"] == "rank 0 says hi\n"
+    assert d2["logs"]["11"]["reset"]  # a new log identity
+
+
+# ---------------------------------------------------------------------------
+# Request paths, size caps, submit recovery and process identity
+# ---------------------------------------------------------------------------
+
+SECRET = "gho_SECRETTOKEN123"
+
+
+def test_adopt_refuses_hidden_and_non_yaml_configs(env):
+    exp = env["home"] / "exp"
+    exp.mkdir()
+    gh = env["home"] / ".config" / "gh"
+    gh.mkdir(parents=True)
+    (gh / "hosts.yml").write_text(f"github.com:\n  oauth_token: {SECRET}\n")
+    resp = call("adopt", {"save_loc": str(exp), "config": str(gh / "hosts.yml")}, check_ok=False)
+    assert resp["error"]["code"] == "forbidden_path" and SECRET not in json.dumps(resp)
+    (exp / "notes.txt").write_text(f"token {SECRET}\n")
+    resp = call("adopt", {"save_loc": str(exp), "config": str(exp / "notes.txt")}, check_ok=False)
+    assert resp["error"]["code"] == "config_error" and SECRET not in json.dumps(resp)
+    (exp / "bad.yml").write_text(f"a: [{SECRET}\n")
+    resp = call("adopt", {"save_loc": str(exp), "config": str(exp / "bad.yml")}, check_ok=False)
+    assert (
+        resp["error"]["code"] == "config_error"
+        and SECRET not in json.dumps(resp)
+        and "line" in resp["error"]["message"]
+    )
+    (exp / "list.yml").write_text("- 1\n")
+    resp = call("adopt", {"save_loc": str(exp), "config": str(exp / "list.yml")}, check_ok=False)
+    assert resp["error"]["code"] == "config_error"
+    assert not (exp / ".credit").exists()
+
+
+@pytest.mark.parametrize("job_id", ["-x", "123; rm -rf ~", "123 456", "abc.desched1", "1.$(id)"])
+def test_adopt_validates_job_ids(env, job_id):
+    cfg = make_config(env)
+    resp = call("adopt", {"save_loc": str(cfg.parent), "config": str(cfg), "job_ids": [job_id]}, check_ok=False)
+    assert resp["error"]["code"] == "bad_request"
+
+
+def test_adopt_accepts_array_and_plain_ids(env):
+    cfg = make_config(env)
+    out = call("adopt", {"save_loc": str(cfg.parent), "config": str(cfg), "job_ids": ["12[].desched1", "77"]})
+    assert [j["job_key"] for j in runs.read_run(out["run_dir"])["jobs"]] == ["12[]", "77"]
+
+
+def test_plan_scope_and_yaml_errors_do_not_leak(env):
+    outside = env["tmp"] / "outside"
+    outside.mkdir()
+    (outside / "c.yml").write_text("save_loc: /x\n")
+    ssh = env["home"] / ".ssh"
+    ssh.mkdir()
+    (ssh / "config.yml").write_text(f"Host x\n  IdentityFile {SECRET}\n")
+    base = {"kind": "train", "scheduler": "pbs", "cluster": "derecho", "options": {}}
+    for path in (outside / "c.yml", ssh / "config.yml", env["home"] / "exp" / ".." / ".." / "outside" / "c.yml"):
+        resp = call("plan", {**base, "config": str(path)}, check_ok=False)
+        assert resp["error"]["code"] == "forbidden_path", (path, resp)
+    bad = env["home"] / "bad.yml"
+    bad.write_text(f"Host x\n  IdentityFile: {SECRET}\n")
+    resp = call("plan", {**base, "config": str(bad)}, check_ok=False)
+    assert resp["error"]["code"] == "config_error" and SECRET not in json.dumps(resp)
+    assert "line 2" in resp["error"]["message"]
+    resp = call("plan", {**base, "config": str(env["home"] / "notes.txt")}, check_ok=False)
+    assert resp["error"]["code"] == "config_error"
+    # whitespace in the config path or save_loc
+    spaced = env["home"] / "my exp"
+    spaced.mkdir()
+    (spaced / "c.yml").write_text(yaml.safe_dump({"save_loc": str(env["home"] / "s"), "pbs": {"conda": "e"}}))
+    assert call("plan", {**base, "config": str(spaced / "c.yml")}, check_ok=False)["error"]["code"] == "config_error"
+    cfg = make_config(env, save_loc=str(env["home"] / "has space"))
+    assert call("plan", {**base, "config": str(cfg)}, check_ok=False)["error"]["code"] == "config_error"
+
+
+def test_resume_with_nothing_left_is_a_config_error(env):
+    run_id, _, save = make_run(env)
+    (save / "training_log.csv").write_text("index,epoch,train_loss\n" + "".join(f"{i},{i},1.0\n" for i in range(4)))
+    req = {"kind": "train", "scheduler": "pbs", "cluster": "derecho", "options": {"resume_from": run_id}}
+    resp = call("plan", req, check_ok=False)
+    assert resp["error"]["code"] == "config_error" and "nothing left to train" in resp["error"]["message"]
+
+
+def test_outputs_scope(env):
+    run_id, run_dir, save = make_run(env)
+    outside = env["tmp"] / "forecasts"
+    outside.mkdir()
+    (outside / "f.nc").write_text("x")
+    conf = yaml.safe_load(open(os.path.join(run_dir, "config.yml")))
+    conf["inference"] = {"save_forecast": str(outside)}
+    with open(os.path.join(run_dir, "config.yml"), "w") as f:
+        yaml.safe_dump(conf, f)
+    out = call("outputs", {"run_id": run_id})
+    assert out["files"] == []  # named, not listed
+    # with a remote.yaml, a ledger run whose save_loc is outside its roots is not served
+    (env["home"] / ".credit" / "remote.yaml").write_text(f"roots: [{env['home']}]\n")
+    rogue = env["tmp"] / "rogue"
+    rid = runs.new_run_id("train")
+    runs.append_ledger({"run_id": rid, "run_dir": str(save / ".credit" / "runs" / run_id), "save_loc": str(rogue)})
+    record = runs.read_run(run_dir)
+    record["save_loc"] = str(rogue)
+    runs.write_run(run_dir, record)
+    assert call("outputs", {"run_id": rid}, check_ok=False)["error"]["code"] == "forbidden_path"
+
+
+def test_read_and_grep_caps(env):
+    big = env["home"] / "big.txt"
+    big.write_bytes(b"x" * (9 << 20))
+    r = call("read", {"path": str(big), "length": 10 << 20})
+    assert len(r["data"]) == 8 << 20 and not r["eof"]
+    run_id, run_dir, save = make_run(env, jobs=["11.desched1"])
+    with open(save / "logs" / "credit_gen2.o11", "wb") as f:
+        f.write(b"needle early\n")
+        f.write((b"y" * 99 + b"\n") * 50_000)  # 5 MB
+        f.write(b"needle late\n")
+    out = call("logs", {"run_id": run_id, "grep": "needle", "tail_bytes": 64 << 20})
+    assert out["text"] == "needle late\n"
+
+
+def test_sync_reports_csv_pending(env):
+    run_id, run_dir, save = make_run(env)
+    csv_path = save / "training_log.csv"
+    csv_path.write_text("index,epoch,train_loss\n0,0,1.5\n")
+    d = call("sync", {"runs": {run_id: None}, "scheduler": False})["runs"][run_id]
+    assert d["csv"] is None and d["csv_pending"]
+    os.utime(csv_path, (time.time() - 10, time.time() - 10))
+    d2 = call("sync", {"runs": {run_id: d["cursor"]}, "scheduler": False})["runs"][run_id]
+    assert d2["csv"]["rows"] == [[0.0, 0.0, 1.5]] and not d2["csv_pending"]
+
+
+def test_submit_retry_resubmits_refused_jobs_and_reports_partial(env):
+    cfg = make_config(env)
+    qsub = env["tmp"] / "bin" / "qsub"
+    _write_exe(
+        qsub,
+        f"""\
+        #!/bin/bash
+        echo "qsub $*" >> {env["calls"]}
+        if [[ "$*" == *depend* && ! -e {env["tmp"]}/allow ]]; then echo "qsub: queue limits" >&2; exit 1; fi
+        echo "qsub: warning: account is nearly out of hours"
+        n=$(cat {env["tmp"]}/qsub.n 2>/dev/null || echo 1000); n=$((n + 1)); echo $n > {env["tmp"]}/qsub.n
+        echo "$n.desched1"
+        """,
+    )
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 3}}
+    plan = call("plan", req)["plan"]
+    first = call("submit", submit_req(plan))
+    assert [j["job_id"] for j in first["jobs"]] == ["1001.desched1"]  # id parsed past the warning line
+    assert "queue limits" in first["errors"][0] and "depends on" in first["errors"][1]
+    (env["tmp"] / "allow").touch()
+    second = call("submit", submit_req(plan))
+    assert second["already_submitted"] and second["errors"] == []
+    assert [(j["index"], j["job_id"]) for j in second["jobs"]] == [
+        (1, "1001.desched1"),
+        (2, "1002.desched1"),
+        (3, "1003.desched1"),
+    ]
+    calls = env["calls"].read_text().splitlines()
+    assert calls[-1].endswith(f"-W depend=afterok:1002.desched1 {plan['run_dir']}/scripts/job-3.sh")
+    assert sum("job-1.sh" in c for c in calls) == 1  # job 1 never resubmitted
+    # an intent with no outcome (a crash, or a qsub timeout) is reported, never blindly resubmitted
+    plan2 = call("plan", {**req, "run_id": None, "options": {"chain": 2}})["plan"]
+    run_dir2 = plan2["run_dir"]
+    os.makedirs(os.path.join(run_dir2, "events"))
+    os.makedirs(os.path.join(run_dir2, "scripts"))
+    runs.append_event(run_dir2, "submit.jsonl", runs.make_event("job.submitting", {"index": 1}, "submit"))
+    n_calls = len(env["calls"].read_text().splitlines())
+    third = call("submit", submit_req(plan2))
+    assert third["already_submitted"] and third["jobs"] == []
+    partial = [e for e in third["errors"] if isinstance(e, dict)]
+    assert partial == [
+        {
+            "code": "partial_submit",
+            "index": 1,
+            "job_name": f"{plan2['run_id']}-1",
+            "message": partial[0]["message"],
+        }
+    ]
+    assert len(env["calls"].read_text().splitlines()) == n_calls  # nothing submitted
+    assert runs.find_run(plan2["run_id"])  # the interrupted run is in the ledger now
+
+
+def test_local_cancel_and_state_check_process_identity(env):
+    stranger = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        cfg = make_config(env)
+        save = cfg.parent / "save"
+        run_id = runs.new_run_id("train")
+        record = runs.create_run(
+            run_id, "train", str(cfg), str(save), {"scheduler": "local", "log_dir": str(save / "logs")}
+        )
+        run_dir = runs.run_dir_for(str(save), run_id)
+        an_hour_ago = runs.now_ts(time.time() - 3600)
+        runs.add_job(run_dir, record, {"index": 1, "job_id": f"local-{stranger.pid}", "submitted": an_hour_ago})
+        states, _ = _sched.query([("local", f"local-{stranger.pid}", run_dir)])
+        assert states[f"local-{stranger.pid}"]["state"] == "gone"
+        assert call("cancel", {"run_id": run_id, "scope": "all"}) == {"cancelled": [], "errors": {}}
+        with pytest.raises(runs.SchedulerError, match="not signalling"):
+            _sched.cancel_job("local", f"local-{stranger.pid}", run_dir)
+        assert stranger.poll() is None  # still alive
+    finally:
+        stranger.kill()
+
+
+TERM_TRAINER = """\
+import os, signal, sys, time
+def on_term(*_):
+    print("cleaning up", flush=True)
+    time.sleep(1.0)
+    open(os.environ["CLEANED"], "w").write("done")
+    sys.exit(7)
+signal.signal(signal.SIGTERM, on_term)
+open(os.environ["READY"], "w").write("ok")
+while True:
+    time.sleep(0.05)
+"""
+
+
+@pytest.mark.parametrize("target", ["parent", "group"])
+def test_term_trap_waits_for_the_job_and_records_its_exit_code(env, monkeypatch, target):
+    import signal
+
+    fake = env["tmp"] / "term_trainer.py"
+    fake.write_text(TERM_TRAINER)
+    monkeypatch.setenv("CREDIT_REMOTE_LOCAL_CMD", f"{sys.executable} {fake}")
+    monkeypatch.setenv("READY", str(env["tmp"] / "ready"))
+    monkeypatch.setenv("CLEANED", str(env["tmp"] / "cleaned"))
+    cfg = make_config(env)
+    plan = call("plan", {"kind": "train", "config": str(cfg), "scheduler": "local", "options": {"chain": 1}})["plan"]
+    out = call("submit", submit_req(plan))
+    (job,) = out["jobs"]
+    pid = int(job["job_id"].split("-")[1])
+    wait_for(lambda: (env["tmp"] / "ready").exists())
+    if target == "parent":
+        os.kill(pid, signal.SIGTERM)
+    else:
+        os.killpg(pid, signal.SIGTERM)
+    marker_file = os.path.join(out["run_dir"], "events", f"{job['job_key']}.script.jsonl")
+
+    def exited():
+        return [ev for _, _, ev in runs.read_lines(marker_file)[0] if ev["type"] == "job.exited"]
+
+    wait_for(exited)
+    assert (env["tmp"] / "cleaned").exists()  # the job finished cleaning up before job.exited
+    types = [ev["type"] for _, _, ev in runs.read_lines(marker_file)[0]]
+    assert types == ["job.started", "job.signaled", "job.exited"]
+    assert exited()[0]["data"]["code"] == 7
+    wait_for(lambda: not _sched._pid_alive(pid))
+
+
+# ---------------------------------------------------------------------------
+# Heavy verbs (need torch; skipped without it)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def heavy_env(env):
+    pytest.importorskip("torch")
+    return env
+
+
+def test_check_verb_on_a_real_example(heavy_env):
+    import shutil
+
+    cfg = heavy_env["home"] / "example-v2026.2.yml"
+    shutil.copy(os.path.join(REPO, "config", "gen_2", "examples", "example-v2026.2.yml"), cfg)
+    r = call("check", {"config": str(cfg)})
+    report = r["report"]
+    assert report["config"] == str(cfg) and isinstance(report["findings"], list) and report["findings"]
+    assert {"errors", "warnings"} <= set(report) and isinstance(r["derived"], dict)
+    assert {"severity", "where", "message", "fix"} == set(report["findings"][0])
+    r2 = call("check", {"yaml": cfg.read_text()})
+    assert r2["report"]["config"] == "<yaml>" and r2["report"]["findings"]
+    resp = call("check", {"config": str(heavy_env["home"] / "notes.txt")}, check_ok=False)
+    assert resp["error"]["code"] in ("config_error", "not_found")
+    assert (
+        call("check", {"config": str(heavy_env["tmp"] / "x.yml")}, check_ok=False)["error"]["code"] == "forbidden_path"
+    )
+
+
+def test_components_verb(heavy_env):
+    kinds = call("components")["kinds"]
+    assert set(kinds) == {"models", "trainers", "datasets", "preblocks", "postblocks", "losses", "metrics"}
+    assert "wxformer" in kinds["models"] and "concat" in kinds["preblocks"]
+    only = call("components", {"kind": "preblocks"})["kinds"]
+    assert list(only) == ["preblocks"]
+    d = call("components", {"kind": "preblocks", "key": "concat"})
+    assert d["kind"] == "preblocks" and d["key"] == "concat" and d["class"] == "ConcatToTensor"
+    assert d["module"] == "credit.preblock.concat" and isinstance(d["params"], list)
+    assert all({"name", "default", "annotation", "required"} == set(p) for p in d["params"])
+    assert call("components", {"kind": "models", "key": "nope"}, check_ok=False)["error"]["code"] == "not_found"
+    assert call("components", {"kind": "bogus"}, check_ok=False)["error"]["code"] == "bad_request"
+
+
+def test_build_config_verb(heavy_env):
+    preset = {
+        "dataset_type": "weatherbench2_era5",
+        "level_coord": "level",
+        "levels": [500, 700, 850],
+        "vars_3D": ["temperature"],
+        "vars_2D": ["surface_pressure"],
+        "static": ["land_sea_mask"],
+        "timestep": "6h",
+        "start": "1959-01-01",
+        "end": "2022-12-31",
+        "height": 32,
+        "width": 64,
+        "resolution": "5.625deg",
+        "tisr": [[87.1875, -87.1875, 32], [0, 354.375, 64]],
+    }
+    save = heavy_env["home"] / "exp" / "save"
+    state = {
+        "system": "local",
+        "experiment": "test_exp",
+        "save_loc": str(save),
+        "seed": 3141,
+        "dataset": preset["dataset_type"],
+        "preset": preset,
+        "start": preset["start"],
+        "end": preset["end"],
+        "timestep": "6h",
+        "valid_start": "2021-01-01",
+        "valid_end": "2021-12-31",
+        "vars_3D": preset["vars_3D"],
+        "vars_2D": preset["vars_2D"],
+        "batch_size": 1,
+        "batches_per_epoch": 1,
+        "parallelism_data": "none",
+        "nodes": 1,
+        "gpus": 1,
+        "pbs": None,
+    }
+    out = heavy_env["home"] / "exp" / "built.yml"
+    r = call("build_config", {"state": state, "path": str(out), "write": False})
+    assert yaml.safe_load(r["yaml"])["save_loc"] == str(save) and not out.exists()
+    assert call("build_config", {"state": {}}, check_ok=False)["error"]["code"] in ("config_error", "bad_request")
+    refused = call("build_config", {"state": state, "path": str(out), "write": True}, check_ok=False)
+    assert refused["error"]["code"] == "bad_request" and not out.exists()
+
+
+def test_internal_errors_are_bounded(env):
+    code = (
+        "import sys; import credit.remote as r\n"
+        "def boom(req):\n"
+        "    def deep(n):\n"
+        "        if n == 0: raise ValueError('x' * 5000)\n"
+        "        deep(n - 1)\n"
+        "    deep(20)\n"
+        "r.VERBS['hello'] = boom\n"
+        "sys.exit(r.main(['hello']))\n"
+    )
+    proc = subprocess.run(
+        [sys.executable, "-P", "-c", code], input=b"{}", capture_output=True, env=os.environ.copy(), timeout=60
+    )
+    resp = json.loads(proc.stdout.split(SENTINEL)[-1])
+    msg = resp["error"]["message"]
+    assert resp["error"]["code"] == "internal" and msg.startswith("ValueError: xxx")
+    assert msg.count('File "') == 3 and len(msg) < 2000
+
+
+# ---------------------------------------------------------------------------
+# Final review: concurrent submits (N1) and run.json lagging submit.jsonl (N2)
+# ---------------------------------------------------------------------------
+
+
+def test_concurrent_submits_queue_each_job_once(env):
+    cfg = make_config(env)
+    _write_exe(
+        env["tmp"] / "bin" / "qsub",
+        f"""\
+        #!/bin/bash
+        sleep 0.5
+        echo "qsub $*" >> {env["calls"]}
+        echo "$RANDOM$RANDOM.desched1"
+        """,
+    )
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 3}}
+    plan = call("plan", req)["plan"]
+    body = json.dumps(submit_req(plan)).encode()
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-P", "-m", "credit.remote", "submit"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            env=os.environ.copy(),
+        )
+        for _ in range(2)
+    ]
+    outs = [json.loads(p.communicate(body, timeout=60)[0].split(SENTINEL)[-1]) for p in procs]
+    assert len(env["calls"].read_text().splitlines()) == 3  # one qsub per job, not six
+    winners = [o for o in outs if o["ok"] and not o["result"].get("already_submitted")]
+    assert len(winners) == 1 and len(winners[0]["result"]["jobs"]) == 3
+    loser = [o for o in outs if o is not winners[0]][0]
+    assert (
+        not loser["ok"] and loser["error"]["code"] == "conflict" and "in progress" in loser["error"]["message"]
+    ) or (loser["ok"] and loser["result"]["already_submitted"])
+
+
+def test_jobs_survive_a_crash_between_submitted_and_run_json(env, monkeypatch):
+    import importlib
+
+    submit_mod = importlib.import_module("credit.cli._submit")
+    cfg = make_config(env)
+    req = {"kind": "train", "config": str(cfg), "scheduler": "pbs", "cluster": "derecho", "options": {"chain": 3}}
+    plan = submit_mod._plan(req)
+    args = (plan["request"], plan["scripts_sha256"], plan["config_sha256"])
+    real = runs.write_run
+
+    def crash_once(run_dir, record):
+        if record.get("jobs"):
+            monkeypatch.setattr(runs, "write_run", real)
+            raise KeyboardInterrupt("simulated crash after job.submitted, before run.json")
+        return real(run_dir, record)
+
+    monkeypatch.setattr(runs, "write_run", crash_once)
+    with pytest.raises(KeyboardInterrupt):
+        submit_mod._submit_plan(*args)
+    run_dir, run_id = plan["run_dir"], plan["run_id"]
+    assert runs.read_run(run_dir)["jobs"] == []  # run.json lags submit.jsonl
+    assert [j["job_id"] for j in runs.jobs_of(run_dir, runs.read_run(run_dir))] == ["1001.desched1"]
+
+    # sync, status and cancel all see the job
+    (env["tmp"] / "qstat.json").write_text(json.dumps({"Jobs": {"1001.desched1": {"job_state": "Q"}}}))
+    r = call("sync", {"runs": {run_id: None}})
+    assert [j["job_id"] for j in r["runs"][run_id]["run"]["jobs"]] == ["1001.desched1"]
+    assert r["scheduler"]["1001.desched1"]["state"] == "queued"
+    status = subprocess.run(
+        [sys.executable, "-m", "credit.cli", "status", run_id, "--json"],
+        capture_output=True,
+        env=os.environ.copy(),
+        timeout=60,
+    )
+    summary = json.loads(status.stdout)
+    assert [j["job_id"] for j in summary["jobs"]] == ["1001.desched1"] and summary["state"] == "queued"
+    assert call("cancel", {"run_id": run_id, "scope": "all"})["cancelled"] == ["1001.desched1"]
+    assert "qdel 1001.desched1" in env["calls"].read_text()
+    assert [j["job_id"] for j in runs.read_run(run_dir)["jobs"]] == ["1001.desched1"]  # healed by cancel
+
+    # a retry heals run.json and submits only the remaining jobs
+    retry = submit_mod._submit_plan(*args)
+    assert retry["already_submitted"] and [j["index"] for j in retry["jobs"]] == [1, 2, 3]
+    assert [j["job_id"] for j in runs.read_run(run_dir)["jobs"]] == ["1001.desched1", "1002.desched1", "1003.desched1"]
+    assert sum(" qsub " in f" {c}" and "job-1.sh" in c for c in env["calls"].read_text().splitlines()) == 1
+
+
+@pytest.mark.parametrize(
+    ("hostname", "expected"),
+    [
+        ("crlogin1", "casper"),  # the login nodes since January 2026
+        ("crhtc12", "casper"),
+        ("casper23", "casper"),
+        ("derecho4", "derecho"),
+        ("dec0123", "ncar"),
+        ("my-laptop", "local"),
+    ],
+)
+def test_system_name(hostname, expected):
+    from credit.runs import system_name
+
+    assert system_name(hostname) == expected

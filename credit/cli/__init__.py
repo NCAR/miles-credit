@@ -11,6 +11,7 @@ Examples
   credit submit   --cluster derecho -c config.yml --gpus 4 --nodes 2
   credit submit   --cluster casper  -c config.yml --mode rollout --jobs 10
   credit submit   --cluster casper  -c config.yml --mode realtime --init-time 2024-01-15T00
+  credit status
 """
 
 from ._ask import (
@@ -43,6 +44,8 @@ from ._common import (
 from ._convert import _convert, _init, _write_reload_config
 from ._parser import _build_parser, main
 from ._plot import _build_channel_map, _build_denorm_stats, _metrics, _plot
+from ._remote_setup import _remote_setup
+from ._status import _status
 from ._submit import (
     _build_pbs_script,
     _build_preprocess_pbs_script,
@@ -53,8 +56,6 @@ from ._submit import (
     _build_rollout_slurm_script,
     _build_slurm_script,
     _compute_chain,
-    _do_submit_realtime,
-    _do_submit_rollout,
     _load_pbs_config,
     _load_slurm_config,
     _print_ensemble_rollout_plan,
@@ -128,6 +129,8 @@ __all__ = [
     "_sbatch",
     "_scheduler_ctx",
     "_setup_logging",
+    "_remote_setup",
+    "_status",
     "_submit",
     "_train",
     "_write_reload_config",

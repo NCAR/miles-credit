@@ -28,6 +28,7 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
+from credit import events
 from credit.distributed import select_device
 from credit.models.checkpoint import TorchFSDPCheckpointIO, copy_checkpoint
 from credit.scheduler import update_on_epoch
@@ -236,6 +237,9 @@ class BaseTrainer(ABC):
         self.model = model
         self.rank = rank
         self.device = select_device(rank)
+        # Pre-clip total gradient norm from the last optimizer step (a tensor, or
+        # None when clipping is off); read only when a progress event is due.
+        self._grad_norm = None
 
         # Store full conf for subclass method bodies that still need it
         self.conf = conf
@@ -420,6 +424,16 @@ class BaseTrainer(ABC):
         if self.rank == 0:
             pbar.update(1)
             pbar.set_description(" ".join(parts))
+        if phase == "train":
+            events.sink().train_progress(
+                epoch,
+                results_dict,
+                len(results_dict.get("train_loss") or []),
+                getattr(pbar, "total", None),
+                lr=optimizer.param_groups[0]["lr"],
+                grad_norm=self._grad_norm,
+                display_metrics=self.display_metrics,
+            )
 
     def _log_epoch_metrics(self, epoch: int, results_dict: dict, phase: str = "valid") -> None:
         """Log aggregate metrics after a train or validation epoch."""
@@ -577,6 +591,19 @@ class BaseTrainer(ABC):
             if self.save_every_epoch:
                 copy_checkpoint(os.path.join(self.save_loc, "model_checkpoint.pt"), epoch)
 
+        self._checkpoint_event("checkpoint.pt", epoch, "latest")
+        if self.ema is not None:
+            self._checkpoint_event("checkpoint_ema.pt", epoch, "ema")
+        if self.save_every_epoch:
+            name = "model_checkpoint.pt" if self.mode == "fsdp" else "checkpoint.pt"
+            self._checkpoint_event(f"{name}{epoch:05}.pt", epoch, "epoch")
+
+    def _checkpoint_event(self, fname: str, epoch: int, kind: str) -> None:
+        """Emit ``checkpoint.saved`` for ``save_loc/fname`` if it exists (rank 0 only, via the sink)."""
+        path = os.path.join(self.save_loc, fname)
+        if events.sink().enabled and os.path.exists(path):
+            events.sink().emit("checkpoint.saved", {"path": path, "epoch": epoch, "kind": kind})
+
     # ------------------------------------------------------------------
     # Main training loop
     # ------------------------------------------------------------------
@@ -667,13 +694,16 @@ class BaseTrainer(ABC):
         if torch.distributed.is_available() and torch.distributed.is_initialized():
             torch.distributed.barrier()
 
+        stop_reason, last_epoch = None, start_epoch - 1
         for epoch in range(start_epoch, epoch_limit):
+            last_epoch = epoch
             # Backup previous epoch's checkpoint
             if epoch > start_epoch and self.save_backup_weights and self.rank == 0:
                 for fname in ("checkpoint.pt",):
                     src = os.path.join(self.save_loc, fname)
                     if os.path.exists(src):
                         shutil.copyfile(src, os.path.join(self.save_loc, f"backup_{fname}"))
+                        self._checkpoint_event(f"backup_{fname}", epoch - 1, "backup")
                 if self.mode == "fsdp":
                     for fname in ("model_checkpoint.pt", "optimizer_checkpoint.pt"):
                         src = os.path.join(self.save_loc, fname)
@@ -761,7 +791,11 @@ class BaseTrainer(ABC):
                 os.makedirs(trial_dir, exist_ok=True)
                 df.to_csv(os.path.join(trial_dir, f"training_log_{trial.number}.csv"), index=False)
             else:
-                df.to_csv(log_path, index=False)
+                # Write-then-rename so a reader never sees a half-written log.
+                tmp_path = f"{log_path}.tmp-{os.getpid()}"
+                df.to_csv(tmp_path, index=False)
+                os.replace(tmp_path, log_path)
+                events.sink().emit("train.epoch", {"epoch": epoch, "row": df.iloc[-1].to_dict()})
 
             # ---- TensorBoard logging ----
             if self.tb_writer is not None:
@@ -795,10 +829,11 @@ class BaseTrainer(ABC):
                 offset = epoch - best_epoch_actual
 
                 if offset == 0 and self.save_best_weights and self.rank == 0:
-                    for fname in ("checkpoint.pt", "checkpoint_ema.pt"):
+                    for fname, kind in (("checkpoint.pt", "best"), ("checkpoint_ema.pt", "best_ema")):
                         src = os.path.join(self.save_loc, fname)
                         if os.path.exists(src):
                             shutil.copyfile(src, os.path.join(self.save_loc, f"best_{fname}"))
+                            self._checkpoint_event(f"best_{fname}", epoch, kind)
                     if self.mode == "fsdp":
                         for fname in ("model_checkpoint.pt", "optimizer_checkpoint.pt"):
                             src = os.path.join(self.save_loc, fname)
@@ -810,10 +845,16 @@ class BaseTrainer(ABC):
                         f"Early stopping: best {self.training_metric} at epoch {best_epoch_actual}, "
                         f"current epoch {epoch}"
                     )
+                    stop_reason = "early_stop"
                     break
 
             if self.stop_after_epoch:
+                stop_reason = "epochs_per_job"
                 break
+
+        if stop_reason is None:
+            stop_reason = "completed" if last_epoch + 1 >= self.epochs else "epochs_per_job"
+        events.sink().emit("train.stopped", {"reason": stop_reason, "epoch": last_epoch})
 
         # Shut down DataLoader workers to avoid leaked semaphore warnings at exit
         for _loader in (train_loader, valid_loader):
