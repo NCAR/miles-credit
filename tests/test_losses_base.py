@@ -264,8 +264,107 @@ def test_exp_transform_specs_from_conf():
             }
         }
     }
-    assert exp_transform_specs(conf) == [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}]
+    assert exp_transform_specs(conf) == [{"type": "exp_transform", "variables": [VAR_SP], "base": "e", "eps": 1e-8}]
     assert exp_transform_specs({}) == []
+
+
+def test_unit_transform_specs_collects_square_transforms():
+    from credit.losses.base import exp_transform_specs, unit_transform_specs
+
+    conf = {
+        "postblocks": {
+            "per_step": {
+                "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+                "exp": {"type": "exp_transform", "args": {"variables": [VAR_SP], "base": "10"}},
+                "square": {"type": "square_transform", "args": {"variables": [VAR_PRECIP]}},
+                # The target twin is not what the weights describe; y_processed is.
+                "square_target": {
+                    "type": "square_transform",
+                    "args": {"variables": [VAR_T], "key": "y_target_processed"},
+                },
+            }
+        }
+    }
+    assert unit_transform_specs(conf) == [
+        {"type": "exp_transform", "variables": [VAR_SP], "base": "10", "eps": 1e-8},
+        {"type": "square_transform", "variables": [VAR_PRECIP]},
+    ]
+    assert [s["type"] for s in exp_transform_specs(conf)] == ["exp_transform"]
+    assert unit_transform_specs({}) == []
+
+
+def _make_sqrt_scaler_file(tmp_path, x):
+    """Scaler fit on y = sqrt(x), the SqrtTransform preblock's output."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    y = torch.sqrt(x)
+    s = DStandardScalerTensor(channels_last=False)
+    s.mean_x_ = y.mean(dim=0, keepdim=False).double()
+    s.var_x_ = y.var(dim=0, unbiased=False).double()
+    s.x_columns_ = list(range(x.shape[1]))
+    s.n_ = x.shape[0]
+    s._fit = True
+    path = str(tmp_path / "sqrt_scaler.json")
+    save_scaler_dict({"target": {"ERA5": {VAR_PRECIP: s}}}, path)
+    return path
+
+
+SQUARE_SPEC = [{"type": "square_transform", "variables": [VAR_PRECIP]}]
+
+
+def test_load_target_variances_converts_square_transformed_vars(tmp_path):
+    """A sqrt-scaled variable scored in physical units gets Var(x) = 4 m^2 s^2 + 2 s^4."""
+    torch.manual_seed(0)
+    m, s = 3.0, 0.5
+    x = (m + s * torch.randn(400000, 1, dtype=torch.float64)) ** 2  # sqrt(x) ~ N(m, s^2)
+    path = _make_sqrt_scaler_file(tmp_path, x)
+
+    sqrt_space = _load_target_variances(path)
+    physical = _load_target_variances(path, SQUARE_SPEC)
+    assert sqrt_space[VAR_PRECIP] == pytest.approx(s**2, rel=0.02)
+    assert physical[VAR_PRECIP] == pytest.approx(4 * m**2 * s**2 + 2 * s**4, rel=0.02)
+    assert physical[VAR_PRECIP] == pytest.approx(float(x.var(unbiased=False)), rel=0.02)
+    # A variable no square_transform covers keeps its sqrt-space variance.
+    other = _load_target_variances(path, [{"type": "square_transform", "variables": [VAR_T]}])
+    assert other[VAR_PRECIP] == pytest.approx(sqrt_space[VAR_PRECIP])
+
+
+def test_load_target_variances_square_prefers_exact_physical_stats(tmp_path):
+    """The sidecar's exact variance replaces the normal-theory estimate for sqrt variables."""
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+    from credit.preblock.scaler import physical_stats_path
+
+    torch.manual_seed(0)
+    # Zero-inflated "precipitation": far from normal in sqrt space.
+    x = torch.exp(-6.0 + 1.5 * torch.randn(50000, 1, dtype=torch.float64))
+    x[torch.rand(50000) < 0.7] = 0.0
+    path = _make_sqrt_scaler_file(tmp_path, x)
+    estimate = _load_target_variances(path, SQUARE_SPEC)[VAR_PRECIP]
+    sqrt_space = _load_target_variances(path)[VAR_PRECIP]
+
+    s = DStandardScalerTensor(channels_last=False)
+    s.fit(x.float().reshape(-1, 1, 1))
+    save_scaler_dict({"target": {"ERA5": {VAR_PRECIP: s}}}, physical_stats_path(path))
+
+    true_var = float(x.var(unbiased=False))
+    assert abs(estimate - true_var) > 0.2 * true_var
+    assert _load_target_variances(path, SQUARE_SPEC)[VAR_PRECIP] == pytest.approx(true_var, rel=1e-3)
+    # Only square-transformed variables use the sidecar; a sqrt-space loss keeps the sqrt variance.
+    assert _load_target_variances(path)[VAR_PRECIP] == pytest.approx(sqrt_space)
+
+
+def test_exp_transforms_argument_is_a_deprecated_alias():
+    from credit.losses.base import _resolve_unit_transforms
+
+    spec = [{"variables": [VAR_SP], "base": "e", "eps": 1e-8}]
+    assert _resolve_unit_transforms(SQUARE_SPEC, None) is SQUARE_SPEC
+    with pytest.warns(DeprecationWarning, match="unit_transforms"):
+        assert _resolve_unit_transforms(None, spec) is spec
+    with pytest.warns(DeprecationWarning):
+        assert _resolve_unit_transforms(SQUARE_SPEC, spec) is SQUARE_SPEC
 
 
 # ---------------------------------------------------------------------------

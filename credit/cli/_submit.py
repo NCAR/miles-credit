@@ -11,11 +11,14 @@ import textwrap
 
 import yaml
 
+from credit.pbs import DERECHO_MPICH_GTL_FIX, PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
+
 from ._common import (
     _PBS_DEFAULTS,
     _SLURM_CLUSTER_DEFAULTS,
     _SLURM_DEFAULTS,
     _repo_root,
+    _nonblank,
     _resolve_torchrun,
     auto_mem,
     casper_mem,
@@ -102,6 +105,10 @@ def _load_pbs_config(config_path: str) -> dict:
     return pbs
 
 
+# Shown in --dry-run output when no account resolves; a real submit exits instead.
+_UNSET_ACCOUNT = "<UNSET>"
+
+
 def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Namespace:
     """Return a copy of *args* with None fields filled from *pbs_cfg* then cluster defaults."""
     r = copy.copy(args)
@@ -116,8 +123,25 @@ def _resolve_pbs_opts(args: argparse.Namespace, pbs_cfg: dict) -> argparse.Names
     d = _PBS_DEFAULTS["casper" if is_casper else "derecho"]
 
     r.account = _first(
-        args.account, pbs_cfg.get("project") or pbs_cfg.get("account"), os.environ.get("PBS_ACCOUNT"), d["account"]
+        _nonblank(args.account),
+        _nonblank(pbs_cfg.get("project")) or _nonblank(pbs_cfg.get("account")),
+        _nonblank(os.environ.get("PBS_ACCOUNT")),
+        d["account"],
     )
+    if not r.account:
+        how = (
+            "Set one of (highest priority first):\n"
+            "  credit submit --account <PROJECT> ...\n"
+            "  pbs:\n    project: <PROJECT>      # in the config\n"
+            "  export PBS_ACCOUNT=<PROJECT>"
+        )
+        if getattr(args, "dry_run", False):
+            # A preview shouldn't need an account; show a placeholder and say how to set one.
+            print(f"WARNING: no PBS account; the preview shows {_UNSET_ACCOUNT}. {how}", file=sys.stderr)
+            r.account = _UNSET_ACCOUNT
+        else:
+            print(f"ERROR: no PBS account to charge. {how}", file=sys.stderr)
+            sys.exit(1)
     r.walltime = _first(args.walltime, pbs_cfg.get("walltime"), d["walltime"])
     r.gpus = int(_first(args.gpus, pbs_cfg.get("ngpus") or pbs_cfg.get("gpus"), d["gpus"]))
     r.nodes = int(_first(args.nodes, pbs_cfg.get("nodes"), d["nodes"]))
@@ -271,9 +295,9 @@ def _resolve_slurm_opts(args: argparse.Namespace, slurm_cfg: dict) -> argparse.N
     # Layer any per-cluster overrides (e.g. Perlmutter) on top of the generic defaults.
     d = {**_SLURM_DEFAULTS, **_SLURM_CLUSTER_DEFAULTS.get(getattr(args, "cluster", ""), {})}
     r.account = _first(
-        args.account,
-        slurm_cfg.get("project") or slurm_cfg.get("account"),
-        os.environ.get("SLURM_ACCOUNT"),
+        _nonblank(args.account),
+        _nonblank(slurm_cfg.get("project")) or _nonblank(slurm_cfg.get("account")),
+        _nonblank(os.environ.get("SLURM_ACCOUNT")),
         d["account"],
     )
     r.walltime = _first(args.walltime, slurm_cfg.get("walltime"), d["walltime"])
@@ -668,8 +692,6 @@ def _derecho_pbsdsh_script(
     torchrun invocation; the per-node script is written through an unquoted heredoc, so
     any ``$`` in it expands on the mother-superior node when that script is written.
     """
-    from credit.pbs import PBSDSH_DERECHO_MODULES, _pbsdsh_launch_block
-
     logs_dir = os.path.join(os.path.expandvars(save_loc), "logs") if save_loc else "."
     conda_env = args.conda_env
     torchrun = _resolve_torchrun(conda_env)
@@ -690,6 +712,7 @@ def _derecho_pbsdsh_script(
         module load {PBSDSH_DERECHO_MODULES}
 
         conda activate {args.conda_env}
+        {DERECHO_MPICH_GTL_FIX}
 
         echo "Nodes     : {args.nodes}"
         echo "GPUs/node : {args.gpus}"
@@ -780,6 +803,7 @@ def _build_pbs_script(
                         cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -857,6 +881,16 @@ def _compute_chain(args: argparse.Namespace) -> int:
         return 1
 
 
+def _account_label(args: argparse.Namespace) -> str:
+    """Return the account line for the job plan; a SLURM job with none charges the default allocation."""
+    account = getattr(args, "account", None)
+    if account:
+        return account
+    if getattr(args, "scheduler", "pbs") == "slurm":
+        return "(none; SLURM charges your default allocation)"
+    return _UNSET_ACCOUNT
+
+
 def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
     """Print a human-readable summary of what is about to be submitted."""
     from credit.trainers.preflight import estimate_dataloader_memory_gib
@@ -896,7 +930,7 @@ def _print_job_plan(args: argparse.Namespace, n_jobs: int) -> None:
         sep,
         sep,
         args.cluster,
-        getattr(args, "account", "unset"),
+        _account_label(args),
         getattr(args, "config", "unset"),
         gpu_str,
         getattr(args, "mem", None) or "site default",
@@ -981,6 +1015,7 @@ def _build_realtime_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -1061,6 +1096,7 @@ def _build_preprocess_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}
@@ -1311,6 +1347,7 @@ def _build_rollout_pbs_script(
                         cuda/12.3.2 conda/latest
 
             conda activate {args.conda_env}
+            {DERECHO_MPICH_GTL_FIX}
 
             REPO={repo}
             CONFIG={config}

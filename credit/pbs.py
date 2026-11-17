@@ -6,8 +6,35 @@ import logging
 import subprocess
 
 from credit.conda_env import torchrun_path
+from credit.run_config import sync_run_config
 
 logger = logging.getLogger(__name__)
+
+
+# Defined here, not in credit.cli._common: credit.cli imports credit.pbs at module level,
+# so importing credit.cli from this module would be circular.
+def _nonblank(value) -> str | None:
+    """Return *value* as a stripped string, or None when it is unset or blank.
+
+    An empty ``--account ""`` (e.g. a wrapper passing an unset ``$PROJ``) must fall
+    through to the config and environment, like an empty config key or env var does.
+    """
+    if value is None:
+        return None
+    value = str(value).strip()
+    return value or None
+
+
+def _pbs_account(pbs_options: dict) -> str:
+    """Return the PBS account from ``pbs.project``/``pbs.account`` or ``$PBS_ACCOUNT``."""
+    account = (
+        _nonblank(pbs_options.get("project"))
+        or _nonblank(pbs_options.get("account"))
+        or _nonblank(os.environ.get("PBS_ACCOUNT"))
+    )
+    if not account:
+        raise ValueError("No PBS account. Set pbs.project in the config or export PBS_ACCOUNT.")
+    return account
 
 
 def launch_script(config_file, script_path, launch=True, backend="nccl"):
@@ -40,7 +67,7 @@ def launch_script(config_file, script_path, launch=True, backend="nccl"):
     #PBS -N {pbs_options["job_name"]}
     #PBS -l select=1:ncpus={pbs_options["ncpus"]}:ngpus={num_gpus}:mem={pbs_options["mem"]}{gpu_type_select}
     #PBS -l walltime={pbs_options["walltime"]}
-    #PBS -A {pbs_options["project"]}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -q {pbs_options["queue"]}
     #PBS -j oe
     #PBS -k eod
@@ -101,24 +128,11 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
 
     config_save_path = os.path.join(save_loc, "model.yml")
 
-    # Define the source and destination paths
-    source_path = config_file
-    destination_path = config_save_path
-
-    # Only delete the original if the source and destination paths are different
-    if os.path.exists(destination_path) and os.path.realpath(source_path) != os.path.realpath(destination_path):
-        os.remove(destination_path)
-        logger.info(f"Removed the old model.yml at {destination_path}")
-
-    try:
-        shutil.copy(source_path, destination_path)
-        logger.info(f"Copied the new {source_path} to {destination_path}")
-    except shutil.SameFileError:
-        pass
+    sync_run_config(config_file, save_loc)
 
     # Generate the PBS script
     script = f"""#!/bin/bash
-    #PBS -A {pbs_options.get("project", "default_project")}
+    #PBS -A {_pbs_account(pbs_options)}
     #PBS -N {pbs_options.get("job_name", "default_job")}
     #PBS -l walltime={pbs_options.get("walltime", "00:10:00")}
     #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 1)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "4GB")}
@@ -130,8 +144,9 @@ def launch_script_mpi(config_file, script_path, launch=True, backend="nccl"):
     module purge
     module load ncarenv/24.12
     module reset
-    module load gcc craype cray-mpich cuda cudnn/8.9.7.29-12 conda mkl
+    module load gcc craype cray-mpich/8.1.29 cuda cudnn/8.9.7.29-12 conda mkl
     conda activate {pbs_options.get("conda", "credit")}
+    {DERECHO_MPICH_GTL_FIX}
 
     # Export environment variables
     export LSCRATCH=/glade/derecho/scratch/{user}/
@@ -252,7 +267,7 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
     torchrun_line = f"TORCHRUN={torchrun}\n" if num_nodes == 1 else ""
 
     script = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
@@ -261,7 +276,8 @@ def launch_script_torchrun(config_file, script_path, launch=True, backend="nccl"
 #PBS -k eod
 
 module --force purge
-module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich/8.1.29 conda
+{DERECHO_MPICH_GTL_FIX}
 
 {torchrun_line}export PYTHONPATH="{os.path.dirname(str(script_path))}:${{PYTHONPATH:-}}"
 export LOGLEVEL=INFO
@@ -311,6 +327,20 @@ echo "Done at $(date)"
 PBSDSH_DERECHO_MODULES = (
     "ncarenv/24.12 gcc/12.4.0 ncarcompilers craype cray-mpich/8.1.29 "
     "cuda/12.3.2 conda/latest cudnn/9.2.0.82-12 mkl/2025.0.1 libfabric/1.15.2.0"
+)
+
+# libtorch links Cray's libmpi_gtl_cuda.so.0, but the cray-mpich module does not put its own
+# gtl/lib on LD_LIBRARY_PATH, so the loader falls back to /opt/cray/pe/lib64 via the linker
+# cache. Since the 2026-11-03 Derecho maintenance that resolves to the new default mpich 9.1.0,
+# whose GTL needs libcudart.so.13, and `import torch` fails against CUDA 12. Prepend the loaded
+# cray-mpich's gtl/lib (CRAY_MPICH_ROOTDIR is set by the module) after the module load and
+# `conda activate`, so the GTL that matches the loaded MPICH wins, and log which one is used.
+# Kept on one line so it can be dropped into the indented, dedented script templates.
+# TODO(remove when NCAR fixes the cray-mpich module / torch is rebuilt against PE 9.x).
+DERECHO_MPICH_GTL_FIX = (
+    'if [ -d "${CRAY_MPICH_ROOTDIR:-}/gtl/lib" ]; then '
+    'export LD_LIBRARY_PATH="${CRAY_MPICH_ROOTDIR}/gtl/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"; '
+    'echo "credit: using MPICH GTL from ${CRAY_MPICH_ROOTDIR}/gtl/lib"; fi'
 )
 
 
@@ -486,7 +516,7 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
     torchrun = f"{conda}/bin/torchrun" if "/" in str(conda) else "torchrun"
 
     header = f"""#!/bin/bash -l
-#PBS -A {pbs_options.get("project", "NAML0001")}
+#PBS -A {_pbs_account(pbs_options)}
 #PBS -N {pbs_options.get("job_name", "credit_v2_pbsdsh")}
 #PBS -l walltime={pbs_options.get("walltime", "01:00:00")}
 #PBS -l select={num_nodes}:ncpus={pbs_options.get("ncpus", 64)}:ngpus={num_gpus}:mem={pbs_options.get("mem", "480GB")}
@@ -498,6 +528,7 @@ def _build_pbsdsh_script(pbs_options, script_path, config_save_path):
 module --force purge
 module load {PBSDSH_DERECHO_MODULES}
 conda activate {conda}
+{DERECHO_MPICH_GTL_FIX}
 """
     block = _pbsdsh_launch_block(
         torchrun=torchrun,

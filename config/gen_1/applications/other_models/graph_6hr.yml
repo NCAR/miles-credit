@@ -169,7 +169,7 @@ diagnostics:
 
 pbs: #derecho
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "wxformer"
     walltime: "12:00:00"
     nodes: 8
@@ -188,5 +188,5 @@ pbs: #derecho
 #     walltime: '12:00:00'
 #     gpu_type: 'a100'
 #     cpu_type: 'milan'
-#     project: 'NAML0001'
+#     project: YOUR_ACCOUNT
 #     queue: 'casper'

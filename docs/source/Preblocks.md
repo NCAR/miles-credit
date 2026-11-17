@@ -241,6 +241,11 @@ args:
     - "era5/prognostic/3d/Q"
 ```
 
+As for `log_transform`, when this block transforms `target` variables,
+`credit preprocess` also records their physical-unit (pre-sqrt) statistics in
+`<scaler>_physical.json`, which `BaseLoss` and the gen2 metrics use to weight
+them by their exact variance (see [Losses](Losses.md)).
+
 ### `concat` (ConcatToTensor)
 
 **AutoAPI:** {py:obj}`credit.preblock.concat.ConcatToTensor`

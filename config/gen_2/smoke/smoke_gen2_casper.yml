@@ -210,7 +210,7 @@ inference:
 pbs:
     conda: "/glade/u/home/schreck/.conda/envs/credit-casper"  # full path — avoids conda init issues in PBS
     job_name: "smoke_gen2"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     walltime: "01:00:00"
     ncpus: 8
     ngpus: 1

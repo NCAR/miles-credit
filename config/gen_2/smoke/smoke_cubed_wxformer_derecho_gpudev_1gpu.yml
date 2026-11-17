@@ -175,7 +175,7 @@ trainer:
     valid_thread_workers: 1
     prefetch_factor: 2
 pbs:
-  project: P93300012
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: smoke_cubed_gpudev
   walltime: '01:00:00'
   conda: /glade/work/ajanney/conda-envs/credit-derecho

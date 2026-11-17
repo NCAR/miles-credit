@@ -70,7 +70,7 @@ trainer:
 pbs:
   # Casper
   conda: "credit-casper"
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "credit_preprocess"
   walltime: "04:00:00"
   ngpus: 1
@@ -81,7 +81,7 @@ pbs:
 
   # Derecho (uncomment and comment out Casper block above to use)
   # conda: "credit-derecho"
-  # project: "NAML0001"
+  # project: YOUR_ACCOUNT
   # job_name: "credit_preprocess"
   # walltime: "04:00:00"
   # ngpus: 4
