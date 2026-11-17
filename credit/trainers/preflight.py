@@ -21,11 +21,17 @@ check_model_gpu_memory(conf, model, optimizer, rank) -> None
     Runs a synthetic forward/backward/optimizer step and logs peak VRAM.
 """
 
+from __future__ import annotations
+
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING, Any
 
 from credit.datasets.gen_2.channel_utils import resolve_num_levels
+
+if TYPE_CHECKING:
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -241,12 +247,71 @@ def check_dataloader_startup(
 # ---------------------------------------------------------------------------
 
 
+def _cpu_copy(obj: Any) -> Any:
+    """A deep copy of a (nested) state dict with every tensor cloned to the CPU."""
+    import torch
+
+    if isinstance(obj, torch.Tensor):
+        return obj.detach().to("cpu", copy=True)
+    if isinstance(obj, dict):
+        return {k: _cpu_copy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return type(obj)(_cpu_copy(v) for v in obj)
+    return obj
+
+
+def synthetic_step(model: torch.nn.Module, optimizer: torch.optim.Optimizer, x: torch.Tensor) -> None:
+    """Run one forward/backward/optimizer step on *x* and leave no trace of it.
+
+    The step allocates what a real one does (activations, gradients, optimizer
+    state), so peak memory is measured faithfully. But it runs on the real model
+    and optimizer, so everything it touches is put back afterwards: the
+    parameters, their ``.grad``, the module buffers (spectral norm's
+    power-iteration vectors, norm statistics) and the optimizer state (Adam's
+    moments, step count and learning rate). The parameters and optimizer state
+    are held on the CPU meanwhile, about one extra copy of each in host memory.
+    Train/eval mode is left alone: forward and backward do not change it.
+
+    Restoring the parameters matters even though the step's update is thrown
+    away: an all-zero input can make a normalization layer divide by zero, and a
+    non-finite gradient turns the update into NaN weights.
+
+    Without this, a resumed job's restored Adam moments were overwritten by the
+    gradient of ``mean(model(zeros))``; with the scheduler past its warmup, the
+    next real steps followed that bogus direction at full learning rate and
+    training diverged right after every resume.
+    """
+    import torch
+
+    params = list(model.parameters())
+    saved_params = [p.detach().to("cpu", copy=True) for p in params]
+    saved_grads = [p.grad for p in params]  # set aside (not copied): backward then allocates fresh ones
+    saved_buffers = {name: buf.detach().clone() for name, buf in model.named_buffers()}
+    saved_optimizer = _cpu_copy(optimizer.state_dict())
+    for p in params:
+        p.grad = None
+    try:
+        model(x).mean().backward()
+        optimizer.step()
+    finally:
+        optimizer.load_state_dict(saved_optimizer)  # drops state the step created, restores the rest
+        with torch.no_grad():
+            for p, saved in zip(params, saved_params):
+                p.copy_(saved)
+            for name, buf in model.named_buffers():
+                if name in saved_buffers:
+                    buf.copy_(saved_buffers[name])
+        for p, grad in zip(params, saved_grads):
+            p.grad = grad
+
+
 def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
     """Run a synthetic forward/backward/optimizer step and log peak VRAM.
 
     Creates a zero-filled batch of the expected input shape, runs it through
-    the model, backprops, and steps the optimizer. Logs peak VRAM so users
-    can verify their model fits on the target GPU before a long training run.
+    the model, backprops, and steps the optimizer (see :func:`synthetic_step`,
+    which leaves the model and optimizer as it found them). Logs peak VRAM so
+    users can verify their model fits on the target GPU before a long training run.
 
     Input channel count is inferred from the model config:
         frames × (channels × levels + surface_channels + input_only_channels)
@@ -290,15 +355,9 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
         device = next(model.parameters()).device
         torch.cuda.reset_peak_memory_stats(device)
 
-        x = torch.zeros(B, C_in, H, W, device=device)
         # Unwrap DDP/FSDP so the synthetic pass runs on the inner module directly.
         # This avoids triggering NCCL collectives that non-zero ranks never join.
-        inner = getattr(model, "module", model)
-        y_hat = inner(x)
-        loss = y_hat.mean()
-        loss.backward()
-        optimizer.step()
-        optimizer.zero_grad()
+        synthetic_step(getattr(model, "module", model), optimizer, torch.zeros(B, C_in, H, W, device=device))
 
         peak_mib = torch.cuda.max_memory_allocated(device) / 2**20
         total_mib = torch.cuda.get_device_properties(device).total_memory / 2**20
@@ -313,7 +372,6 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
             C_in,
         )
 
-        del x, y_hat, loss
         torch.cuda.empty_cache()
 
     except Exception as e:

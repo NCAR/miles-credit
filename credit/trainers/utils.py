@@ -713,6 +713,13 @@ def load_model_states_and_optimizer(conf, model, device):
         if conf["trainer"]["start_epoch"] > 0:
             if scheduler is not None:
                 scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+                # A new scheduler set each group's lr for its own step 0 (0 during warmup); loading
+                # its state does not touch the optimizer, so the first resumed step would run at
+                # that lr. Put back the lr the schedule had reached.
+                last_lr = scheduler.get_last_lr() if hasattr(scheduler, "get_last_lr") else None
+                if last_lr is not None and len(last_lr) == len(optimizer.param_groups):
+                    for group, lr in zip(optimizer.param_groups, last_lr):
+                        group["lr"] = lr
             scaler.load_state_dict(checkpoint["scaler_state_dict"])
 
     if conf["trainer"].get("update_learning_rate", False):
