@@ -40,6 +40,8 @@ class LogTransform(BasePreblock):
             variables: []
     """
 
+    changes_units = True  # credit preprocess records physical-unit target stats
+
     def __init__(
         self,
         variables: list[str],

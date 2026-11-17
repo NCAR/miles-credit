@@ -194,6 +194,11 @@ args:
     - "era5/prognostic/3d/specific_humidity"
 ```
 
+A variable this block (or `exp_transform`) returns to physical units in
+`y_processed` is weighted by its physical-unit variance in `BaseLoss` and the
+gen2 metrics, not the scaler's transformed-space variance (see
+[Losses](Losses.md)).
+
 ## Diagnostics
 
 ### `geopotential_diagnostic` (GeopotentialDiagnostic)
