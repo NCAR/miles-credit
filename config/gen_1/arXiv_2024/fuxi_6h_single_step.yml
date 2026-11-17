@@ -176,7 +176,7 @@ predict:
     
 pbs: #derecho
     conda: "credit-derecho"
-    project: "NAML0001"
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     job_name: "fuxi_6h"
     walltime: "12:00:00"
     nodes: 8

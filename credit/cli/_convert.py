@@ -478,15 +478,21 @@ def _convert(args: argparse.Namespace) -> None:
     if not pbs:
         print("  --- PBS / job settings ---")
         cluster = prompt("Cluster (casper/derecho)", default="derecho")
-        account = prompt(
-            "PBS account code",
-            default=os.environ.get("PBS_ACCOUNT") or "NAML0001",
-        )
+        # Only write the account when the user types one; left blank, `credit submit`
+        # charges $PBS_ACCOUNT at submit time (same behavior as `credit begin`).
+        env_account = os.environ.get("PBS_ACCOUNT")
+        if env_account:
+            hint = f"PBS account (Enter to use $PBS_ACCOUNT={env_account} at submit time)"
+        else:
+            hint = "PBS project code to charge (Enter to skip; then export PBS_ACCOUNT before submitting)"
+        account = prompt(hint, default="")
         conda = prompt("Conda env (name or full path)", default="")
         walltime = prompt("Walltime (HH:MM:SS)", default="12:00:00")
         job_name = prompt("Job name", default="credit_gen2")
 
-        new_pbs = {"project": account, "job_name": job_name, "walltime": walltime, "conda": conda}
+        new_pbs = {"job_name": job_name, "walltime": walltime, "conda": conda}
+        if account:
+            new_pbs = {"project": account, **new_pbs}
 
         if cluster == "derecho":
             new_pbs["nodes"] = int(prompt("Nodes", default="1"))

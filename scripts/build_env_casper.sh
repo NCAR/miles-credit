@@ -2,7 +2,7 @@
 #PBS -N credit-env-casper
 #PBS -l select=1:ncpus=8:mem=32GB
 #PBS -l walltime=02:00:00
-#PBS -A NAML0001
+# Pass your project code at submit time: qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} <this script>
 #PBS -q casper
 #PBS -j oe
 #PBS -k eod
@@ -11,9 +11,9 @@
 # Build a miles-credit conda env on Casper.
 #
 # Usage:
-#   qsub scripts/build_env_casper.sh
+#   qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} scripts/build_env_casper.sh
 #   # or with custom source/target:
-#   SOURCE_ENV=/path/to/env TARGET_ENV=/path/to/new/env qsub scripts/build_env_casper.sh
+#   SOURCE_ENV=/path/to/env TARGET_ENV=/path/to/new/env qsub -A ${PBS_ACCOUNT:?set PBS_ACCOUNT} scripts/build_env_casper.sh
 #
 # SOURCE_ENV: base env to clone (must have PyTorch + CUDA stack)
 # TARGET_ENV: where the new env is created (defaults to $WORK/conda-envs/credit-casper)

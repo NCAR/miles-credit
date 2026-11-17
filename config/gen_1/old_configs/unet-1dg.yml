@@ -128,7 +128,7 @@ visualization:
 
 # pbs: #derecho
 #     conda: "holodec"
-#     project: "NAML0001"
+#     project: YOUR_ACCOUNT
 #     job_name: "holodec"
 #     walltime: "01:00:00"
 #     nodes: 1
@@ -146,5 +146,5 @@ pbs: # casper
     mem: '32GB'
     walltime: '00:15:00'
     gpu_type: 'a100'
-    project: 'NAML0001'
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     queue: 'casper'

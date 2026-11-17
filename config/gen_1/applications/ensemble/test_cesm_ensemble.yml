@@ -290,5 +290,5 @@ pbs: #derecho
     ngpus: 1
     mem: '32GB'
     gpu_type: 'v100'
-    project: 'NAML0001'
+    # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
     queue: 'casper'

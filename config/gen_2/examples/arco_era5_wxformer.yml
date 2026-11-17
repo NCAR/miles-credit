@@ -296,7 +296,7 @@ loss:
 
 pbs: #derecho
   conda: "credit-derecho"
-  project: "NAML0001"
+  # project: YOUR_ACCOUNT  # or export PBS_ACCOUNT
   job_name: "wxformer_arco_6hr_gen2"
   walltime: "12:00:00"
   nodes: 4

@@ -136,12 +136,13 @@ def test_clean_config_reports_no_errors(conf):
     assert rep.exit_code() == 0
 
 
-def test_missing_scaler_is_a_warning_not_an_error(conf):
+def test_missing_scaler_is_info_not_a_warning(conf):
     """A not-yet-fitted scaler is expected before `credit preprocess`."""
     rep = _run(conf)
-    assert any("scaler_path" in w for w in _wheres(rep, "warning"))
+    assert any("scaler_path" in w for w in _wheres(rep, "info"))
+    assert not any("scaler_path" in w for w in _wheres(rep, "warning"))
     assert rep.exit_code() == 0
-    assert rep.exit_code(strict=True) == 1
+    assert rep.exit_code(strict=True) == 0
 
 
 # ===========================================================================
@@ -868,6 +869,65 @@ def test_checks_do_not_mutate_the_config(conf):
     assert conf == before
 
 
+@pytest.mark.parametrize(
+    ("pbs", "env_account", "severity"),
+    [
+        ({"queue": "main"}, None, "warning"),  # submit would fail: nothing to charge
+        ({"queue": "main"}, "ENV_ACCOUNT", "info"),  # $PBS_ACCOUNT covers it
+        ({"queue": "main", "project": "ABCD0001"}, None, None),
+        ({"queue": "main", "project": "ABCD0001"}, "ABCD0001", None),  # agree: nothing to say
+        ({"queue": "main", "project": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # config overrides env
+        ({"queue": "main", "account": "ABCD0001"}, "ENV_ACCOUNT", "info"),  # alias too
+    ],
+)
+def test_pbs_account_resolution(conf, monkeypatch, pbs, env_account, severity):
+    if env_account:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    conf["pbs"] = pbs
+    rep = _run(conf)
+    found = {f.severity for f in rep.findings if f.where == "pbs.project"}
+    assert found == ({severity} if severity else set())
+
+
+def test_slurm_only_block_reports_account(conf, monkeypatch):
+    # A config with only a slurm: block (no pbs:) still gets its account reported.
+    monkeypatch.setenv("SLURM_ACCOUNT", "m0000_g")
+    conf.pop("pbs", None)
+    conf["slurm"] = {"conda": "credit", "partition": "gpu"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"] and "m0000_g" in found[0].message
+
+
+@pytest.mark.parametrize(("env_account", "needle"), [(None, "SLURM_ACCOUNT"), ("m0000_g", "m0000_g")])
+def test_slurm_account_message_is_scheduler_aware(conf, monkeypatch, env_account, needle):
+    # A Perlmutter block (written under pbs: by `credit begin`) resolves $SLURM_ACCOUNT, not $PBS_ACCOUNT.
+    monkeypatch.setenv("PBS_ACCOUNT", "PBS_ONLY")
+    if env_account:
+        monkeypatch.setenv("SLURM_ACCOUNT", env_account)
+    else:
+        monkeypatch.delenv("SLURM_ACCOUNT", raising=False)
+    conf["pbs"] = {"constraint": "gpu", "qos": "regular", "job_name": "j", "walltime": "01:00:00", "queue": "main"}
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == ["info"]
+    text = found[0].message + (found[0].fix or "")
+    assert needle in text and "PBS_ACCOUNT" not in text
+
+
+@pytest.mark.parametrize(("env_account", "expect_info"), [(None, True), ("", True), ("ENV0001", False)])
+def test_no_pbs_block_notes_missing_account(conf, monkeypatch, env_account, expect_info):
+    # No pbs: block (e.g. a laptop config): INFO only, never a warning, and silent when $PBS_ACCOUNT is set.
+    if env_account is None:
+        monkeypatch.delenv("PBS_ACCOUNT", raising=False)
+    else:
+        monkeypatch.setenv("PBS_ACCOUNT", env_account)
+    conf.pop("pbs", None)
+    conf.pop("slurm", None)
+    found = [f for f in _run(conf).findings if f.where == "pbs.project"]
+    assert [f.severity for f in found] == (["info"] if expect_info else [])
+
+
 # ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================
@@ -959,6 +1019,46 @@ def test_log_variance_weight_skipped_without_inverse_variance(conf, tmp_path):
 def test_log_variance_weight_skipped_without_exp_transform(conf, tmp_path):
     """A log-space loss scores in log units, so the scaler variance applies as-is."""
     _write_standard_scaler(tmp_path / "scaler.json", [8.0, 12.0], [0.5, 3.0])
+    assert not _log_variance_warnings(_run(conf))
+
+
+def _square_transform_q(conf):
+    for name, key in (("square", "y_processed"), ("square_target", "y_target_processed")):
+        conf["postblocks"]["per_step"][name] = {
+            "type": "square_transform",
+            "args": {"variables": ["ERA5/prognostic/3d/Q"], "key": key},
+        }
+
+
+def test_sqrt_variance_weight_warns_without_physical_stats(conf, tmp_path):
+    """A square_transformed variable without the sidecar is weighted by an estimate."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and found[0].where == "loss.args.var_weighting", found
+    assert "ERA5/prognostic/3d/Q" in found[0].message and "square_transformed" in found[0].message
+    assert "zero-inflated" not in found[0].message
+    assert "variable_weights" in found[0].fix and "credit preprocess" in found[0].fix
+
+
+def test_sqrt_variance_weight_flags_zero_inflated_fields(conf, tmp_path):
+    """A sqrt-space spread larger than the mean marks the estimate as least reliable."""
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [0.01, 4.0], [0.25, 0.5])
+    found = _log_variance_warnings(_run(conf))
+    assert len(found) == 1 and "zero-inflated" in found[0].message, found
+
+
+def test_sqrt_variance_weight_silent_with_exact_physical_stats(conf, tmp_path):
+    _square_transform_q(conf)
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
+    _write_standard_scaler(tmp_path / "scaler_physical.json", [9.0, 16.0], [9.0, 32.0])
+    assert not _log_variance_warnings(_run(conf)), _text(_run(conf), "warning")
+
+
+def test_sqrt_variance_weight_skipped_without_square_transform(conf, tmp_path):
+    """A sqrt-space loss scores in sqrt units, so the scaler variance applies as-is."""
+    _write_standard_scaler(tmp_path / "scaler.json", [3.0, 4.0], [0.25, 0.5])
     assert not _log_variance_warnings(_run(conf))
 
 

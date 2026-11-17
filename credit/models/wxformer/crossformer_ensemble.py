@@ -1,4 +1,4 @@
-from credit.models.crossformer import CrossFormer
+from credit.models.wxformer.crossformer import CrossFormer
 import torch.nn.functional as F
 import torch.nn as nn
 import logging
@@ -64,17 +64,17 @@ class CrossFormerWithNoise(CrossFormer):
                 [
                     StochasticDecompositionLayer(
                         self.noise_latent_dim,
-                        self.up_block3.output_channels,
+                        self.up_block3.sharp.out_channels,
                         encoder_noise_factors[0],
                     ),
                     StochasticDecompositionLayer(
                         self.noise_latent_dim,
-                        self.up_block2.output_channels,
+                        self.up_block2.sharp.out_channels,
                         encoder_noise_factors[1],
                     ),
                     StochasticDecompositionLayer(
                         self.noise_latent_dim,
-                        self.up_block1.output_channels,
+                        self.up_block1.sharp.out_channels,
                         encoder_noise_factors[2],
                     ),
                 ]
@@ -92,17 +92,17 @@ class CrossFormerWithNoise(CrossFormer):
         # Decoder noise injection layers
         self.noise_inject1 = StochasticDecompositionLayer(
             self.noise_latent_dim,
-            self.up_block1.output_channels,
+            self.up_block1.sharp.out_channels,
             decoder_noise_factors[0],
         )
         self.noise_inject2 = StochasticDecompositionLayer(
             self.noise_latent_dim,
-            self.up_block2.output_channels,
+            self.up_block2.sharp.out_channels,
             decoder_noise_factors[1],
         )
         self.noise_inject3 = StochasticDecompositionLayer(
             self.noise_latent_dim,
-            self.up_block3.output_channels,
+            self.up_block3.sharp.out_channels,
             decoder_noise_factors[2],
         )
 
@@ -130,8 +130,10 @@ class CrossFormerWithNoise(CrossFormer):
 
         if self.patch_width > 1 and self.patch_height > 1:
             x = self.cube_embedding(x)
-        elif self.frames > 1:
-            x = F.avg_pool3d(x, kernel_size=(2, 1, 1)).squeeze(2)
+
+        if self.frames > 1:
+            b, c, t, h, w = x.shape
+            x = x.reshape(b, c * t, h, w)
         else:
             x = x.squeeze(2)
 
@@ -171,7 +173,8 @@ class CrossFormerWithNoise(CrossFormer):
         if self.use_interp:
             x = F.interpolate(x, size=(self.image_height, self.image_width), mode="bilinear")
 
-        x = x.unsqueeze(2)
+        b, _, h, w = x.shape
+        x = x.view(b, self.base_output_channels, self.output_frames, h, w)
 
         if self.use_post_block:
             x = {
