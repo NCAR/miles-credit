@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.checkpoint import checkpoint
+from credit.boundary_padding import TensorPadding
 from credit.postblock.gen1 import PostBlock
 from timm.layers import DropPath, Mlp, to_2tuple, _assert
 from credit.models.base_model import BaseModel
@@ -44,6 +45,30 @@ def apply_spectral_norm(model):
 
 def circular_pad1d(x, pad):
     return torch.cat((x[..., -pad:], x, x[..., :pad]), dim=-1)
+
+
+def _as_pad_pair(pad):
+    """Normalize a ``pad_lat``/``pad_lon`` entry to a ``(before, after)`` pair.
+
+    ``TensorPadding`` indexes these as two-element sequences, as do ``fuxi`` and
+    ``dscale_wrf``, and that is what ``credit_main_parser`` hands the model: it
+    rewrites a scalar ``pad_lat: 80`` into ``[80, 80]`` (``credit/parser.py``).
+    Gen2 training runs through ``credit/applications/train_gen2.py``, which
+    bypasses that parser, so the scalar spelling several configs use can still
+    reach the model there. Accept both rather than failing on one of them.
+
+    Args:
+        pad (int | float | Sequence[int]): Symmetric width, or ``[before, after]``.
+
+    Returns:
+        Tuple[int, int]: The ``(before, after)`` widths.
+    """
+    if isinstance(pad, (int, float)):
+        return (int(pad), int(pad))
+    pad = tuple(int(p) for p in pad)
+    if len(pad) != 2:
+        raise ValueError(f"padding must be an int or a 2-element sequence, got {pad!r}")
+    return pad
 
 
 def bchw_to_bhwc(x: torch.Tensor) -> torch.Tensor:
@@ -744,10 +769,20 @@ class SwinTransformerV2Cr(BaseModel):
         self.use_padding = padding_conf["activate"]
 
         if self.use_padding:
-            pad_lat = padding_conf["pad_lat"]
-            pad_lon = padding_conf["pad_lon"]
-            img_size[0] += int(2 * pad_lat)
-            img_size[1] += int(2 * pad_lon)
+            # Normalize first: the padded image size must agree with what
+            # TensorPadding actually adds, including asymmetric widths such as
+            # pad_lat: [37, 38]. The previous `int(2 * pad_lat)` assumed a
+            # symmetric scalar and raised TypeError on the list form, which is
+            # what credit_main_parser always produces -- so padding was
+            # unusable even with the shipped swin_6hr.yml / swin_1h.yml.
+            pad_lat = _as_pad_pair(padding_conf["pad_lat"])
+            pad_lon = _as_pad_pair(padding_conf["pad_lon"])
+            padding_conf = {**padding_conf, "pad_lat": pad_lat, "pad_lon": pad_lon}
+            img_size[0] += pad_lat[0] + pad_lat[1]
+            img_size[1] += pad_lon[0] + pad_lon[1]
+            # forward() calls self.padding_opt.pad/unpad; without this the model
+            # raised AttributeError on the first batch whenever padding was on.
+            self.padding_opt = TensorPadding(**padding_conf)
 
         img_size = to_2tuple(img_size)
         window_size = (

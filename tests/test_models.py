@@ -11,6 +11,8 @@ from credit.parser import load_custom_model_modules
 from credit.models.unet import SegmentationModel
 from credit.models.wxformer.crossformer import CrossFormer
 from credit.models.fuxi import Fuxi
+from credit.models.swin import SwinTransformerV2Cr
+from credit.distributed import ignore_static_attn_mask_buffers
 from credit.parser import credit_main_parser
 
 TEST_FILE_DIR = "/".join(os.path.abspath(__file__).split("/")[:-1])
@@ -208,6 +210,87 @@ def test_register_model_overwrite(caplog):
     conf = {"model": {"type": "test_overwrite_model"}, "save_loc": "/tmp"}
     model = load_model(conf)
     assert isinstance(model, ModelV2)
+
+
+def _small_swin(img_size, padding_conf=None):
+    """Build a CPU-sized SwinTransformerV2Cr.
+
+    The shipped swin config is 640x1280 / embed_dim 768 / depth 12, which is far too
+    large for CI, so these tests construct the model directly. ``patch_size=4`` with
+    ``window_size=5`` requires the *padded* image to be a multiple of 20 on both axes.
+
+    Args:
+        img_size (Tuple[int, int]): Unpadded (height, width).
+        padding_conf (dict): Padding configuration, or None to disable.
+
+    Returns:
+        SwinTransformerV2Cr: The constructed model.
+    """
+    return SwinTransformerV2Cr(
+        img_size=img_size,
+        patch_size=4,
+        window_size=5,
+        channels=1,
+        levels=2,
+        surface_channels=1,
+        input_only_channels=0,
+        output_only_channels=0,
+        frames=1,
+        embed_dim=32,
+        depths=(2,),
+        num_heads=(2,),
+        padding_conf=padding_conf,
+    )
+
+
+@pytest.mark.parametrize("pad_lat, pad_lon", [(4, 8), ([3, 5], [8, 8])], ids=["symmetric_int", "asymmetric_list"])
+def test_swin_boundary_padding(pad_lat, pad_lon):
+    """Swin with padding active must build, and round-trip back to the input grid.
+
+    Regression test for two bugs: ``forward`` called ``self.padding_opt.pad``/``unpad``
+    but ``__init__`` never constructed it, raising AttributeError on the first batch;
+    and the padded image size was computed as ``int(2 * pad_lat)``, which assumed a
+    symmetric scalar and raised TypeError on the ``[before, after]`` form that
+    ``credit_main_parser`` always produces.
+    """
+    image_height, image_width = 32, 64
+    padding_conf = {"activate": True, "mode": "earth", "pad_lat": pad_lat, "pad_lon": pad_lon}
+
+    model = _small_swin((image_height, image_width), padding_conf)
+
+    # both spellings add 8 rows and 16 columns, and the interior is restored on unpad
+    assert model.img_size == (40, 80)
+
+    input_tensor = torch.randn(1, model.in_chans, 1, image_height, image_width)
+    y_pred = model(input_tensor)
+
+    assert y_pred.shape == torch.Size([1, model.out_chans, 1, image_height, image_width])
+    assert not torch.isnan(y_pred).any()
+
+
+def test_swin_attn_mask_excluded_from_ddp_buffer_sync():
+    """Static attention masks must land on the DDP ignore list by fully-qualified name.
+
+    They derive from the window geometry alone, so every rank builds an identical
+    copy. Left in, DDP re-broadcasts them on every forward pass — roughly 300 MiB of
+    constants per iteration at the production 640x1280 depth-12 size.
+    """
+    model = _small_swin((40, 80))
+
+    masks = [name for name, _ in model.named_buffers() if name.rsplit(".", 1)[-1] == "attn_mask"]
+    assert masks, "expected at least one shifted block to register an attn_mask"
+
+    added = ignore_static_attn_mask_buffers(model)
+    assert sorted(added) == sorted(masks)
+    assert sorted(model._ddp_params_and_buffers_to_ignore) == sorted(masks)
+
+    # idempotent, and it must not discard entries an earlier caller added
+    assert ignore_static_attn_mask_buffers(model) == []
+    assert sorted(model._ddp_params_and_buffers_to_ignore) == sorted(masks)
+
+    # every other buffer keeps synchronizing
+    others = [name for name, _ in model.named_buffers() if name.rsplit(".", 1)[-1] != "attn_mask"]
+    assert not set(others) & set(model._ddp_params_and_buffers_to_ignore)
 
 
 if __name__ == "__main__":
