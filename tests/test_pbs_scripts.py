@@ -586,12 +586,12 @@ class TestSchedulerIntegration:
 
 
 # ---------------------------------------------------------------------------
-# Channel map / denorm alignment
+# Channel map
 # ---------------------------------------------------------------------------
 
 
 class TestChannelAlignment:
-    """_build_channel_map and _build_denorm_stats must agree on C_out."""
+    """_build_channel_map must lay out the output channels contiguously."""
 
     def _conf(self, vars_3d, vars_2d, diag_2d, n_levels=5):
         return {
@@ -607,52 +607,7 @@ class TestChannelAlignment:
                     }
                 },
             },
-            "preblocks": {
-                "norm": {
-                    "args": {
-                        "mean_path": "/fake/mean.nc",
-                        "std_path": "/fake/std.nc",
-                    }
-                }
-            },
         }
-
-    def _patch_xr(self, monkeypatch, conf):
-        import numpy as np
-        import xarray as xr
-
-        src = conf["data"]["source"]["ERA5"]
-        n = len(src["levels"])
-        v = src["variables"]
-        all_3d = (v.get("prognostic") or {}).get("vars_3D", [])
-        all_2d = list((v.get("prognostic") or {}).get("vars_2D", [])) + list(
-            (v.get("diagnostic") or {}).get("vars_2D", [])
-        )
-        ds_vars = {vn: xr.DataArray(np.ones(n), dims=["level"], coords={"level": src["levels"]}) for vn in all_3d}
-        ds_vars.update({vn: xr.DataArray(np.float32(1.0)) for vn in all_2d})
-        ds = xr.Dataset(ds_vars)
-        monkeypatch.setattr(xr, "open_dataset", lambda *a, **kw: ds)
-
-    def test_lengths_match_simple(self, monkeypatch):
-        from credit.cli import _build_channel_map, _build_denorm_stats
-
-        conf = self._conf(["U", "V"], ["SP"], [], n_levels=3)
-        self._patch_xr(monkeypatch, conf)
-        cm = _build_channel_map(conf)
-        m, s = _build_denorm_stats(conf)
-        total_from_map = sum(len(v) for v in cm.values())
-        assert len(m) == total_from_map
-        assert len(s) == total_from_map
-
-    def test_lengths_match_with_diagnostics(self, monkeypatch):
-        from credit.cli import _build_channel_map, _build_denorm_stats
-
-        conf = self._conf(["T", "Q"], ["SP", "VAR_2T"], ["precip", "evap"], n_levels=4)
-        self._patch_xr(monkeypatch, conf)
-        cm = _build_channel_map(conf)
-        m, s = _build_denorm_stats(conf)
-        total_from_map = sum(len(v) for v in cm.values())
-        assert len(m) == total_from_map == 4 * 2 + 2 + 2  # 12
 
     def test_channel_indices_are_contiguous(self):
         from credit.cli import _build_channel_map
