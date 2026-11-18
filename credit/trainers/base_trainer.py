@@ -444,6 +444,9 @@ class BaseTrainer(ABC):
           - list of variable names: only per-variable columns whose key contains
             one of the names.
           - ``False`` or ``[]``: combined aggregates only.
+
+        The raw-prediction validation loss (``loss_raw``) and the conservation
+        fixers' correction sizes (``fixer/<block>/<quantity>``) are always written.
         """
         required_metrics = ["loss", *self.display_metrics, "forecast_len", "history_len"]
 
@@ -466,7 +469,8 @@ class BaseTrainer(ABC):
             names = all_names
         else:
             names = []
-        return list(dict.fromkeys(names + required_metrics))  # preserves order; set() randomizes column order
+        always = [name for name in all_names if name == "loss_raw" or name.startswith("fixer/")]
+        return list(dict.fromkeys(names + required_metrics + always))  # preserves order; set() randomizes column order
 
     # ------------------------------------------------------------------
     # Checkpointing

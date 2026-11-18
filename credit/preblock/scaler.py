@@ -5,11 +5,16 @@ from credit.preblock.base import BasePreblock
 from os.path import exists, expandvars, splitext
 from os import makedirs
 from ._utils import (
-    _parse_variable_selection,
-    _flatten_spatial_tensors,
-    _unflatten_spatial_tensors,
     _any_mps,
+    _flatten_spatial_tensors,
+    _leaf_ndims,
+    _legacy_spatial_variables,
+    _merge_nested,
+    _parse_variable_selection,
+    _pass_through_empty_cells,
+    _spatial_scaler_template,
     _to_cpu,
+    _unflatten_spatial_tensors,
 )
 
 _SCALER_REGISTRY = {
@@ -172,9 +177,13 @@ class BridgeScalerTransform(BasePreblock):
             data_types:
                 - "target"
 
-        # Grid-wise scaling: variables in `spatial_variables` are scaled per
-        # gridpoint (one mean/variance per lat/lon cell) rather than per level.
-        # Their scaler's x_columns_/mean_x_/var_x_ must have length == n_lat * n_lon.
+        # Grid-wise scaling: variables in `spatial_variables` get one mean/variance
+        # per level *and* gridpoint, fit with bridgescaler's
+        # DSpatialStandardScalerTensor whatever `scaler_type` the block uses.
+        # Statistics are NaN-aware per gridpoint, and a constant (zero-variance)
+        # gridpoint is scaled with std 1 instead of dividing by zero. Scaler files
+        # fit before this (a DStandardScalerTensor over the flattened H*W grid)
+        # still load and transform as before.
         # `spatial_variables` entries must also be covered by `variables`.
         type: "bridgescaler_transform"
         args:
@@ -204,6 +213,7 @@ class BridgeScalerTransform(BasePreblock):
         # Full keys or partial paths of variables that use grid-wise (per-gridpoint)
         # scaling instead of per-level scaling. Must also be selected by `variables`.
         self.spatial_variables = spatial_variables or []
+        self._flat_spatial = None  # legacy (flattened-grid) spatial scalers, resolved on first forward
         if scaler_params is None:
             scaler_params = {}
         # bridgescaler defaults to channels_last=True, but CREDIT tensors are always
@@ -216,7 +226,7 @@ class BridgeScalerTransform(BasePreblock):
         # inverse_transform (loaded from disk, or accumulated by fit_scaler_batch).
         # ``scaler_template`` is the single unfitted prototype used to fit new data.
         if exists(self.scaler_path):
-            self.scaler = load_scaler_dict(self.scaler_path)
+            self.scaler = _pass_through_empty_cells(load_scaler_dict(self.scaler_path))
             self.scaler_template = None
         else:
             full_scaler_path = self.scaler_path
@@ -236,17 +246,21 @@ class BridgeScalerTransform(BasePreblock):
     def forward(self, batch: dict) -> dict:
         if not self.variables_expanded:
             self._expand_variables(batch)
+        # Only spatial variables from a pre-DSpatialStandardScalerTensor scaler file are flattened.
+        if self._flat_spatial is None:
+            self._flat_spatial = _legacy_spatial_variables(self.scaler, self.spatial_variables)
+        flat_spatial = self._flat_spatial
         batch = self._copy_batch(batch)  # shallow copy — avoids mutating the caller's dict
         if self.data_types is not None:
             # Slice to the requested data types — useful in multi-step training where
             # the input is already scaled but the target still needs to be scaled.
             sub_batch = {dt: batch[dt] for dt in self.data_types if dt in batch}
-            sub_batch, spatial_shapes = _flatten_spatial_tensors(sub_batch, self.spatial_variables)
+            sub_batch, spatial_shapes = _flatten_spatial_tensors(sub_batch, flat_spatial)
             scaled = scale_var_dict(sub_batch, self.scaler, self.method, self.variables)
             scaled = _unflatten_spatial_tensors(scaled, spatial_shapes)
             batch.update(scaled)  # write the scaled data types back into the full batch
             return batch
-        batch, spatial_shapes = _flatten_spatial_tensors(batch, self.spatial_variables)
+        batch, spatial_shapes = _flatten_spatial_tensors(batch, flat_spatial)
         scaled = scale_var_dict(batch, self.scaler, self.method, self.variables)
         return _unflatten_spatial_tensors(scaled, spatial_shapes)
 
@@ -271,9 +285,18 @@ class BridgeScalerTransform(BasePreblock):
             self._expand_variables(batch)
         # Fit only the requested data types; if data_types is None, fit the full batch.
         fit_batch = {dt: batch[dt] for dt in self.data_types if dt in batch} if self.data_types is not None else batch
-        fit_batch, _ = _flatten_spatial_tensors(fit_batch, self.spatial_variables)
-        fitted = scale_var_dict(fit_batch, self.scaler_template, "fit", self.variables)
+        # Spatial variables get a per-location scaler (one template per tensor rank);
+        # everything else uses this block's scaler_type.
+        spatial_set = set(self.spatial_variables)
+        plain = [v for v in self.variables if v not in spatial_set]
+        fitted = scale_var_dict(fit_batch, self.scaler_template, "fit", plain) if plain else {}
+        by_ndim = {}
+        for var, ndim in _leaf_ndims(fit_batch, self.spatial_variables).items():
+            by_ndim.setdefault(ndim, []).append(var)
+        for ndim, names in by_ndim.items():
+            fitted = _merge_nested(fitted, scale_var_dict(fit_batch, _spatial_scaler_template(ndim), "fit", names))
         # Merge this batch's fit into the running accumulation (running average of
         # the scaler statistics across batches).
         self.scaler = fitted if self.scaler is None else _combine_scaler_dicts(self.scaler, fitted)
+        self._flat_spatial = None
         return self.scaler

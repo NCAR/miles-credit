@@ -13,7 +13,7 @@ zarr
 numcodecs
 einops
 echo-opt
-bridgescaler
+bridgescaler>=0.9.0
 segmentation-models-pytorch
 haversine
 pvlib

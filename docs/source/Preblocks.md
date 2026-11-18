@@ -113,6 +113,37 @@ args:
   reshape_to_xy: true
 ```
 
+**Partial-coverage sources (`renormalize`).** The plain product `W @ x` is right when
+the source covers the whole destination grid. It goes wrong when the source does not,
+as with an MPAS ocean or sea-ice mesh (which has no land cells) regridded onto a global
+grid:
+
+- a destination cell that no source cell overlaps gets an empty sum, so it comes out
+  **0** rather than NaN, and the scaler and loss treat land as data;
+- with `destarea`-normalized weights (the ESMF default), a coastal cell that is 30% ocean
+  gets 0.3 × the ocean value.
+
+Set `renormalize: true` on that regrid block to compute `Σ w·x / Σ w` over the valid
+(non-NaN) source cells instead. Coastal cells then get the true mean of their covered
+part, and cells with no valid source come out NaN, ready for a later `fill_values`
+NaN → 0 rule.
+
+NaN source cells are skipped rather than propagated, so with a land field (ocean stored
+as NaN) a coastal cell keeps the mean of its land part instead of becoming NaN. For a
+source with full coverage and no NaN, both modes give the same result. `credit check`
+warns when a regrid block's weight file leaves destination cells empty or partly covered
+and `renormalize` is not set.
+
+```yaml
+ocnregrid:
+  type: "regrid"
+  args:
+    weight_file: "/path/to/EC30to60E2r2_to_CESMf09.nc"   # destarea weights, ocean-only source
+    variables:
+      - "E3SM_OCN/prognostic/2d/SSS"
+    renormalize: true
+```
+
 ### `era5_normalizer` (ERA5Normalizer)
 
 **AutoAPI:** {py:obj}`credit.preblock.norm.ERA5Normalizer`
@@ -163,6 +194,20 @@ you don't need to set it yourself unless you have a reason to override it.
 (Once fitted, the setting is saved in the scaler JSON, so transform-only use
 of an existing scaler is unaffected.)
 ```
+
+Variables listed under `spatial_variables` are scaled **grid-wise**: one mean and
+variance per level *and* grid point, fit with bridgescaler's
+`DSpatialStandardScalerTensor` whatever `scaler_type` the block uses. It works on
+lat/lon and unstructured (`ncol`) grids and on 3D variables (per level). The
+statistics are NaN-aware per grid point, so a fixed mask (SST over land, say)
+only drops those cells, and a constant grid point is scaled with a standard
+deviation of 1 instead of dividing by zero. A cell that is NaN in every sample
+(never observed) has NaN statistics; the scaler pre/postblocks pass it through
+unchanged (mean 0, std 1) so nothing downstream turns NaN. Raw NaNs stay NaN
+through the scaler, so fill them *after* it (a `fill_values` preblock) before
+`concat` so the model sees finite values. Fitting
+needs a bridgescaler newer than 0.8.6; scaler files fit before this (one
+column per grid point, over the flattened grid) still load and work unchanged.
 
 ```{warning}
 If a variable is scaled grid-wise via `spatial_variables`, that same list must

@@ -130,6 +130,29 @@ def test_missing_scaler_is_not_backed_up(tmp_path):
     assert _backup_existing_file(str(tmp_path / "missing.json")) is None
 
 
+@pytest.mark.parametrize("shape", [(4, 1, 1, 6, 8), (4, 3, 1, 50)], ids=["latlon", "ncol"])
+def test_log_fitted_scalers_handles_spatial_scalers(shape, caplog):
+    """Per-location scalers store (C, *grid) stats; logging must summarize them, not index per channel."""
+    import logging
+
+    from credit.applications.preprocess import log_fitted_scalers
+    from credit.preblock._utils import _spatial_scaler_template
+
+    x = torch.randn(*shape) * 2 + 280
+    x[..., :3] = float("nan")  # cells never observed, like land in an ocean field
+    scaler = _spatial_scaler_template(len(shape))
+    scaler.fit(x)
+
+    logger = logging.getLogger("test_spatial_log")
+    with caplog.at_level(logging.INFO, logger="test_spatial_log"):
+        log_fitted_scalers({"input": {"src": {"SST": scaler}}}, logger)
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+    lines = [r.getMessage() for r in caplog.records if "never-observed" in r.getMessage()]
+    assert len(lines) == shape[1]
+    assert all("inv[-4 -> 4]" in line and "nan" not in line for line in lines)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -642,3 +665,177 @@ def test_preprocess_main_duplicate_scaler_path_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
     with pytest.raises(ValueError, match="distinct scaler_path"):
         preprocess.main()
+
+
+# ---------------------------------------------------------------------------
+# IC-phase handling (offline — no dataset needed)
+# ---------------------------------------------------------------------------
+
+
+def test_preprocess_writes_loss_variances_end_to_end(tmp_path, monkeypatch):
+    """preprocess.main fits the scaler, then writes physical-unit variances for a
+    log-scaled variable that the target twin exponentiates back."""
+    import json
+
+    import yaml
+    from credit.applications import preprocess
+
+    conf = _make_conf(str(tmp_path / "save"), str(tmp_path / "scaler.json"))
+    conf["trainer"]["batches_per_epoch"] = 4
+    conf["preblocks"]["per_step"]["concat"] = {"type": "concat"}
+    scaler_args = {"scaler_path": str(tmp_path / "scaler.json"), "variables": []}
+    conf["postblocks"] = {
+        "per_step": {
+            "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+            "reconstruct_target": {"type": "reconstruct", "args": {"in_key": "y", "out_key": "y_target_processed"}},
+            "scaler_target": {
+                "type": "bridgescaler_transform",
+                "args": {**scaler_args, "method": "inverse_transform", "key": "y_target_processed"},
+            },
+            "exp_target": {"type": "exp_transform", "args": {"variables": [VAR_Q], "key": "y_target_processed"}},
+        }
+    }
+    variance_path = tmp_path / "save" / "loss_variances.json"
+    conf["loss"] = {
+        "type": "base",
+        "args": {"scaler_path": scaler_args["scaler_path"], "variance_path": str(variance_path)},
+    }
+    config_path = tmp_path / "preprocess.yml"
+    config_path.write_text(yaml.safe_dump(conf, sort_keys=False))  # block order matters
+
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path)])
+    try:
+        preprocess.main()
+    except Exception as err:  # network / GCS issues
+        if "GCS" in str(err) or "gs://" in str(err) or "connect" in str(err).lower():
+            pytest.skip(f"WeatherBench2 GCS store unavailable: {err}")
+        raise
+
+    variables = json.loads(variance_path.read_text())["variables"]
+    assert variables[VAR_T]["n_samples"] == 2 * 2  # half of 4 batches, batch size 2
+    q = variables[VAR_Q]
+    # Physical specific humidity (kg/kg), not the log-space values the scaler was fit on.
+    assert len(q["pooled_variance"]) == len(LEVELS)
+    assert all(1e-10 < v < 1e-4 for v in q["pooled_variance"]), variables
+    assert all(0 < v < p for v, p in zip(q["temporal_variance"], q["pooled_variance"]))
+    assert variables[VAR_T]["observed_fraction"] == pytest.approx([1.0] * len(LEVELS))
+    assert all(1.0 < v < 1000.0 for v in variables[VAR_T]["pooled_variance"])
+
+    # --variance-only rebuilds the file from the existing scaler, backing up the old one.
+    monkeypatch.setattr(sys, "argv", ["credit_preprocess", "-c", str(config_path), "--variance-only"])
+    preprocess.main()
+    assert len(list(variance_path.parent.glob("loss_variances_*.json"))) == 1
+
+
+class TestICPhase:
+    """`credit preprocess` must fit scalers on the batch the trainer produces at step 0.
+
+    The trainer runs ``preblocks.ic_only`` before ``preblocks.per_step`` (see
+    ``TrainerGen2``), so statistics fit on the raw batch would describe a different
+    grid, vertical coordinate or set of variable names than the scaler is later asked
+    to transform.
+    """
+
+    RAW = f"{SOURCE}/prognostic/2d/raw_name"
+    RENAMED = f"{SOURCE}/prognostic/2d/renamed"
+
+    @staticmethod
+    def _batch(var_key, value=3.0):
+        return {"input": {SOURCE: {var_key: torch.full((1, 1, 1, 2, 2), value)}}}
+
+    @staticmethod
+    def _conf(tmp_path, ic_only=None):
+        conf = {
+            "preblocks": {
+                "per_step": {
+                    "scaler": {
+                        "type": "bridgescaler_transform",
+                        "args": {"variables": [], "scaler_path": str(tmp_path / "scaler.json")},
+                    }
+                }
+            }
+        }
+        if ic_only is not None:
+            conf["preblocks"]["ic_only"] = ic_only
+        return conf
+
+    def test_ic_phase_is_applied_before_fitting(self, tmp_path):
+        """An ic_only rename reaches the fit batch — the trainer applies it before per_step."""
+        from credit.preblock import apply_preblocks
+
+        conf = self._conf(
+            tmp_path,
+            {"rename": {"type": "rename", "args": {"mapping": {self.RAW: self.RENAMED}}}},
+        )
+        ic_preblocks = build_preblocks(conf, phase="ic_only")
+        step_preblocks = build_preblocks(conf, phase="per_step")
+
+        batch = apply_preblocks(ic_preblocks, self._batch(self.RAW))
+        fit_batch = apply_preblocks_before_scaler(step_preblocks, batch, None, stop_key="scaler")
+
+        assert self.RENAMED in fit_batch["input"][SOURCE]
+        assert self.RAW not in fit_batch["input"][SOURCE]
+
+    def test_no_ic_section_is_a_passthrough(self, tmp_path):
+        """Configs without an ic_only section are untouched — the same object comes back."""
+        from credit.preblock import apply_preblocks
+
+        ic_preblocks = build_preblocks(self._conf(tmp_path), phase="ic_only")
+        assert len(ic_preblocks) == 0
+
+        batch = self._batch(self.RAW)
+        assert apply_preblocks(ic_preblocks, batch) is batch
+
+    def test_scaler_in_ic_only_is_rejected(self, tmp_path):
+        """An ic_only scaler is never fit by preprocess, so reject it with an actionable error."""
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(
+            tmp_path,
+            {
+                "scale_ic": {
+                    "type": "bridgescaler_transform",
+                    "args": {"variables": [], "scaler_path": str(tmp_path / "ic_scaler.json")},
+                }
+            },
+        )
+        with pytest.raises(ValueError, match="not supported in the 'ic_only' phase"):
+            _validate_ic_phase(build_preblocks(conf, phase="ic_only"))
+
+    def test_concat_in_ic_only_is_rejected(self, tmp_path):
+        """concat flattens the nested dict the per_step chain needs."""
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(tmp_path, {"concat": {"type": "concat"}})
+        with pytest.raises(ValueError, match="not supported in the 'ic_only' phase"):
+            _validate_ic_phase(build_preblocks(conf, phase="ic_only"))
+
+    def test_valid_ic_phase_passes_validation(self, tmp_path):
+        from credit.applications.preprocess import _validate_ic_phase
+
+        conf = self._conf(tmp_path, {"rename": {"type": "rename", "args": {"mapping": {self.RAW: self.RENAMED}}}})
+        _validate_ic_phase(build_preblocks(conf, phase="ic_only"))  # must not raise
+
+
+def test_check_flags_unsupported_ic_only_blocks():
+    """`credit check` reports the same constraint statically."""
+    from credit.cli._check import _Report, _check_ic_only_phase
+
+    rep = _Report("test.yml")
+    _check_ic_only_phase(
+        {
+            "preblocks": {
+                "ic_only": {
+                    "scale_ic": {"type": "bridgescaler_transform", "args": {}},
+                    "concat": {"type": "concat"},
+                    "rename": {"type": "rename", "args": {}},
+                }
+            }
+        },
+        rep,
+    )
+    wheres = [f.where for f in rep.findings]
+    assert rep.count("error") == 2
+    assert "preblocks.ic_only.scale_ic" in wheres
+    assert "preblocks.ic_only.concat" in wheres
+    assert "preblocks.ic_only.rename" not in wheres

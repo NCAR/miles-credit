@@ -1,0 +1,893 @@
+# Gen2 config for the subE3SMulator (E3SMv2.1-coupled climate emulator): scaling test, 2026-10-24.
+#
+# Scaling decisions come from scripts/scaling_diagnostics.py, tail_scan.py and units_audit.py; see
+# E3SMULATOR_SCALING_DIAGNOSTICS.md and E3SMULATOR_TRAINING_DEBUG.md. In short:
+#   - per-cell (spatial) scaling only for PS, SST, SSS, TLAI; everything else per-channel (global)
+#   - PRECT: sqrt before scaling, square after (prediction and target twin)
+#   - loss/metric weights: per-level variances measured in loss units (variance_path, written by preprocess),
+#     so PRECT's m/s variance and the masked fields' observed fractions need no hand-set multipliers
+#   - log only on input-only fields (TLAI, canopy heights), so no exp on any output
+#   - clips for two processing artifacts: sithick pile-up cells (> 10 m), QRUNOFF one-step pulses (> 50 mm/6 h)
+#   - land -> NaN for SST (before the ATM regrid) and for the MPAS fields (ocnregrid renormalize: true)
+#   - Q clipped to |z| <= 50 after the scaler: one-step simulation spikes at the model top (levels 0-9)
+#     reach |z| ~1,500 (E3SMULATOR_DATA_AUDIT.md section 0.1)
+#   - fixers: tracer, then a snapshot the training loss scores (pred_key: y_processed_raw), then mass, water
+#     and net energy (scale_by_mass, PHIS from the regridded static input, flux_units "W m-2"). Validation
+#     scores the fixed prediction. Fluxes are positive-down, instantaneous. On the truth the fixers correct
+#     PS by 0.04 Pa, PRECT by 3.6% (rms) and T by 0.01 K (rms, 0.5 W/m2 mean) per step.
+#
+# 1. Preprocess (fits the scaler on 4 ranks x 500 batches x batch 2 = 4,000 samples; needs torchrun):
+#      torchrun --standalone --nproc-per-node=4 credit/applications/preprocess.py \
+#          -c config/gen_2/camulator/E3SMulator_cbecker.yaml
+#    or: credit submit --cluster perlmutter --scheduler slurm --mode preprocess -c <this> --dry-run
+#    Preprocess refuses to overwrite an existing scaler file: move the old one aside first.
+# 2. Train: same torchrun with credit/applications/train_gen2.py. batches_per_epoch is shared with
+#    preprocess: lower it (e.g. 100) for a quick test epoch.
+# ===================================================================================================================== #
+
+save_loc: '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator_scaling_test/'
+seed: 2000   # the scaler was fit with seed 1000. The sampler shuffles with seed + epoch, so training
+             # with 1000 would replay the exact preprocess batches in epoch 0; 2000 does not.
+# ---- Training data ---- #
+data:
+  source: &data_sources
+    E3SM_ATM: # ncol size: 21600
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D:
+              - 'U'
+              - 'V'
+              - 'T'
+              - 'Q'
+          vars_2D:
+              - 'PS'
+              - 'TS'
+              - 'SST'
+          path: &eam_path '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.eam.h1.h2.%Y.nc'
+        diagnostic:
+          vars_2D:
+              - 'PRECT'
+              - 'TREFHT'
+              - 'CLDTOT'
+              - 'TAUX'
+              - 'TAUY'
+              - 'U10'
+              - 'Z500'
+              - 'OMEGA850'
+              - 'OMEGA200'
+              - 'QFLX'
+              - 'FLUT'
+              - 'FSNS'
+              - 'FLNS'
+              - 'FSNT'
+              - 'FLNT'
+              - 'SHFLX'
+              - 'LHFLX'
+          path: *eam_path
+        dynamic_forcing:
+          vars_2D:
+              - 'SOLIN'
+              - 'co2vmr_3d'
+              - 'TLAI'
+          path: "/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/dynamicforcing_%Y.nc"
+
+        static:
+          vars_2D:
+              - 'PHIS'
+              - 'landfrac'
+              - 'ZTOP_CANOPY'
+              - 'ZBOT_CANOPY'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/staticforcing.nc'
+
+    E3SM_OCN: # nCells = 236853 (missing coordinate data)
+      dataset_type: "local"
+      coordinate_file: &scrip_file "/global/cfs/cdirs/m5388/cbecker/metadata/EC30to60E2r2.scrip.201005.nc"
+      lat_name: &scrip_lat 'grid_center_lat'
+      lon_name: &scrip_lon 'grid_center_lon'
+      variables:
+        prognostic:
+          vars_2D:
+              - 'SSS'
+          path: &mpaso_path '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.mpaso.hist.am.6hr.%Y.nc'
+
+        diagnostic:
+          vars_2D:
+              - 'dMLD'
+          path: *mpaso_path
+
+    E3SM_ICE: # nCells = 236853 (missing coordinate data)
+      dataset_type: "local"
+      coordinate_file: *scrip_file
+      lat_name: *scrip_lat
+      lon_name: *scrip_lon
+      variables:
+        prognostic:
+          vars_2D:
+              - 'sithick'
+          path: '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.mpassi.hist.am.6hr.%Y.nc'
+
+    E3SM_LND: # nCols = 21600
+      dataset_type: "local"
+      variables:
+        prognostic:
+          vars_2D:
+              - 'SOILWAT_2m'
+              - 'TSOI_2m'
+              - 'SNOWDP'
+          path: &elm_path '/global/cfs/cdirs/mp9/E3SMv2.1-subE3SMulator/creditformat/v21.LR.subE3SMulator.001.elm.h1.%Y.withtop2m.negclip.nc'
+
+        diagnostic:
+          vars_2D:
+              - 'QRUNOFF'
+          path: *elm_path
+
+
+  date_ranges:
+      - ["1951-01-01", "1999-12-31"]
+      - ["2010-01-01", "2024-12-31"]
+      - ["2041-01-01", "2050-12-31"]
+  timestep: "6h"
+
+
+  history_len: 1
+  forecast_len: 1
+
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+
+# ---- Validation data ---- #
+validation_data:
+  source: *data_sources
+  date_ranges:
+      - ["2000-01-01", "2009-12-31"]
+  timestep: "6h"
+  history_len: 1
+  forecast_len: 1
+  one_shot: True
+  lead_time_periods: 6
+  skip_periods: null
+
+# ---- Training hyperparameters ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp                # ddp | fsdp2 | none  (ddp: preprocess ranks split the data; launch with torchrun)
+    tensor: 1
+    domain: 1
+
+  cpu_offload: False
+  activation_checkpoint: True
+
+  load_weights: False
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: False
+
+  skip_validation: False
+  update_learning_rate: True
+
+  save_backup_weights: True
+  save_best_weights: True
+  save_every_epoch: True
+
+  save_metric_vars: True   # a list matches by substring ("T" matches most keys) and silently drops others
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 2
+  valid_batch_size: 2
+
+  batches_per_epoch: 200   # training test: ~14 s/step (GPU-bound, FP32) -> ~46 min per epoch.
+                           # The scaler was fit with 500 (4 ranks x 500 x batch 2 = 4,000 samples).
+  valid_batches_per_epoch: 20   # 4 ranks x 20 x batch 2 = 160 held-out samples (2000-2009)
+  stopping_patience: 5000
+
+  start_epoch: 0
+  num_epoch: &epochs 4          # scaling test: 4 x 200 steps + validation fits a 4 h interactive node
+  epochs: *epochs
+
+  use_tensorboard: True
+  use_ema: False
+
+  use_scheduler: False
+  scheduler:
+    scheduler_type: cosine-annealing
+    T_max: *epochs
+    last_epoch: -1
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  thread_workers: 4
+  valid_thread_workers: 4
+  prefetch_factor: 2
+
+
+# ---- Preblocks / Postblocks ---- #
+# Preblocks run before the model; postblocks run after each forward pass.
+# scaler (BridgeScaler) normalizes inputs/targets before the model and
+# denormalizes outputs after. concat assembles the nested variable dict into
+# the flat (B, C, H, W) tensor the model expects. reconstruct is required
+# for forecast_len > 1 rollout.
+preblocks:
+  # Regrids are split by what they apply to, so multi-step training and rollout work:
+  #   ic_only  (step 1 only): the inputs the model carries forward itself (prognostics) or reuses (statics).
+  #   per_step (every step):  dynamic forcing and the training target, which arrive raw from the dataset
+  #                           at every step. From step 2 on the prognostic inputs are the previous
+  #                           prediction, already on the model grid, so they must not be regridded again.
+  # For forecast_len 1 this computes exactly what a single ic_only regrid did, and the scaler sees the
+  # same data (preprocess replays ic_only, then per_step up to the scaler).
+  ic_only:
+    sst_land_to_nan_input: # EAM stores SST as 0 over land. Make it NaN before the regrid, so coastal cells come
+                           # out NaN instead of a blend of 0 K and real SST (no ocean SST is <= 0 K)
+        type: "fill_values"
+        args:
+            data_types: ["input"]
+            rules: &sst_land_rules
+                - search: 0
+                  op: "<="
+                  fill: .nan
+            variables: &sst_var
+                - 'E3SM_ATM/prognostic/2d/SST'
+    atmlndregrid_input:
+        type: "regrid"
+        args:
+            weight_file: &atm_weights "/global/cfs/cdirs/m5388/cbecker/metadata/fe30_to_cesm.nc"
+            data_types: ["input"]
+            variables: &atm_lnd_state_vars  # everything on the fe30 grid except dynamic forcing. Variables a
+                                            # split lacks (statics in target, diagnostics in input) are skipped
+                - 'E3SM_ATM/static/2d/PHIS'
+                - 'E3SM_ATM/static/2d/landfrac'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+                - 'E3SM_ATM/prognostic/3d/U'
+                - 'E3SM_ATM/prognostic/3d/V'
+                - 'E3SM_ATM/prognostic/3d/T'
+                - 'E3SM_ATM/prognostic/3d/Q'
+                - 'E3SM_ATM/prognostic/2d/TS'
+                - 'E3SM_ATM/prognostic/2d/SST'
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
+                - 'E3SM_ATM/diagnostic/2d/TREFHT'
+                - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+                - 'E3SM_ATM/diagnostic/2d/TAUX'
+                - 'E3SM_ATM/diagnostic/2d/TAUY'
+                - 'E3SM_ATM/diagnostic/2d/U10'
+                - 'E3SM_ATM/diagnostic/2d/Z500'
+                - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+                - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+                - 'E3SM_ATM/diagnostic/2d/QFLX'
+                - 'E3SM_ATM/diagnostic/2d/FLUT'
+                - 'E3SM_ATM/diagnostic/2d/FSNS'
+                - 'E3SM_ATM/diagnostic/2d/FLNS'
+                - 'E3SM_ATM/diagnostic/2d/FSNT'
+                - 'E3SM_ATM/diagnostic/2d/FLNT'
+                - 'E3SM_ATM/diagnostic/2d/SHFLX'
+                - 'E3SM_ATM/diagnostic/2d/LHFLX'
+                - 'E3SM_ATM/prognostic/2d/PS'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+            reshape_to_xy: true
+    ocnregrid_input:
+        type: "regrid"
+        args:
+            weight_file: &ocn_weights "/global/cfs/cdirs/m5388/cbecker/metadata/EC30to60E2r2_to_CESMf09.nc"
+            data_types: ["input"]
+            variables: &ocn_vars
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+            renormalize: true  # the MPAS meshes have no land cells and these weights are destarea-normalized:
+                               # without this, land comes out 0 (an empty sum) instead of NaN and the
+                               # ~4,500 coastal cells are diluted by their land fraction
+  per_step:
+    sst_land_to_nan_target: # same rule as sst_land_to_nan_input, on the raw target at every step
+        type: "fill_values"
+        args:
+            data_types: ["target"]
+            rules: *sst_land_rules
+            variables: *sst_var
+    forcingregrid: # dynamic forcing is read raw from the dataset at every step
+        type: "regrid"
+        args:
+            weight_file: *atm_weights
+            data_types: ["input"]
+            variables:
+                - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+                - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            reshape_to_xy: true
+    atmlndregrid_target:
+        type: "regrid"
+        args:
+            weight_file: *atm_weights
+            data_types: ["target"]
+            variables: *atm_lnd_state_vars
+            reshape_to_xy: true
+    ocnregrid_target:
+        type: "regrid"
+        args:
+            weight_file: *ocn_weights
+            data_types: ["target"]
+            variables: *ocn_vars
+            renormalize: true
+    missing_to_nan: # raw fill values -> NaN, which the scaler skips per grid point. |x| >= 1e15 also catches
+                    # fill values a regrid blended with real data; no field here comes near it.
+        type: "fill_values"
+        args:
+            rules:
+                - search: 1.0e+15
+                  op: ">="
+                  fill: .nan
+                - search: -1.0e+15
+                  op: "<="
+                  fill: .nan
+            variables: []
+
+    clamp_negative: # the sqrt- and log-transformed fields are non-negative; clamp small negative noise to 0
+                    # so sqrt_trans / log_trans do not turn it into NaN
+        type: "fill_values"
+        args:
+            rules:
+                - search: 0
+                  op: "<"
+                  fill: 0
+            variables:
+                - 'E3SM_ATM/diagnostic/2d/PRECT'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+
+    clip_sithick: # a few coastal cells (e.g. 69.3N 50W, west Greenland) hold 30-73 m of ice for years, a
+                  # pile-up artifact in the source data; grid-cell-mean ice above ~10 m is not plausible.
+                  # Affects ~5 cells per timestep (scripts/tail_scan.py)
+        type: "fill_values"
+        args:
+            rules:
+                - search: 10.0
+                  op: ">"
+                  fill: 10.0
+            variables:
+                - 'E3SM_ICE/prognostic/2d/sithick'
+
+    clip_qrunoff: # QRUNOFF is mm accumulated per 6 h; spring snowmelt is sometimes dumped into a single step
+                  # (up to 650 mm/6 h, one-step pulses in tail_scan.py). 50 mm/6 h (200 mm/day) ~ p99.99
+        type: "fill_values"
+        args:
+            rules:
+                - search: 50.0
+                  op: ">"
+                  fill: 50.0
+            variables:
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+
+    sqrt_trans: # PRECT is an output and is scored in physical units: sqrt tames its tail (held-out max
+                # |z| 21 vs 109 raw) and its square inverse grows errors only polynomially (log/exp blew up)
+      type: "sqrt_transform"
+      args:
+        variables: &sqrt_vars
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+
+    log_trans: # input-only fields, so no exp_transform is needed anywhere downstream
+      type: "log_transform"
+      args:
+        variables: &log_vars
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: &bs_pre_json '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator_scaling_test/E3SM_6h_bridgescaler.json'
+        variables: &scaler_vars
+            - 'E3SM_ATM/static/2d/PHIS'
+            - 'E3SM_ATM/dynamic_forcing/2d/co2vmr_3d'
+            - 'E3SM_ATM/dynamic_forcing/2d/SOLIN'
+            - 'E3SM_ATM/prognostic/3d/U'
+            - 'E3SM_ATM/prognostic/3d/V'
+            - 'E3SM_ATM/prognostic/3d/T'
+            - 'E3SM_ATM/prognostic/3d/Q'
+            - 'E3SM_ATM/prognostic/2d/TS'
+            - 'E3SM_ATM/diagnostic/2d/PRECT'
+            - 'E3SM_ATM/prognostic/2d/SST'
+            - 'E3SM_LND/prognostic/2d/TSOI_2m'
+            - 'E3SM_ATM/diagnostic/2d/TREFHT'
+            - 'E3SM_ATM/diagnostic/2d/CLDTOT'
+            - 'E3SM_ATM/diagnostic/2d/TAUX'
+            - 'E3SM_ATM/diagnostic/2d/TAUY'
+            - 'E3SM_ATM/diagnostic/2d/U10'
+            - 'E3SM_ATM/diagnostic/2d/Z500'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA850'
+            - 'E3SM_ATM/diagnostic/2d/OMEGA200'
+            - 'E3SM_ATM/diagnostic/2d/QFLX'
+            - 'E3SM_ATM/diagnostic/2d/FLUT'
+            - 'E3SM_ATM/diagnostic/2d/FSNS'
+            - 'E3SM_ATM/diagnostic/2d/FLNS'
+            - 'E3SM_ATM/diagnostic/2d/FSNT'
+            - 'E3SM_ATM/diagnostic/2d/FLNT'
+            - 'E3SM_ATM/diagnostic/2d/SHFLX'
+            - 'E3SM_ATM/diagnostic/2d/LHFLX'
+            - 'E3SM_ATM/prognostic/2d/PS'
+            - 'E3SM_OCN/prognostic/2d/SSS'
+            - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+            - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+            - 'E3SM_LND/prognostic/2d/SNOWDP'
+            - 'E3SM_OCN/diagnostic/2d/dMLD'
+            - 'E3SM_ICE/prognostic/2d/sithick'
+            - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+            - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+            - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+        spatial_variables: &spatial_vars # held-out per-cell max |z| <= 15 for all four. Intermittent fields
+                                         # (SNOWDP, sithick, QRUNOFF) blow up per cell (1e5-1e19); SOILWAT_2m
+                                         # stays global because its never-observed (ocean) cells would get
+                                         # std 1 in physical units, ~1,600x its scale in the loss
+           - 'E3SM_ATM/prognostic/2d/PS'
+           - 'E3SM_ATM/prognostic/2d/SST'
+           - 'E3SM_OCN/prognostic/2d/SSS'
+           - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+        scaler_type: "standard"
+        scaler_params:
+          channels_last: False
+        method: transform
+
+    clip_q_normalized: # Q at the model top (levels 0-9) has one-step spikes from the simulation itself (present in
+                       # the raw eam.h2 files) up to |z| ~1,500 against a background sigma ~1e-7 kg/kg. Clip in
+                       # normalized space so each level is clipped against its own sigma; a physical cap would
+                       # either miss the top-level spikes or clip the moist lower levels. Q >= 0 keeps z >= -8,
+                       # so the lower bound only guards against bad data. Applied to input and target, after the
+                       # scaler, so it does not change the scaler fit
+        type: "fill_values"
+        args:
+            rules:
+                - search: 50.0
+                  op: ">"
+                  fill: 50.0
+                - search: -50.0
+                  op: "<"
+                  fill: -50.0
+            variables:
+                - 'E3SM_ATM/prognostic/3d/Q'
+
+    fillnan_post: # NaN (missing data; cells the scaler never observed pass through as NaN) -> 0 after
+                  # scaling, so the model only sees finite values
+        type: "fill_values"
+        args:
+            rules:
+                - search: nan
+                  fill: 0
+            variables: &fill_vars  
+                - 'E3SM_ATM/static/2d/landfrac'
+                - 'E3SM_ATM/prognostic/2d/SST'
+                - 'E3SM_OCN/prognostic/2d/SSS'
+                - 'E3SM_OCN/diagnostic/2d/dMLD'
+                - 'E3SM_ICE/prognostic/2d/sithick'
+                - 'E3SM_LND/prognostic/2d/TSOI_2m'
+                - 'E3SM_LND/diagnostic/2d/QRUNOFF'
+                - 'E3SM_LND/prognostic/2d/SOILWAT_2m'
+                - 'E3SM_LND/prognostic/2d/SNOWDP'
+                - 'E3SM_ATM/dynamic_forcing/2d/TLAI'
+                - 'E3SM_ATM/static/2d/ZTOP_CANOPY'
+                - 'E3SM_ATM/static/2d/ZBOT_CANOPY'
+    concat:
+      type: concat
+
+# -----------------------------------------------------------------------
+# Physics conservation fixers — gen2 name-based postblock schema.
+#
+# The "super dict" carried through the postblock chain (y_processed, built by
+# reconstruct) is keyed by variable NAME, so the fixers address fields by name
+# rather than channel index. They also do NO scaling: like the geopotential /
+# mslp flagship blocks they operate in physical units. The bridgescaler blocks
+# own the scaling, and the preblocks own input scaling.
+#
+# Pipeline order (per_step):
+#   1. reconstruct (detach: false)  -> split y_pred into named y_processed,
+#                                       keeping the autograd graph
+#   2. inverse bridgescaler         -> y_processed in physical units
+#   3. tracer / mass / water / energy fixers (name-based, physical, no scaling)
+#   4. flatten_to_tensor            -> forward-scale a copy + rebuild flat y_pred
+#                                       (normalized) for the loss; y_processed
+#                                       stays physical for rollout assembly
+#
+# Because reconstruct no longer detaches, the conservation corrections flow into
+# the loss/gradient (loss is computed on y_pred after step_postblocks run).
+#
+# The fixers read t0 by name from the per-step physical input the model
+# consumed that step (default key x_physical, set by the trainer each step). For
+# forecast_len=1 that equals the initial condition; for multistep it is the
+# previous step's predicted physical state plus the current step's forcing.
+# SOLIN (TOA downwelling solar) is an input-only dynamic forcing, also read from
+# x_physical.
+# -----------------------------------------------------------------------
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: False   # REQUIRED with flatten_to_tensor in training: keeps y_processed
+                        # on the autograd graph so the rebuilt y_pred can backprop
+#    wind_filter:
+#      type: wind_artifact_filter
+#      args:
+#        u_var: E3SM_ATM/prognostic/3d/U
+#        v_var: E3SM_ATM/prognostic/3d/V
+#        target_vars:
+#          - E3SM_ATM/prognostic/3d/U
+#          - E3SM_ATM/prognostic/3d/V
+#          - E3SM_ATM/prognostic/3d/T
+#          - E3SM_ATM/prognostic/3d/Q
+#        mask_level: 14
+#        target_levels: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+#        # values below copied verbatim from the gen1 stable-run config,
+#        # climate/assets/inference_config.yml (tuned for normalized values —
+#        # keep paired with the pre-inverse_scale placement of this block)
+#        speed_threshold: 2.8
+#        smooth_sigma: 1.2
+#        smooth_sigma_zonal: 2.0
+#        smooth_sigma_meridional: 0.5
+#        dilation_zonal: 15
+#        dilation_meridional: 5
+#        falloff_sigma: 4.0
+#        preserve_amplitude: true
+
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: *bs_pre_json
+        variables: *scaler_vars
+        spatial_variables: *spatial_vars
+        method: inverse_transform
+    
+    square: # inverse of sqrt_trans: PRECT back to m/s before the fixers and the loss. No clamp, so
+            # gradients flow; the square is >= 0, so the tracer fixer never clips PRECT
+      type: "square_transform"
+      args:
+        variables: *sqrt_vars
+
+# ----------------------------------------------------------------------- #
+# Target twin.
+#
+# BaseLoss and the gen2 metrics both score y_processed (the prediction) against
+# y_target_processed (the truth), and both sides must be in the same physical
+# units. These three blocks mirror the *unit-changing* blocks above
+# (bridgescaler_transform, square_transform) onto the target, writing to
+# 'y_target_processed' via the `key` / `out_key` args instead of the default
+# 'y_processed'.
+#
+# The conservation fixers below are deliberately NOT mirrored: they correct the
+# prediction, so running them on the target would "fix" the truth being scored.
+# ----------------------------------------------------------------------- #
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: 'y'                 # the flat target tensor, split with the same
+                                    # metadata.target._channel_map as y_pred
+        out_key: 'y_target_processed'
+        detach: True                # the target carries no gradient — unlike the
+                                    # prediction reconstruct above, which needs
+                                    # detach: False so the loss can backprop
+
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: *bs_pre_json
+        key: 'y_target_processed'
+        variables: *scaler_vars
+        spatial_variables: *spatial_vars
+        method: inverse_transform
+
+    square_target:
+      type: "square_transform"
+      args:
+        key: 'y_target_processed'
+        variables: *sqrt_vars
+
+    tracer_fixer: # clamps the prediction at >= 0; unit-independent, so safe to enable before the others
+      type: tracer_fixer
+      args:
+        tracer_thres: 0.0
+        tracer_vars:
+          - E3SM_ATM/prognostic/3d/Q
+          - E3SM_OCN/prognostic/2d/SSS
+          - E3SM_LND/prognostic/2d/SOILWAT_2m
+          - E3SM_LND/prognostic/2d/SNOWDP
+          - E3SM_ICE/prognostic/2d/sithick
+          - E3SM_ATM/diagnostic/2d/PRECT
+          - E3SM_ATM/diagnostic/2d/CLDTOT
+          - E3SM_ATM/diagnostic/2d/FLUT
+          - E3SM_LND/diagnostic/2d/QRUNOFF
+          - E3SM_OCN/diagnostic/2d/dMLD
+
+    # The training loss scores this snapshot (loss.args.pred_key): the prediction after the tracer clamp but
+    # before the global budget fixers below. A fixer that rescales or shifts a field hides that field's raw
+    # global mean from a loss on its output (the energy fixer's fixed T ignores any offset in the raw T), so
+    # the loss would never pull it back (arXiv:2607.18416). The fixed y_processed still rolls forward, is
+    # what validation scores (valid_pred_key), and is what rollout writes.
+    snapshot_raw:
+      type: snapshot
+      args:
+        key: y_processed
+        out_key: y_processed_raw
+
+    mass_fixer: # before the energy fixer, which integrates over the corrected PS
+      type: global_mass_fixer
+      args:
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        q_var: E3SM_ATM/prognostic/3d/Q
+        sp_var: E3SM_ATM/prognostic/2d/PS
+
+    water_fixer: # rescales PRECT to close the global water budget; PRECT is not fed back, so it only
+                 # changes the delivered precipitation. On the truth (scripts/fixer_truth_check.py, 60 samples)
+                 # the factor is 1.0004 on average with a 3.6% step-to-step spread (instantaneous fields).
+      type: global_water_fixer
+      args:
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        q_var: E3SM_ATM/prognostic/3d/Q
+        sp_var: E3SM_ATM/prognostic/2d/PS
+        precip_var: E3SM_ATM/diagnostic/2d/PRECT
+        evapor_var: E3SM_ATM/diagnostic/2d/QFLX
+        precip_units: "m s-1"         # PRECT is a liquid-water depth rate
+        evapor_units: "kg m-2 s-1"    # QFLX is a mass flux
+        evapor_positive_up: false     # this QFLX is positive-down (sign-flipped from native EAM), the fixer default
+
+
+    energy_fixer_net:
+      type: global_energy_fixer_net
+      args:
+        # grid (lon2d/lat2d) and hybrid coefficients (hyai/hybi) only; PHIS comes from the input below
+        save_loc_physics: /global/cfs/cdirs/m5388/cbecker/metadata/e3sm_eam_L72_f09_statics.nc
+        flux_units: "W m-2"   # the E3SM fluxes are instantaneous W/m2 rates (positive-down), not J/m2
+        scale_by_mass: True   # one uniform dT weighted by air mass (as CAM/EAM's own fixer), instead of the
+                              # gen1 total-energy rescale that over-corrects high terrain and moist columns
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        T_var: E3SM_ATM/prognostic/3d/T
+        q_var: E3SM_ATM/prognostic/3d/Q
+        U_var: E3SM_ATM/prognostic/3d/U
+        V_var: E3SM_ATM/prognostic/3d/V
+        sp_var: E3SM_ATM/prognostic/2d/PS
+        surface_geopotential_var: E3SM_ATM/static/2d/PHIS  # the static input, regridded by atmlndregrid_input
+        toa_net_solar_var: E3SM_ATM/diagnostic/2d/FSNT
+        toa_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNT
+        surf_net_solar_var: E3SM_ATM/diagnostic/2d/FSNS
+        surf_net_thermal_var: E3SM_ATM/diagnostic/2d/FLNS
+        surf_sh_var: E3SM_ATM/diagnostic/2d/SHFLX
+        surf_lh_var: E3SM_ATM/diagnostic/2d/LHFLX
+
+
+# ONLY NEEDED FOR TRAINING #
+#    flatten:
+#      type: flatten_to_tensor
+#      args:
+#        method: transform
+#        key: y_processed
+#        out_key: y_pred
+#        scaler_path: /glade/derecho/scratch/$USER/CREDIT_runs/camulator_test/scaler.json
+#        variables:
+#          - CESM/prognostic/3d/U
+#          - CESM/prognostic/3d/V
+#          - CESM/prognostic/3d/T
+#          - CESM/prognostic/3d/Qtot
+#          - CESM/prognostic/2d/PS
+#          - CESM/prognostic/2d/TREFHT
+#          - CESM/diagnostic/2d/PRECT
+#          - CESM/diagnostic/2d/TS
+#          - CESM/diagnostic/2d/CLDHGH
+#          - CESM/diagnostic/2d/CLDLOW
+#          - CESM/diagnostic/2d/CLDMED
+#          - CESM/diagnostic/2d/TAUX
+#          - CESM/diagnostic/2d/TAUY
+#          - CESM/diagnostic/2d/U10
+#          - CESM/diagnostic/2d/QFLX
+#          - CESM/diagnostic/2d/FSDS_J
+#          - CESM/diagnostic/2d/FLDS_J
+#          - CESM/diagnostic/2d/FSUS
+#          - CESM/diagnostic/2d/FLUS
+#          - CESM/diagnostic/2d/SHFLX
+#          - CESM/diagnostic/2d/LHFLX
+#          - CESM/diagnostic/2d/FSUTOA
+#          - CESM/diagnostic/2d/FLUT
+
+
+# ---- Model architecture ---- #
+# Must match the checkpoint — do not edit for the shipped model.
+model:
+  type: "camulator"
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 72
+  channels: 4               # 3D prognostic: U V T Q
+  surface_channels: 8       # 2D prognostic: PS TREFHT
+  input_only_channels: 7    # dynamic_forcing (4) + static (3)
+  output_only_channels: 19  # diagnostic variables
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [256, 512, 1024, 2048]
+  depth: [2, 2, 18, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  use_spectral_norm: True
+  interp: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [48, 48]
+    pad_lon: [48, 48]
+
+
+# ---- Loss ---- #
+#loss:
+#  training_loss: "mse"
+#
+#  use_power_loss: False
+#  use_spectral_loss: False
+#  spectral_lambda_reg: 0.1
+#  spectral_wavenum_init: 20
+#
+#  latitude_weights: "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+#  use_latitude_weights: True
+#
+#  use_variable_weights: False
+
+loss:
+  type: base
+  args:
+    training_loss: "mse"              # univariate loss per variable (mse | mae | huber | logcosh | ...)
+    base_loss_parameters: {}
+    # base_loss_overrides:            # optional per-variable univariate loss
+    #   ERA5/diagnostic/2d/total_precipitation: {loss: "mae"}
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance weights each level of each variable by 1/sigma^2. Options:
+    # inverse_variance | manual | learnable | none
+    var_weighting: "inverse_variance"
+    scaler_path: *bs_pre_json         # fallback for any variable the variance file lacks
+    # Per-level target variances measured on y_target_processed (loss units: PRECT in m/s after the square),
+    # written by `credit preprocess` after the scaler fit; `credit preprocess --variance-only` rebuilds it.
+    variance_path: &loss_variances '/global/cfs/cdirs/m5388/cbecker/CREDIT_runs/subE3SMulator_scaling_test/E3SM_6h_loss_variances.json'
+    variance_type: &variance_type "temporal"  # per-grid-point variance over time, grid-averaged (pooled: time+space)
+    mask_correction: &mask_correction true     # weight / observed fraction: SST/SSS/land fields are NaN off their domain
+    # Every masked field here is NaN outside its domain before the scaler (sst_land_to_nan, ocnregrid renormalize,
+    # land-model fill values -> missing_to_nan), so no variance_masks rules are needed.
+    variable_weights: {}              # manual multipliers per var_key (all modes); none needed with variance_path
+    normalize_weights: false          # true divides by the mean weight and shrinks the loss to ~1e-9
+
+    # Data diagnostic variables are always scored; postblock-computed
+    # diagnostics (e.g. from mslp_diagnostic) only when true.
+    include_computed_diagnostics: false
+    pred_key: y_processed_raw         # train on the prediction before the budget fixers (postblocks snapshot_raw)
+    valid_pred_key: y_processed       # validate and select checkpoints on the fixed one; also logs valid_loss_raw
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: &lat_weights_file "/global/cfs/cdirs/m5388/cbecker/metadata/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc"
+
+metrics:
+  type: combined
+  args:
+    metrics:                          # registry names of univariate metrics
+      rmse: {}
+      r2score: {}
+      bias: {}
+    # To score a variable with a different functional, add that metric to the
+    # list above — each entry scores every variable under its own namespace
+    # (e.g. "mae/ERA5/..."). There is no per-variable metric override: unlike
+    # the loss, a combined metric has no single "base" metric to override.
+
+    # Physical-unit variables differ wildly in variance (SP ~1e5 Pa vs q ~1e-2);
+    # inverse_variance divides each variable by sigma**scale_power, using the
+    # bridgescaler file. scale_power is a property of the metric, so the
+    # aggregate is dimensionless whatever its order: 2 for mse, 1 for rmse/mae/
+    # bias/activity, and 0 for already-normalized scores like r2score/acc
+    # (which ignore the scaler entirely).
+    # Options: inverse_variance | manual | none (no learnable for metrics).
+    var_weighting: "inverse_variance"
+    scaler_path: *bs_pre_json
+    variance_path: *loss_variances    # same loss-unit variances as the loss (level-averaged per variable)
+    variance_type: *variance_type
+    mask_correction: *mask_correction
+    variable_weights: {}              # manual multipliers per var_key (all modes)
+    normalize_weights: false
+
+    include_computed_diagnostics: false
+
+    use_latitude_weights: True        # cos(lat) spatial weighting per variable
+    latitude_weights: *lat_weights_file
+
+# ---- Inference ---- #
+# run_mode selects between batch and single forecast.
+#   batch:  generates forecasts for a range of init times defined under batch_forecast.initialization
+#   single: runs one forecast from a specific init time defined under single_forecast.start_datetime
+inference:
+  run_mode: single
+  mode: none                          # none | ddp | fsdp
+  save_forecast: '/global/common/software/m5388/kjmayer/CREDIT_runs/subE3SMulator/rollout/'
+
+  batch_forecast:
+    forecast_length: "45d"                    # 1 no-leap year
+    first_init_date: "2026-01-01"
+    last_init_date: "2039-12-31"
+    init_interval: "1w"
+
+  single_forecast:
+    forecast_length: "30d"                    # 1460 6-hourly steps = 1 no-leap year
+    start_datetime: "1995-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: month
+    metadata: "/global/cfs/cdirs/m5388/cbecker/metadata/camulator_metadata.yaml"
+    variables:
+#      - name: "CESM/prognostic/3d/U"
+#      - name: "CESM/prognostic/3d/V"
+#      - name: "CESM/prognostic/3d/T"
+#      - name: "CESM/prognostic/3d/Qtot"
+      - name: "CESM/prognostic/2d/PS"
+      - name: "CESM/prognostic/2d/TREFHT"
+      - name: "CESM/diagnostic/2d/PRECT"
+      - name: "CESM/diagnostic/2d/TS"
+      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDLOW"
+      - name: "CESM/diagnostic/2d/CLDMED"
+      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUY"
+      - name: "CESM/diagnostic/2d/U10"
+      - name: "CESM/diagnostic/2d/QFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/FSDS_J"
+      - name: "CESM/diagnostic/2d/FLDS_J"
+      - name: "CESM/diagnostic/2d/FSUS"
+      - name: "CESM/diagnostic/2d/FLUS"
+      - name: "CESM/diagnostic/2d/FSUTOA"
+      - name: "CESM/diagnostic/2d/FLUT"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 0
+
+slurm:
+  # Read by `credit submit --cluster perlmutter --scheduler slurm --mode preprocess|train`, which writes
+  # the sbatch script (torchrun on 4 GPUs) under save_loc/slurm_scripts/ and logs under save_loc/logs/.
+  conda: "/global/common/software/m5388/cbecker/envs/credit"
+  # account: pass --account m5388_g to `credit submit`, or export SLURM_ACCOUNT=m5388_g (no hard-coded accounts, #486)
+  job_name: "e3sm_scaling_test"
+  nodes: 1
+  ngpus: 4
+  ncpus: 128               # Perlmutter counts hardware threads: 128 = the whole GPU node
+  walltime: "04:00:00"
+  qos: "regular"           # debug caps walltime at 30 min
+  constraint: "gpu"
+  env_setup:
+    - "export NCCL_DEBUG=INFO"

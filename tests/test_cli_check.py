@@ -420,6 +420,103 @@ def test_data_valid_alias_warns(conf):
 
 
 # ===========================================================================
+# Grid coordinate configuration (coordinate_file / lat_name / lon_name)
+# ===========================================================================
+
+
+def test_missing_coordinate_file_is_an_error(conf, tmp_path):
+    """LocalDataset raises on an unopenable coordinate_file; catch the typo here."""
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(tmp_path / "nope.nc")
+    rep = _run(conf)
+    assert "data.source.ERA5.coordinate_file" in _wheres(rep)
+    assert "File not found" in _text(rep)
+
+
+def test_existing_coordinate_file_is_silent(conf, tmp_path):
+    grid = tmp_path / "grid.nc"
+    grid.write_bytes(b"")  # existence is all _check_paths inspects
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(grid)
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_coordinate_file_checked_in_validation_data_too(conf, tmp_path):
+    conf["validation_data"] = copy.deepcopy(conf["data"])
+    conf["validation_data"]["source"]["ERA5"]["coordinate_file"] = str(tmp_path / "nope.nc")
+    assert "validation_data.source.ERA5.coordinate_file" in _wheres(_run(conf))
+
+
+@pytest.mark.parametrize(("given", "missing"), [("lat_name", "lon_name"), ("lon_name", "lat_name")])
+def test_half_a_coordinate_name_pair_is_an_error(conf, given, missing):
+    """find_coord_pair requires both names or neither."""
+    conf["data"]["source"]["ERA5"][given] = "XLAT"
+    rep = _run(conf)
+    assert f"data.source.ERA5.{missing}" in _wheres(rep)
+    assert "pair" in _text(rep)
+
+
+def test_both_coordinate_names_are_silent(conf):
+    conf["data"]["source"]["ERA5"]["lat_name"] = "XLAT"
+    conf["data"]["source"]["ERA5"]["lon_name"] = "XLONG"
+    assert _wheres(_run(conf)) == set()
+
+
+def _write_source_file(tmp_path, name, with_coords):
+    """A tiny local data file, with or without lat/lon coordinates."""
+    import numpy as np
+    import xarray as xr
+
+    path = tmp_path / name
+    coords = {"level": [1, 2]}
+    dims = ("level", "j", "i")
+    if with_coords:
+        coords |= {"latitude": ("j", np.linspace(-90, 90, 4)), "longitude": ("i", np.linspace(0, 350, 6))}
+        dims = ("level", "latitude", "longitude")
+    xr.Dataset({"T": (dims, np.zeros((2, 4, 6), "f4"))}, coords=coords).to_netcdf(path)
+    return path
+
+
+def test_coordless_local_source_is_an_error(conf, tmp_path):
+    """Training would run and only rollout would fail — catch it before submitting."""
+    path = _write_source_file(tmp_path, "nocoords.nc", with_coords=False)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+
+    rep = _run(conf)
+
+    assert "data.source.ERA5.coordinate_file" in _wheres(rep)
+    assert "No horizontal grid available" in _text(rep)
+    assert "coordinate_file" in _text(rep)
+
+
+def test_source_with_inline_coords_is_silent(conf, tmp_path):
+    path = _write_source_file(tmp_path, "withcoords.nc", with_coords=True)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_coordless_source_with_coordinate_file_is_silent(conf, tmp_path):
+    """Setting the key is the fix, so the error must go away once it is set."""
+    path = _write_source_file(tmp_path, "nocoords.nc", with_coords=False)
+    grid = _write_source_file(tmp_path, "grid.nc", with_coords=True)
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = str(path)
+    conf["data"]["source"]["ERA5"]["coordinate_file"] = str(grid)
+
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_grid_check_skips_non_local_sources(conf, tmp_path):
+    """Remote sources resolve their grid lazily on first read; nothing to inspect."""
+    conf["data"]["source"]["ERA5"]["dataset_type"] = "arco_era5"
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+def test_grid_check_silent_when_data_files_are_absent(conf):
+    """An unglobbable path is reported by the path checks, not duplicated here."""
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = "/definitely/not/here_%Y.nc"
+    assert "data.source.ERA5.coordinate_file" not in _wheres(_run(conf))
+
+
+# ===========================================================================
 # Model geometry and channel counts
 # ===========================================================================
 
@@ -929,6 +1026,193 @@ def test_no_pbs_block_notes_missing_account(conf, monkeypatch, env_account, expe
 
 
 # ===========================================================================
+# Block variable references
+# ===========================================================================
+
+
+def _with_preblock_vars(conf, variables, block_type="log_transform", section="per_step"):
+    conf["preblocks"].setdefault(section, {})["blk"] = {"type": block_type, "args": {"variables": variables}}
+    return conf
+
+
+def test_valid_variable_refs_stay_silent(conf):
+    """Full keys that every source really produces raise nothing."""
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/T", "ERA5/static/2d/lsm", "ERA5/diagnostic/2d/TP"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_partial_variable_paths_are_not_flagged(conf):
+    """`_parse_variable_selection` expands prefixes, so they are not typos."""
+    _with_preblock_vars(conf, ["ERA5/prognostic", "ERA5/prognostic/3d"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_unknown_field_type_in_variable_ref_is_an_error(conf):
+    """The gen1-style 'static_forcing' spelling of 'static' is silently skipped at runtime."""
+    _with_preblock_vars(conf, ["ERA5/static_forcing/2d/lsm"])
+    rep = _run(conf)
+    assert "preblocks.per_step.blk" in _wheres(rep)
+    text = _text(rep)
+    assert "unknown field type 'static_forcing'" in text
+    # The prefix hint must beat difflib, which ranks 'dynamic_forcing' higher.
+    assert "Did you mean 'static'?" in text
+
+
+def test_misspelled_variable_name_suggests_the_real_one(conf):
+    _with_preblock_vars(conf, ["ERA5/prognostic/2d/PS"])
+    rep = _run(conf)
+    assert "preblocks.per_step.blk" in _wheres(rep)
+    assert "Did you mean 'ERA5/prognostic/2d/SP'?" in _text(rep)
+
+
+def test_variable_ref_under_wrong_source_is_an_error(conf):
+    """A real variable name under a source that does not produce it is still dead."""
+    conf["data"]["source"]["OTHER"] = copy.deepcopy(conf["data"]["source"]["ERA5"])
+    conf["data"]["source"]["OTHER"]["variables"] = {"dynamic_forcing": {"vars_2D": ["tsi"]}}
+    _with_preblock_vars(conf, ["ERA5/dynamic_forcing/2d/tsi"])
+    assert "preblocks.per_step.blk" in _wheres(_run(conf))
+
+
+def test_postblock_variable_refs_are_checked(conf):
+    """Scalar variable args (q_var, sp_var, ...) count, not just `variables` lists."""
+    conf["postblocks"]["per_step"]["fixer"] = {
+        "type": "tracer_fixer",
+        "args": {"tracer_vars": ["ERA5/prognostic/3d/NOPE"]},
+    }
+    assert "postblocks.per_step.fixer" in _wheres(_run(conf))
+
+
+def test_rename_targets_are_valid_downstream(conf):
+    """A rename creates keys no source produces — referencing them is legitimate."""
+    conf["preblocks"]["ic_only"] = {
+        "rn": {"type": "rename", "args": {"mapping": {"ERA5/prognostic/3d/T": "ERA5/prognostic/3d/temp"}}}
+    }
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/temp"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_unresolvable_rename_mapping_file_disables_the_check(conf):
+    """A mapping_file cannot be read statically, so stay quiet rather than cry wolf."""
+    conf["preblocks"]["ic_only"] = {"rn": {"type": "rename", "args": {"mapping_file": "/some/map.yml"}}}
+    _with_preblock_vars(conf, ["ERA5/prognostic/3d/anything_at_all"])
+    assert _wheres(_run(conf)) == set()
+
+
+def test_synthesised_output_names_are_not_flagged(conf):
+    """`output_name` names a variable the block creates, and is valid downstream."""
+    conf["postblocks"]["per_step"]["mslp"] = {
+        "type": "mslp_diagnostic",
+        "args": {
+            "output_name": "ERA5/derived_diagnostic/2d/mslp",
+            "surface_pressure_var": "ERA5/prognostic/2d/SP",
+        },
+    }
+    _with_preblock_vars(conf, ["ERA5/derived_diagnostic/2d/mslp"])
+    # Not an empty error set: mslp_diagnostic also trips the BaseLoss target-twin
+    # check, which is a separate finding. Only the variable-ref check matters here.
+    assert "not produced by any configured source" not in _text(_run(conf))
+
+
+def test_file_paths_are_not_mistaken_for_variable_refs(conf):
+    """Paths have enough slashes to look like keys; the source-name test excludes them."""
+    conf["preblocks"]["per_step"]["blk"] = {
+        "type": "regrid",
+        "args": {"weight_file": "/glade/derecho/scratch/u/weights.nc", "variables": ["ERA5/prognostic/3d/T"]},
+    }
+    assert _wheres(_run(conf)) == set()
+
+
+def _write_weights(path, rows, cols, S, n_a, n_b, normalization="destarea"):
+    import numpy as np
+    import xarray as xr
+
+    xr.Dataset(
+        {
+            "row": ("n_s", np.asarray(rows, dtype=np.int32)),
+            "col": ("n_s", np.asarray(cols, dtype=np.int32)),
+            "S": ("n_s", np.asarray(S, dtype=np.float64)),
+            "mask_a": ("n_a", np.ones(n_a, dtype=np.int32)),
+            "mask_b": ("n_b", np.ones(n_b, dtype=np.int32)),
+        },
+        attrs={"normalization": normalization},
+    ).to_netcdf(path)
+    return str(path)
+
+
+def test_regrid_with_uncovered_cells_warns_until_renormalized(conf, tmp_path):
+    """An ocean-only mesh: one cell partly covered, one not at all -> 0 instead of NaN."""
+    path = _write_weights(tmp_path / "ocn.nc", rows=[1, 1, 2], cols=[1, 2, 3], S=[0.5, 0.5, 0.3], n_a=3, n_b=3)
+    conf["preblocks"]["ic_only"] = {
+        "ocnregrid": {"type": "regrid", "args": {"weight_file": path, "variables": ["ERA5/prognostic/3d/T"]}}
+    }
+    where = "preblocks.ic_only.ocnregrid.args.renormalize"
+    rep = _run(conf)
+    assert where in _wheres(rep, "warning"), _text(rep, "warning")
+    assert "1 of 3 destination cells with no source" in _text(rep, "warning")
+    assert "1 partly covered" in _text(rep, "warning")
+
+    conf["preblocks"]["ic_only"]["ocnregrid"]["args"]["renormalize"] = True
+    assert where not in _wheres(_run(conf), "warning")
+
+
+def test_regrid_with_full_coverage_is_silent(conf, tmp_path):
+    path = _write_weights(tmp_path / "full.nc", rows=[1, 1, 2], cols=[1, 2, 3], S=[0.5, 0.5, 1.0], n_a=3, n_b=2)
+    conf["preblocks"]["ic_only"] = {
+        "rg": {"type": "regrid", "args": {"weight_file": path, "variables": ["ERA5/prognostic/3d/T"]}}
+    }
+    assert not any(w.endswith(".renormalize") for w in _wheres(_run(conf), "warning"))
+
+
+# ===========================================================================
+# YAML numeric strings
+# ===========================================================================
+
+
+def test_unsigned_exponent_is_an_error(conf):
+    """`1.0e6` is a str in YAML 1.1 — it reaches the code and raises on first use."""
+    conf["postblocks"]["per_step"]["log_trans"] = {
+        "type": "exp_transform",
+        "args": {"variables": [], "max_value": yaml.safe_load("x: 1.0e6")["x"]},
+    }
+    rep = _run(conf)
+    where = "postblocks.per_step.log_trans.args.max_value"
+    assert where in _wheres(rep), _text(rep)
+    assert "1.0e+6" in _text(rep)
+
+
+def test_signed_exponent_is_accepted(conf):
+    """The correct spelling parses as a float and must stay silent."""
+    conf["postblocks"]["per_step"]["log_trans"] = {
+        "type": "exp_transform",
+        "args": {"variables": [], "max_value": yaml.safe_load("x: 1.0e+6")["x"]},
+    }
+    rep = _run(conf)
+    assert not any(f.where.endswith("max_value") for f in rep.findings), _text(rep)
+
+
+def test_numeric_string_found_in_a_list(conf):
+    """The walk descends into lists, which is where thresholds often live."""
+    conf["postblocks"]["per_step"]["tracer_fixer"] = {
+        "type": "tracer_fixer",
+        "args": {"tracer_vars": ["ERA5/prognostic/3d/Q"], "tracer_thres": [yaml.safe_load("x: 1e3")["x"]]},
+    }
+    rep = _run(conf)
+    assert "postblocks.per_step.tracer_fixer.args.tracer_thres[0]" in _wheres(rep), _text(rep)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["%Y", "/glade/p/1e5/run", "era5-gen2", "10", "e", "1e", "e6", "1.0e6 m"],
+    ids=["strftime", "path", "registry_key", "base_10", "base_e", "trailing_e", "leading_e", "with_units"],
+)
+def test_legitimate_strings_are_not_flagged(conf, value):
+    """Paths, registry keys and ExpTransform's `base: "10"` must not trip the check."""
+    conf["data"]["source"]["ERA5"]["variables"]["prognostic"]["path"] = value
+    rep = _run(conf)
+    assert not any("numeric" in f.message or "exponent" in f.message for f in rep.findings), _text(rep)
+
+
+# ===========================================================================
 # Fitted scaler statistics
 # ===========================================================================
 
@@ -1154,3 +1438,118 @@ def test_unknown_cluster_still_reports_memory(tmp_path):
     assert "on Casper" in finding.message and "on Derecho" in finding.message
     (finding,) = _mem_findings(_big_conf(tmp_path, 0.01, queue="gpudev", mem="100GB"))  # both clusters
     assert "was not compared" in finding.message
+
+
+# --------------------------------------------------------------------------- #
+# variance_path (loss-space variances from credit preprocess)
+# --------------------------------------------------------------------------- #
+def _write_variances(path, levels=None, extra=None):
+    levels = levels or {"ERA5/prognostic/3d/T": 2, "ERA5/prognostic/3d/Q": 2, "ERA5/prognostic/2d/SP": 1}
+    variables = {
+        k: {"temporal_variance": [1.0] * n, "pooled_variance": [2.0] * n, "observed_fraction": [1.0] * n}
+        for k, n in {**levels, **(extra or {})}.items()
+    }
+    path.write_text(json.dumps({"meta": {"scaler_paths": [str(path.parent / "scaler.json")]}, "variables": variables}))
+
+
+def _variance_findings(rep, severity):
+    return [f for f in rep.findings if f.severity == severity and "variance" in f.where]
+
+
+def test_variance_path_missing_warns(conf, tmp_path):
+    conf["loss"]["args"]["variance_path"] = str(tmp_path / "loss_variances.json")
+    found = _variance_findings(_run(conf), "warning")
+    assert any("does not exist yet" in f.message for f in found), found
+
+
+def test_variance_path_reports_uncovered_and_level_mismatch(conf, tmp_path):
+    path = tmp_path / "loss_variances.json"
+    _write_variances(path, {"ERA5/prognostic/3d/T": 3, "ERA5/prognostic/2d/SP": 1})
+    conf["loss"]["args"]["variance_path"] = str(path)
+    rep = _run(conf)
+    warnings = _variance_findings(rep, "warning")
+    assert any("ERA5/prognostic/3d/Q" in f.message and "scaler variance" in f.message for f in warnings), warnings
+    errors = _variance_findings(rep, "error")
+    assert len(errors) == 1 and "ERA5/prognostic/3d/T" in errors[0].message and "3 level" in errors[0].message
+
+
+def test_variance_path_flags_bad_type_and_doubled_weights(conf, tmp_path):
+    path = tmp_path / "loss_variances.json"
+    _write_variances(path, extra={"ERA5/diagnostic/2d/TP": 1})
+    conf["loss"]["args"].update(
+        variance_path=str(path), variance_type="tendency", variable_weights={"ERA5/diagnostic/2d/TP": 2.76e6}
+    )
+    rep = _run(conf)
+    assert any(f.where == "loss.args.variance_type" for f in rep.findings if f.severity == "error"), _text(rep)
+    info = [f for f in rep.findings if f.severity == "info" and f.where == "loss.args.variable_weights"]
+    assert len(info) == 1 and "ERA5/diagnostic/2d/TP" in info[0].message
+
+
+# ===========================================================================
+# Which prediction the loss scores relative to the budget fixers
+# ===========================================================================
+
+_ENERGY_FIXER = {
+    "type": "global_energy_fixer_net",
+    "args": {
+        "T_var": "ERA5/prognostic/3d/T",
+        "q_var": "ERA5/prognostic/3d/Q",
+        "U_var": "ERA5/prognostic/3d/T",
+        "V_var": "ERA5/prognostic/3d/T",
+        "toa_net_solar_var": "ERA5/diagnostic/2d/TP",
+        "toa_net_thermal_var": "ERA5/diagnostic/2d/TP",
+        "surf_net_solar_var": "ERA5/diagnostic/2d/TP",
+        "surf_net_thermal_var": "ERA5/diagnostic/2d/TP",
+        "surf_sh_var": "ERA5/diagnostic/2d/TP",
+        "surf_lh_var": "ERA5/diagnostic/2d/TP",
+        "lead_time_periods": 6,
+        "sp_var": "ERA5/prognostic/2d/SP",
+        "surface_geopotential_var": "ERA5/static/2d/lsm",
+        "grid_type": "sigma",
+    },
+}
+_MASS_FIXER = {
+    "type": "global_mass_fixer",
+    "args": {"q_var": "ERA5/prognostic/3d/Q", "sp_var": "ERA5/prognostic/2d/SP", "grid_type": "sigma"},
+}
+_SNAPSHOT = {"type": "snapshot", "args": {"key": "y_processed", "out_key": "y_processed_raw"}}
+
+
+def _fixer_warnings(rep):
+    return {w for w in _wheres(rep, "warning") if w.startswith("postblocks.per_step.") and "fixer" in w}
+
+
+def test_pred_key_must_be_written(conf):
+    conf["loss"]["args"]["pred_key"] = "y_processed_raw"
+    rep = _run(conf)
+    assert "loss.args.pred_key" in _wheres(rep)
+    assert "snapshot" in _text(rep)
+
+
+def test_energy_fixer_scored_by_the_loss_warns(conf):
+    conf["postblocks"]["per_step"]["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    rep = _run(conf)
+    assert "postblocks.per_step.energy_fixer" in _fixer_warnings(rep)
+    assert "2607.18416" in _text(rep, "warning")
+
+
+def test_scoring_a_snapshot_before_the_fixers_is_clean(conf):
+    per_step = conf["postblocks"]["per_step"]
+    per_step["snapshot_raw"] = copy.deepcopy(_SNAPSHOT)
+    per_step["mass_fixer"] = copy.deepcopy(_MASS_FIXER)
+    per_step["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    conf["loss"]["args"].update(pred_key="y_processed_raw", valid_pred_key="y_processed")
+    rep = _run(conf)
+    assert not {"loss.args.pred_key", "loss.args.valid_pred_key"} & _wheres(rep), _text(rep)
+    assert _fixer_warnings(rep) == set(), _text(rep, "warning")
+
+
+def test_mass_fixer_after_energy_fixer_warns(conf):
+    per_step = conf["postblocks"]["per_step"]
+    per_step["snapshot_raw"] = copy.deepcopy(_SNAPSHOT)
+    per_step["energy_fixer"] = copy.deepcopy(_ENERGY_FIXER)
+    per_step["mass_fixer"] = copy.deepcopy(_MASS_FIXER)
+    conf["loss"]["args"]["pred_key"] = "y_processed_raw"
+    rep = _run(conf)
+    assert _fixer_warnings(rep) == {"postblocks.per_step.mass_fixer"}
+    assert "before the energy fixer" in _text(rep, "warning")

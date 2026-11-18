@@ -78,6 +78,13 @@ _KNOWN_TOP_LEVEL = frozenset(
 
 _ERROR, _WARN, _INFO = "error", "warning", "info"
 
+# YAML 1.1 resolves a scalar in exponent notation to a float only when the
+# exponent carries an explicit sign: "1.0e+6" is a float, "1.0e6" is a *string*.
+# A string matching this is therefore always the unsigned-exponent spelling,
+# which reaches the code as str and either raises on the first arithmetic or
+# silently misbehaves.
+_UNSIGNED_EXPONENT = re.compile(r"^[-+]?(?:\d+\.?\d*|\.\d+)[eE]\d+$")
+
 
 # ---------------------------------------------------------------------------
 # Findings
@@ -355,6 +362,17 @@ def _check_data_sources(conf: dict, rep: _Report) -> None:
                 fix="Remove the key to take the dataset default, or list the levels explicitly.",
             )
 
+        # find_coord_pair requires both names or neither — one alone raises at
+        # dataset init, which is a slow way to learn about a typo.
+        has_lat_name, has_lon_name = "lat_name" in src, "lon_name" in src
+        if has_lat_name != has_lon_name:
+            given, missing = ("lat_name", "lon_name") if has_lat_name else ("lon_name", "lat_name")
+            rep.error(
+                f"{base}.{missing}",
+                f"'{given}' is set but '{missing}' is not; coordinate names must be given as a pair.",
+                fix=f"Add {missing}, or remove {given} to use automatic coordinate detection.",
+            )
+
         variables = src.get("variables") or {}
         if not variables:
             rep.error(f"{base}.variables", "Source defines no variables.")
@@ -494,6 +512,8 @@ def _check_blocks(conf: dict, rep: _Report, deep: bool) -> None:
                         rep.error(where, f"'{btype}' failed to construct: {type(exc).__name__}: {exc}")
 
     _check_scaler_paths_unique(conf, rep)
+    _check_ic_only_phase(conf, rep)
+    _check_block_variable_refs(conf, rep)
     _check_scaler_spatial_variables_consistent(conf, rep)
     _check_conservation_units(conf, rep)
 
@@ -548,12 +568,15 @@ def _check_scaler_spatial_variables_consistent(conf: dict, rep: _Report) -> None
     """A scaler's `spatial_variables` must match between its preblock (fit) and
     postblock (apply) blocks.
 
-    `credit preprocess` fits grid-wise (per-gridpoint) statistics only for the
-    variables named in the preblock's `spatial_variables` — anything else is fit
-    per-level. If the postblock applying that same scaler names a variable under
-    `spatial_variables` that the preblock didn't, the postblock flattens it to
-    `n_lat * n_lon` columns before calling the scaler, which no longer matches
-    the fitted column count and raises at runtime on the very first batch.
+    `credit preprocess` fits grid-wise (per-gridpoint) statistics, with a
+    `DSpatialStandardScalerTensor`, only for the variables named in the
+    preblock's `spatial_variables` — anything else is fit per-level. If the
+    postblock applying that same scaler names a variable under
+    `spatial_variables` that the preblock fit per-level, it treats that scaler as
+    a legacy flattened-grid one and flattens the tensor to `n_lat * n_lon`
+    columns, which no longer matches the fitted column count and raises at
+    runtime on the very first batch (as does the reverse with scaler files fit
+    before per-location scaling).
     `flatten_to_tensor` forward-scales with its `scaler_path` too, so it is held
     to the same rule.
     """
@@ -609,6 +632,189 @@ def _check_scaler_paths_unique(conf: dict, rep: _Report) -> None:
                 )
             else:
                 seen[resolved] = where
+
+
+# Block types the ``ic_only`` phase cannot host, and why. The IC phase runs once at
+# t=0 and must hand the per_step chain the same nested batch dict it received;
+# `credit preprocess` replays it before fitting so scaler statistics match the batch
+# the scaler later transforms.
+_IC_ONLY_FORBIDDEN = {
+    "bridgescaler_transform": (
+        "preprocess fits only the 'per_step' scalers, so an ic_only scaler is never fit "
+        "and has no statistics to transform with."
+    ),
+    "concat": (
+        "concat flattens the nested variable dict into a single tensor, which the per_step "
+        "chain that runs after the ic_only phase cannot consume."
+    ),
+}
+
+
+def _check_ic_only_phase(conf: dict, rep: _Report) -> None:
+    """Reject preblock types that cannot run in the ``ic_only`` phase."""
+    for name, block in ((conf.get("preblocks") or {}).get("ic_only") or {}).items():
+        if not isinstance(block, dict):
+            continue
+        reason = _IC_ONLY_FORBIDDEN.get(block.get("type"))
+        if reason:
+            rep.error(
+                f"preblocks.ic_only.{name}",
+                f"'{block['type']}' is not supported in the 'ic_only' phase: {reason}",
+                fix=f"Move '{name}' into preblocks.per_step.",
+            )
+
+
+def _check_regrid_coverage(conf: dict, rep: _Report) -> None:
+    """Warn when a ``regrid`` weight file leaves destination cells empty or partly covered.
+
+    The plain ``W @ x`` product writes 0 (an empty sum) where no source cell overlaps
+    a destination cell, and with ``destarea`` weights scales a partly covered cell by
+    its covered fraction. That is what an ocean-only mesh regridded onto a global grid
+    gives: land comes out 0 instead of NaN, so the scaler and the loss treat it as data,
+    and coastal values are diluted. ``renormalize: true`` fixes both. Only the weight
+    sums are read; an unreadable or missing file is left to ``_check_paths``.
+    """
+    import numpy as np
+
+    for phase in ("ic_only", "per_step"):
+        for name, block in ((conf.get("preblocks") or {}).get(phase) or {}).items():
+            if not isinstance(block, dict) or block.get("type") != "regrid":
+                continue
+            args = block.get("args") or {}
+            if args.get("renormalize") or not args.get("weight_file"):
+                continue
+            path = os.path.expandvars(str(args["weight_file"]))
+            if not os.path.isfile(path):
+                continue
+            try:
+                import xarray as xr
+
+                with xr.open_dataset(path) as w:
+                    sums = np.bincount(
+                        w["row"].values.astype(np.int64) - 1, weights=w["S"].values, minlength=w.sizes["n_b"]
+                    )
+                    norm = w.attrs.get("normalization", "unknown")
+            except Exception:  # noqa: BLE001 — unreadable weights are not this check's business
+                continue
+            empty = int((sums == 0).sum())
+            partial = int(((sums > 0) & (sums < 0.999)).sum())
+            if empty or partial:
+                rep.warn(
+                    f"preblocks.{phase}.{name}.args.renormalize",
+                    f"{path} leaves {empty} of {sums.size} destination cells with no source "
+                    f"(they come out 0, not NaN) and {partial} partly covered (normalization: {norm}; "
+                    "their values are scaled down by the uncovered fraction).",
+                    fix="Set renormalize: true to divide by the covered weight and NaN the empty cells.",
+                )
+
+
+# Field type used by postblocks that synthesise a variable (mslp, geopotential,
+# pressure interpolation). It never comes from a dataset source, so a reference to
+# one is not a typo.
+_SYNTHETIC_FIELD_TYPE = "derived_diagnostic"
+
+# Args whose value NAMES a variable the block creates rather than one it reads.
+_OUTPUT_NAME_ARGS = frozenset({"output_name"})
+
+
+def _iter_block_var_refs(conf: dict, sources: set[str]):
+    """Yield ``(where, arg_name, value)`` for every pre/postblock arg that names a variable.
+
+    A value counts as a variable reference when it has at least four
+    ``"/"``-separated segments and its first segment is a configured source name.
+    That excludes file paths (whose first segment is empty, ``$VAR`` or a directory)
+    and partial selections like ``"era5/prognostic"``, which
+    ``_parse_variable_selection`` expands by prefix.
+    """
+
+    def walk(node, where, arg_name):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                yield from walk(v, where, k)
+        elif isinstance(node, list):
+            for v in node:
+                yield from walk(v, where, arg_name)
+        elif isinstance(node, str) and node.count("/") >= 3 and node.split("/")[0] in sources:
+            yield where, arg_name, node
+
+    for top, sections in (("preblocks", ("ic_only", "per_step")), ("postblocks", ("per_step", "post_rollout"))):
+        for section in sections:
+            for name, block in ((conf.get(top) or {}).get(section) or {}).items():
+                if isinstance(block, dict):
+                    yield from walk(block.get("args") or {}, f"{top}.{section}.{name}", None)
+
+
+def _check_block_variable_refs(conf: dict, rep: _Report) -> None:
+    """Verify every variable a pre/postblock names is actually produced by a source.
+
+    A misspelled variable key is silent at config time and at block-construction
+    time: ``_parse_variable_selection`` and ``Regridder.forward`` both skip names
+    they do not find, so the block quietly does nothing. The failure surfaces much
+    later and far from its cause — an unregridded variable, for instance, reaches
+    ``concat`` with the wrong rank and raises ``Tensors must have same number of
+    dimensions``.
+    """
+    from typing import get_args
+
+    from credit.datasets.gen_2.base_dataset import VALID_FIELD_TYPES
+    from credit.datasets.gen_2.channel_utils import ChannelSchema
+
+    sources = conf.get("data", {}).get("source")
+    if not isinstance(sources, dict) or not sources:
+        return  # malformed data block — already reported by _check_data_sources
+    source_names = set(sources)
+
+    try:
+        schema = ChannelSchema.from_config(conf)
+        known = set(schema.input_channel_map()) | set(schema.target_channel_map())
+    except Exception:  # noqa: BLE001 — schema problems are reported by _check_channel_schema
+        return
+
+    field_types = set(get_args(VALID_FIELD_TYPES)) | {_SYNTHETIC_FIELD_TYPE}
+
+    # Renames rewrite variable keys mid-chain, so their targets are legitimate
+    # references even though no source produces them. A mapping_file cannot be
+    # resolved statically, so skip the check entirely rather than cry wolf.
+    for top, sections in (("preblocks", ("ic_only", "per_step")), ("postblocks", ("per_step", "post_rollout"))):
+        for section in sections:
+            for block in ((conf.get(top) or {}).get(section) or {}).values():
+                if not isinstance(block, dict) or block.get("type") != "rename":
+                    continue
+                args = block.get("args") or {}
+                if args.get("mapping_file"):
+                    return
+                known |= set((args.get("mapping") or {}).values())
+
+    # Variables a block creates are valid downstream references.
+    known |= {v for _, arg, v in _iter_block_var_refs(conf, source_names) if arg in _OUTPUT_NAME_ARGS}
+
+    bad: dict[str, list[str]] = {}
+    for where, arg, value in _iter_block_var_refs(conf, source_names):
+        if arg in _OUTPUT_NAME_ARGS or value in known:
+            continue
+        bad.setdefault(value, [])
+        if where not in bad[value]:
+            bad[value].append(where)
+
+    for value, wheres in bad.items():
+        field_type = value.split("/")[1]
+        if field_type not in field_types:
+            # A valid type that prefixes the bad one beats difflib's ranking: the
+            # common slip is a gen1-style suffix ("static_forcing" for "static"),
+            # and difflib scores the longer "dynamic_forcing" higher.
+            prefix = next((t for t in sorted(field_types) if field_type.startswith(t)), None)
+            hint = f" Did you mean '{prefix}'?" if prefix else _suggest(field_type, sorted(field_types))
+            message = (
+                f"'{value}' uses unknown field type '{field_type}'.{hint} "
+                f"Valid field types: {', '.join(sorted(field_types))}."
+            )
+        else:
+            message = f"'{value}' is not produced by any configured source.{_suggest(value, sorted(known))}"
+        rep.error(
+            wheres[0] if len(wheres) == 1 else f"{wheres[0]} (+{len(wheres) - 1} more)",
+            f"{message} The block will silently skip it.",
+            fix="Use a variable key listed under data.source, or correct the spelling.",
+        )
 
 
 def _check_model(conf: dict, rep: _Report, deep: bool) -> None:
@@ -929,11 +1135,11 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
                 )
 
     if _get(conf, "loss", "args", "var_weighting", default="inverse_variance") in ("inverse_variance", "learnable"):
-        if not _get(conf, "loss", "args", "scaler_path"):
+        if not _get(conf, "loss", "args", "scaler_path") and not _get(conf, "loss", "args", "variance_path"):
             rep.error(
                 "loss.args.scaler_path",
-                "var_weighting needs per-variable variances from a fitted scaler, but scaler_path is unset.",
-                fix="Set loss.args.scaler_path, or use var_weighting: none / manual.",
+                "var_weighting needs per-variable variances, but neither scaler_path nor variance_path is set.",
+                fix="Set loss.args.scaler_path (or variance_path), or use var_weighting: none / manual.",
             )
     if _get(conf, "loss", "args", "use_latitude_weights", default=False) and not _get(
         conf, "loss", "args", "latitude_weights"
@@ -982,6 +1188,84 @@ def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
                 "training_loss itself (the trainer's ensemble setup keys off "
                 "loss.args.training_loss and would not see the override).",
                 fix="Use an elementwise loss in the override, or make ring-crps the training_loss.",
+            )
+
+
+# Global budget fixers. Each rescales or shifts one field so a global budget
+# closes, which hides that field's raw global mean (or scale) from a loss
+# computed on its output. Water and energy close *open* budgets whose target
+# depends on other predicted fields (fluxes, evaporation), so a loss on their
+# output also pushes those fields to steer the fixed one.
+_MASS_FIXERS = {"global_mass_fixer"}
+_OPEN_BUDGET_FIXERS = {
+    "global_water_fixer",
+    "global_energy_fixer",
+    "global_energy_fixer_updown",
+    "global_energy_fixer_net",
+}
+_ENERGY_FIXERS = _OPEN_BUDGET_FIXERS - {"global_water_fixer"}
+
+
+def _check_fixer_scoring(conf: dict, rep: _Report) -> None:
+    """Check which prediction BaseLoss scores relative to the budget fixers.
+
+    ``loss.args.pred_key`` / ``valid_pred_key`` must name a key some per_step
+    postblock writes (``y_processed`` or a ``snapshot`` block's ``out_key``).
+    A fixer that runs before the scored snapshot is inside the loss, and an
+    energy or water fixer inside the loss leaves the raw prediction's global
+    mean unconstrained (arXiv:2607.18416). The mass fixer should also run before
+    the energy fixer, which integrates over the corrected surface pressure.
+    """
+    per_step = _get(conf, "postblocks", "per_step", default={}) or {}
+    blocks = [(name, b) for name, b in per_step.items() if isinstance(b, dict) and "type" in b]
+    if not blocks:
+        return
+
+    # position at which each prediction key is last written
+    written = {}
+    for i, (_name, block) in enumerate(blocks):
+        if block["type"] == "snapshot":
+            written[(block.get("args") or {}).get("out_key", "y_processed_raw")] = i
+    if any(_block_output_key(b) == "y_processed" for _n, b in blocks):
+        written["y_processed"] = len(blocks)
+
+    if _get(conf, "loss", "type") == "base":
+        pred_key = _get(conf, "loss", "args", "pred_key", default="y_processed") or "y_processed"
+        valid_pred_key = _get(conf, "loss", "args", "valid_pred_key") or pred_key
+        for arg, key in (("pred_key", pred_key), ("valid_pred_key", valid_pred_key)):
+            if key not in written:
+                rep.error(
+                    f"loss.args.{arg}",
+                    f"BaseLoss scores '{key}', but no postblocks.per_step block writes it.",
+                    fix=f"Add a snapshot postblock: {{type: snapshot, args: {{out_key: {key}}}}}, "
+                    "or set the key to y_processed.",
+                )
+
+        scored_at = written.get(pred_key)
+        if scored_at is not None:
+            for name, block in blocks[:scored_at]:
+                if block["type"] in _OPEN_BUDGET_FIXERS:
+                    rep.warn(
+                        f"postblocks.per_step.{name}",
+                        f"'{block['type']}' runs before the prediction the training loss scores "
+                        f"('{pred_key}'), so the loss sees its correction: nothing then constrains the raw "
+                        "prediction's global mean of the field it fixes, and its errors push the fluxes it "
+                        "trusts instead (arXiv:2607.18416).",
+                        fix="Add a snapshot block before the fixer, e.g. "
+                        "snapshot_raw: {type: snapshot, args: {out_key: y_processed_raw}}, "
+                        "and set loss.args.pred_key: y_processed_raw.",
+                    )
+
+    names = [name for name, _b in blocks]
+    types = [b["type"] for _n, b in blocks]
+    energy_at = [i for i, t in enumerate(types) if t in _ENERGY_FIXERS]
+    for i, t in enumerate(types):
+        if t in _MASS_FIXERS and energy_at and i > min(energy_at):
+            rep.warn(
+                f"postblocks.per_step.{names[i]}",
+                "The mass fixer runs after the energy fixer, which then integrates energy over the "
+                "uncorrected surface pressure; the mass correction changes the column mass afterwards.",
+                fix="Move the mass fixer before the energy fixer.",
             )
 
 
@@ -1135,6 +1419,11 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
     (e.g. ARCO ERA5 cloud cover on the top hybrid levels) stores a NaN mean or a
     zero variance/range. Scaling divides by it, so every sample comes out
     NaN/inf and the first loss is NaN. Only files that already exist are read.
+
+    Per-location (``DSpatialStandardScalerTensor``) scalers are exempt where that is
+    by design: a constant cell is scaled with std 1, and a never-observed cell
+    (``n_ == 0``, e.g. land in an ocean field) is passed through unchanged by the
+    scaler blocks (``_pass_through_empty_cells``).
     """
     import torch
 
@@ -1160,8 +1449,11 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
             bad = torch.zeros_like(next(iter(stats.values())), dtype=torch.bool)
             for value in stats.values():
                 bad |= ~torch.isfinite(value)
-            if "var_x_" in stats:
+            spatial = type(scaler).__name__ == "DSpatialStandardScalerTensor"
+            if "var_x_" in stats and not spatial:
                 bad |= stats["var_x_"] <= 0
+            if spatial and getattr(scaler, "n_", None) is not None:
+                bad &= torch.as_tensor(scaler.n_).flatten() > 0
             if "min_x_" in stats and "max_x_" in stats:
                 bad |= stats["max_x_"] <= stats["min_x_"]
             if bad.any():
@@ -1176,6 +1468,87 @@ def _check_scaler_stats(conf: dict, rep: _Report) -> None:
                     "scaler and give the now-constant channels a finite mean and a nonzero variance "
                     "in the scaler JSON (e.g. the nearest valid level's variance).",
                 )
+
+
+def _check_loss_variances(conf: dict, rep: _Report) -> None:
+    """Validate ``variance_path`` (loss-space variances from ``credit preprocess``).
+
+    Missing before preprocess is expected (warning). When present, the file must
+    cover every scored variable with the right number of levels, should be newer
+    than the scaler it was measured with, and makes ``variable_weights`` that
+    hand-correct a variable's units (e.g. a sqrt-transformed PRECT) apply twice.
+    """
+    import json
+
+    from credit.datasets.gen_2.channel_utils import ChannelSchema
+    from credit.losses.variances import VARIANCE_TYPES
+
+    for top in ("loss", "metrics"):
+        args = _get(conf, top, "args", default={}) or {}
+        path = args.get("variance_path")
+        if not isinstance(path, str) or not path:
+            continue
+        where = f"{top}.args.variance_path"
+        variance_type = args.get("variance_type", "temporal")
+        if variance_type not in VARIANCE_TYPES:
+            rep.error(f"{top}.args.variance_type", f"'{variance_type}' is not one of {', '.join(VARIANCE_TYPES)}.")
+            variance_type = "temporal"  # keep checking the file
+        expanded = os.path.expandvars(path)
+        if not os.path.isfile(expanded):
+            rep.warn(
+                where,
+                f"{expanded} does not exist yet.",
+                fix="`credit preprocess -c <config>` writes it after fitting the scaler "
+                "(`--variance-only` rebuilds it from an existing scaler).",
+            )
+            continue
+        try:
+            with open(expanded) as f:
+                data = json.load(f)
+            variables = data["variables"]
+        except Exception as exc:  # noqa: BLE001
+            rep.error(where, f"Could not read {expanded}: {type(exc).__name__}: {exc}")
+            continue
+
+        try:
+            layout = ChannelSchema.from_config(conf).target_layout
+        except Exception:  # noqa: BLE001 — schema problems are reported by _check_channel_schema
+            layout = []
+        missing = [e["var_key"] for e in layout if e["var_key"] not in variables]
+        if missing:
+            rep.warn(
+                where,
+                f"{len(missing)} scored variable(s) are not in {expanded} and keep their scaler variance: "
+                + ", ".join(missing[:8])
+                + (" ..." if len(missing) > 8 else ""),
+                fix="Re-run `credit preprocess --variance-only -c <config>` after changing the variables.",
+            )
+        for entry in layout:
+            stats = variables.get(entry["var_key"])
+            if stats is not None and len(stats[f"{variance_type}_variance"]) != entry["n_levels"]:
+                rep.error(
+                    where,
+                    f"'{entry['var_key']}' has {len(stats[f'{variance_type}_variance'])} level(s) in the file "
+                    f"but {entry['n_levels']} in the config.",
+                    fix="Re-run `credit preprocess --variance-only -c <config>`.",
+                )
+
+        for scaler_path in (data.get("meta") or {}).get("scaler_paths") or []:
+            scaler_path = os.path.expandvars(scaler_path)
+            if os.path.isfile(scaler_path) and os.path.getmtime(scaler_path) > os.path.getmtime(expanded):
+                rep.warn(
+                    where,
+                    f"{expanded} is older than the scaler {scaler_path} it was measured with.",
+                    fix="Re-run `credit preprocess --variance-only -c <config>`.",
+                )
+
+        doubled = sorted(k for k in (args.get("variable_weights") or {}) if k in variables)
+        if doubled:
+            rep.info(
+                f"{top}.args.variable_weights",
+                "variance_path already measures these in loss units; a multiplier that corrected their "
+                f"scaler variance (e.g. for a sqrt or log transform) now applies twice: {', '.join(doubled)}",
+            )
 
 
 def _check_transformed_variance_weights(conf: dict, rep: _Report) -> None:
@@ -1213,6 +1586,7 @@ def _check_transformed_variance_weights(conf: dict, rep: _Report) -> None:
         _matching_unit_spec,
         _physical_variance_from_log,
         _physical_variance_from_sqrt,
+        _scaler_channel_mean,
         _scaler_channel_variance,
         unit_transform_specs,
     )
@@ -1261,7 +1635,7 @@ def _check_transformed_variance_weights(conf: dict, rep: _Report) -> None:
                 if spec is None or var is None or not torch.isfinite(var).all() or var_key in physical:
                     continue
                 space = UNIT_TRANSFORMS[spec["type"]]["space"]
-                mean = getattr(scaler, "mean_x_", None)
+                mean = _scaler_channel_mean(scaler)  # observed grid points only, aligned with `var`
                 if mean is None:
                     rep.warn(
                         where,
@@ -1349,6 +1723,64 @@ def _iter_config_paths(conf: dict):
     value = _get(conf, "model", "scrip_path")
     if isinstance(value, str) and value:
         yield "model.scrip_path", value
+    # A source's coordinate_file is read at dataset init and raises there when
+    # missing, so catching a typo statically saves a full job launch.
+    for block in ("data", "validation_data"):
+        for name, src in (_get(conf, block, "source", default={}) or {}).items():
+            value = (src or {}).get("coordinate_file")
+            if isinstance(value, str) and value:
+                yield f"{block}.source.{name}.coordinate_file", value
+
+
+def _check_source_grids(conf: dict, rep: _Report) -> None:
+    """Error when a local source can supply no horizontal grid.
+
+    Nothing in the training path reads lat/lon, so a coordinate-less source
+    trains happily to completion and only fails at rollout — inside
+    ForecastWriter, after the model has already run — which is the most
+    expensive possible way to learn about a one-line config omission. Catching
+    it here costs one file open per source.
+
+    Only ``dataset_type: local`` is inspected: every other gen2 source resolves
+    its grid lazily during the first read (see ``era5.py``, ``hrrr.py``,
+    ``goes.py``), so there is nothing to look at while checking a config.
+
+    Anything that goes wrong *other than* a genuinely missing grid (unreadable
+    file, exotic backend, permissions) is left alone — this check exists to
+    catch a config mistake, not to second-guess the data.
+    """
+    from credit.datasets.gen_2.grid_utils import resolve_source_grid
+    from credit.datasets.gen_2.local import first_data_file
+
+    for block in ("data", "validation_data"):
+        for name, src in (_get(conf, block, "source", default={}) or {}).items():
+            src = src or {}
+            if src.get("dataset_type") != "local":
+                continue
+            if src.get("coordinate_file"):
+                continue  # authoritative, and existence-checked in _check_paths
+
+            probe = first_data_file(src)
+            if probe is None:
+                continue  # missing/unglobbable data is reported elsewhere
+            path, _field_cfg = probe
+            try:
+                import xarray as xr
+
+                with xr.open_dataset(path, engine=src.get("engine")) as ds:
+                    resolve_source_grid(ds, src)
+            except ValueError as exc:
+                rep.error(
+                    f"{block}.source.{name}.coordinate_file",
+                    f"No horizontal grid available: {path} has no recognisable lat/lon "
+                    f"coordinates and no 'coordinate_file' is set. ({exc.__class__.__name__}: "
+                    f"{str(exc).splitlines()[0]}) Training would still run, but "
+                    "`credit rollout` would fail when writing output coordinates.",
+                    fix="Add coordinate_file: <path to a file with lat/lon>, or "
+                    "lat_name/lon_name if the coordinates are present under other names.",
+                )
+            except Exception:  # noqa: BLE001 — unreadable data is not this check's business
+                continue
 
 
 def _check_channel_schema(conf: dict, rep: _Report) -> None:
@@ -1589,6 +2021,38 @@ def _check_torchrun_args(conf: dict, rep: _Report) -> None:
         )
 
 
+def _walk_scalars(node, path=""):
+    """Yield ``(dotted_path, value)`` for every scalar in a nested config."""
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield from _walk_scalars(value, f"{path}.{key}" if path else str(key))
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk_scalars(value, f"{path}[{i}]")
+    else:
+        yield path, node
+
+
+def _check_numeric_strings(conf: dict, rep: _Report) -> None:
+    """Flag values written in exponent notation that YAML parsed as strings.
+
+    ``max_value: 1.0e6`` looks numeric but reaches the code as ``"1.0e6"``,
+    because YAML 1.1 requires a signed exponent to resolve a float. The result
+    is a ``TypeError`` on the first comparison, or worse, a silent string
+    where a number was meant.
+    """
+    for where, value in _walk_scalars(conf):
+        if isinstance(value, str) and _UNSIGNED_EXPONENT.match(value.strip()):
+            fixed = f"{float(value):.10g}"
+            mantissa, _, exponent = value.strip().partition("e" if "e" in value else "E")
+            rep.error(
+                where,
+                f"'{value}' is a string, not a number: YAML only reads exponent notation as a float "
+                "when the exponent is signed.",
+                fix=f"Write {mantissa}e+{exponent} (or {fixed}).",
+            )
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -1609,14 +2073,24 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
         rep.error("custom_objects", f"Failed to load: {type(exc).__name__}: {exc}")
 
     # A data-only fragment has nothing to say about models, losses, or training.
-    checks = [_check_data_sources, _check_validation_data, _check_paths, _check_scaler_stats]
+    checks = [
+        _check_numeric_strings,
+        _check_data_sources,
+        _check_validation_data,
+        _check_paths,
+        _check_source_grids,
+        _check_scaler_stats,
+    ]
     if not _is_data_fragment(conf):
         checks += [
             _check_registry_keys,
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_fixer_scoring,
             _check_transformed_variance_weights,
+            _check_loss_variances,
+            _check_regrid_coverage,
             _check_trainer,
             _check_channel_schema,
             _check_pbs,

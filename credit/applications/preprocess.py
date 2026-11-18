@@ -16,7 +16,13 @@ from torch.distributed import barrier, gather_object
 
 from credit.datasets.gen_2.channel_utils import DEFAULT_SCHEMA_FILENAME, ChannelSchema
 from credit.distributed import DISTRIBUTED_MODES, select_device, get_rank_info, setup
-from credit.preblock import BridgeScalerTransform, apply_preblocks_before_scaler, build_preblocks
+from credit.postblock import apply_postblocks, build_postblocks
+from credit.preblock import (
+    BridgeScalerTransform,
+    apply_preblocks,
+    apply_preblocks_before_scaler,
+    build_preblocks,
+)
 from credit.preblock.scaler import (
     combine_scaler_dicts,
     fit_physical_target_stats,
@@ -46,6 +52,37 @@ def _backup_existing_file(path: str) -> str | None:
     shutil.move(path, backup_path)
     logger.warning("Existing scaler moved from %s to %s.", path, backup_path)
     return backup_path
+
+
+def _validate_ic_phase(ic_preblocks) -> None:
+    """Reject ``preblocks.ic_only`` layouts that preprocess cannot run.
+
+    The IC phase is replayed here so each scaler is fit on exactly the batch it
+    sees at rollout step 0. That requires the phase to leave the nested
+    ``batch[data_type][source][var_key]`` dict intact, and to need no scaler that
+    is still being fit:
+
+      - ``bridgescaler_transform``: preprocess fits the ``per_step`` scalers only,
+        so an IC-phase scaler would be asked to transform before it has any
+        statistics. The trainer fails the same way, just later and less clearly.
+      - ``concat``: collapses the nested dict into a flat ``{"x": tensor}``, which
+        neither the per-step chain nor the trainer's IC phase can consume.
+    """
+    from credit.preblock.concat import ConcatToTensor  # local import keeps module load lazy
+
+    for name, block in ic_preblocks.items():
+        where = f"preblocks.ic_only.{name}"
+        if isinstance(block, BridgeScalerTransform):
+            raise ValueError(
+                f"{where}: bridgescaler_transform is not supported in the 'ic_only' phase. "
+                "preprocess fits only 'per_step' scalers, so this one would never be fit. "
+                "Move it to preblocks.per_step."
+            )
+        if isinstance(block, ConcatToTensor):
+            raise ValueError(
+                f"{where}: concat is not supported in the 'ic_only' phase. It flattens the nested "
+                "variable dict that the per_step chain expects. Move it to the end of preblocks.per_step."
+            )
 
 
 def _scaler_probe_range(scaler):
@@ -84,12 +121,55 @@ def _scaler_device(scaler):
     return torch.device("cpu")
 
 
+def _log_spatial_scaler(scaler, columns, lo, hi, logger):
+    """Log a per-location scaler as per-channel ranges over its grid cells.
+
+    ``mean_x_`` / ``var_x_`` / ``n_`` have shape ``(C, *spatial_shape_)``, so each
+    channel gets the min/max of its per-cell mean and std, the count of cells that
+    were never observed (NaN in every sample), and the physical range the probe
+    endpoints map to across all cells.
+    """
+    spatial_shape = [int(s) for s in scaler.spatial_shape_]
+    logger.info("    spatial shape %s", spatial_shape)
+
+    inv = None
+    try:
+        device = _scaler_device(scaler)
+        # (2, C, time=1, *spatial) mirrors the (batch, level, time, *grid) layout the scaler was fit on.
+        probe = torch.empty((2, len(columns), 1, *spatial_shape), dtype=torch.float32, device=device)
+        probe[0], probe[1] = lo, hi
+        with torch.no_grad():
+            inv = scaler.inverse_transform(probe).detach().cpu().reshape(2, len(columns), -1)
+    except Exception as exc:  # noqa: BLE001 - logging-only, never fail preprocessing
+        logger.warning("  could not inverse-transform probe: %s", exc)
+
+    mean = torch.as_tensor(scaler.mean_x_).detach().cpu().reshape(len(columns), -1)
+    std = torch.as_tensor(scaler.var_x_).detach().cpu().reshape(len(columns), -1).sqrt()
+    n = None if scaler.n_ is None else torch.as_tensor(scaler.n_).detach().cpu().reshape(len(columns), -1)
+
+    def _rng(t):
+        t = t[~torch.isnan(t)]
+        return (float(t.min()), float(t.max())) if t.numel() else (float("nan"), float("nan"))
+
+    for i, col in enumerate(columns):
+        parts = ["mean∈[%.4g, %.4g]" % _rng(mean[i]), "std∈[%.4g, %.4g]" % _rng(std[i])]
+        if n is not None:
+            parts.append(f"never-observed={int((n[i] == 0).sum())}/{n.shape[1]}")
+        if inv is not None:
+            parts.append(f"inv[{lo:g} -> {hi:g}]=[{_rng(inv[0, i])[0]:.4g}, {_rng(inv[1, i])[1]:.4g}]")
+        logger.info("    %s: %s", col + 1 if isinstance(col, int) else col, "  ".join(parts))
+
+
 def _log_single_scaler(scaler, name, logger):
     """Log the fitted parameters of one leaf scaler, one line per channel/level."""
     columns = list(getattr(scaler, "x_columns_", []) or [])
     cls = type(scaler).__name__
     lo, hi, label = _scaler_probe_range(scaler)
     logger.info("Scaler '%s' [%s] — %d channel(s), probe range %s", name, cls, len(columns), label)
+
+    if columns and getattr(scaler, "spatial_shape_", None) is not None:
+        _log_spatial_scaler(scaler, columns, lo, hi, logger)
+        return
 
     mean = getattr(scaler, "mean_x_", None)
     var = getattr(scaler, "var_x_", None)
@@ -172,6 +252,86 @@ def _save_physical_stats(all_physical, preblocks, scaler_block_keys):
         )
 
 
+def _loss_variance_args(conf: dict) -> "dict | None":
+    """``loss.args`` when the loss asks for loss-space variances (``variance_path``), else None."""
+    loss_conf = conf.get("loss") or {}
+    args = loss_conf.get("args") or {}
+    if loss_conf.get("type") != "base" or not args.get("variance_path"):
+        return None
+    return args
+
+
+def write_loss_variances(conf, preprocess_conf, ic_preblocks, n_batches, rank, world_size, device):
+    """Measure per-level target variances in loss space and write ``loss.args.variance_path``.
+
+    Runs after the scalers are saved: rebuilds the per_step preblocks (which now
+    load the fitted scalers) and the target-twin postblocks, then pushes
+    ``n_batches`` batches per rank through them, exactly as the trainer builds
+    ``y_target_processed``. See :mod:`credit.losses.variances`.
+    """
+    from credit.losses.base import _cos_lat_weights
+    from credit.losses.variances import (
+        LossVarianceAccumulator,
+        observed_masks,
+        save_loss_variances,
+        target_twin_conf,
+    )
+
+    args = _loss_variance_args(conf)
+    preblocks = build_preblocks(conf, phase="per_step")
+    scaler_keys = [k for k, v in preblocks.items() if isinstance(v, BridgeScalerTransform)]
+    twin_postblocks = build_postblocks(target_twin_conf(conf), phase="per_step")
+    lat_weights = None
+    if args.get("use_latitude_weights"):
+        lat_weights = _cos_lat_weights(args["latitude_weights"])
+    mask_rules = args.get("variance_masks") or {}
+
+    dataset = load_dataset(preprocess_conf, is_train=True)
+    loader = load_dataloader(
+        preprocess_conf, dataset, rank=rank, world_size=world_size, is_train=True, persistent_workers=False
+    )
+    accumulator = LossVarianceAccumulator()
+    dl = cycle(loader)
+    with torch.no_grad():
+        for i in range(n_batches):
+            logger.info(f"Worker {rank}: loss variances, batch {i + 1} of {n_batches}.")
+            batch = apply_preblocks(ic_preblocks, next(dl))
+            # NaN just before the scaler marks missing data; later preblocks may fill it.
+            pre_scaler = apply_preblocks_before_scaler(preblocks, batch, device, stop_key=scaler_keys[-1])
+            processed = apply_preblocks(preblocks, batch, device=device)
+            state = apply_postblocks(twin_postblocks, {"y": processed["y"], "metadata": processed["metadata"]})
+            target = {k: v for source in state["y_target_processed"].values() for k, v in source.items()}
+            accumulator.update(target, observed_masks(target, pre_scaler, mask_rules))
+    del dl
+    del loader
+
+    accumulator.all_reduce()
+    if rank == 0:
+        variables = accumulator.finalize(lat_weights)
+        path = expandvars(args["variance_path"])
+        _backup_existing_file(path)
+        save_loss_variances(
+            path,
+            variables,
+            {
+                "scaler_paths": [expandvars(preblocks[k].scaler_path) for k in scaler_keys],
+                "batches_per_rank": n_batches,
+                "world_size": world_size,
+                "latitude_weights": args.get("latitude_weights") if lat_weights is not None else None,
+                "variance_masks": mask_rules,
+            },
+        )
+        logger.info("Saved loss-space variances for %d variables to %s", len(variables), path)
+        for var_key, entry in variables.items():
+            logger.info(
+                "  %-45s temporal %.4g  pooled %.4g  observed %.3f  (level means)",
+                var_key,
+                float(torch.tensor(entry["temporal_variance"]).nanmean()),
+                float(torch.tensor(entry["pooled_variance"]).nanmean()),
+                float(torch.tensor(entry["observed_fraction"]).mean()),
+            )
+
+
 def main():
     # gcsfs/aiohttp leave their async SSL transports open until garbage collection,
     # which triggers a benign "unclosed transport" ResourceWarning from asyncio at
@@ -229,6 +389,13 @@ Examples:
         default=False,
         help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker data issues.",
     )
+    parser.add_argument(
+        "--variance-only",
+        action="store_true",
+        default=False,
+        help="Skip the scaler fit and only (re)write the loss-space variance file (loss.args.variance_path) "
+        "from the existing scaler(s).",
+    )
     args = parser.parse_args()
     try:
         with open(args.model_config) as config_file:
@@ -283,7 +450,9 @@ Examples:
     trainer_conf = conf["trainer"]
     # Build preblocks and validate the scaler layout *before* touching the dataset,
     # so a config error fails fast without waiting on (network-backed) data loading.
-    preblocks = build_preblocks(conf)
+    ic_preblocks = build_preblocks(conf, phase="ic_only")
+    _validate_ic_phase(ic_preblocks)
+    preblocks = build_preblocks(conf, phase="per_step")
     # Collect *every* scaler block, not just the first: a config may pair a
     # standard-scaled group of variables with a quantile-scaled group, which
     # requires two BridgeScalerTransform blocks (scaler_type is one value per block).
@@ -334,10 +503,25 @@ Examples:
     else:
         dataset_batches = len(train_loader)
     batches_per_epoch = _bpe if 0 < _bpe < dataset_batches else dataset_batches
+    variance_args = _loss_variance_args(conf)
+    if args.variance_only:
+        if variance_args is None:
+            raise ValueError("--variance-only needs loss.type 'base' with loss.args.variance_path set.")
+        del train_loader
+        _finish_loss_variances(
+            conf, preprocess_conf, ic_preblocks, variance_args, batches_per_epoch, rank, world_size, device
+        )
+        return
     dl = cycle(train_loader)
     for i in range(batches_per_epoch):
         logger.info(f"Worker {rank}: Processing batch {i + 1} of {batches_per_epoch}.")
         batch = next(dl)
+        # Replay the IC phase first. The trainer runs ic_only (regrid, vertical
+        # interpolation, rename, ...) before the per-step chain at step 0, so a scaler
+        # fit on the raw batch would be fit on a different grid, vertical coordinate or
+        # set of variable names than the one it is later asked to transform. This is a
+        # no-op (same object returned) for configs with no ic_only section.
+        batch = apply_preblocks(ic_preblocks, batch)
         # Fit each scaler on the batch as it exists just before that scaler in the
         # preblock chain. Re-applying the pre-scaler preblocks per scaler is safe
         # because preblocks never mutate the raw batch (see apply_preblocks_before_scaler).
@@ -389,6 +573,24 @@ Examples:
         if rank == 0:
             _save_physical_stats(all_physical, preblocks, scaler_block_keys)
 
+    if variance_args is not None:
+        if dist.is_initialized() and world_size > 1:
+            barrier()  # every rank must load the scaler files rank 0 just wrote
+        _finish_loss_variances(
+            conf, preprocess_conf, ic_preblocks, variance_args, batches_per_epoch, rank, world_size, device
+        )
+        return
+
+    if dist.is_initialized():
+        dist.destroy_process_group()
+
+
+def _finish_loss_variances(
+    conf, preprocess_conf, ic_preblocks, variance_args, scaler_batches, rank, world_size, device
+):
+    # Variance estimates converge faster than the scaler fit needs, so half its batches by default.
+    n_batches = int(variance_args.get("variance_batches") or max(1, scaler_batches // 2))
+    write_loss_variances(conf, preprocess_conf, ic_preblocks, n_batches, rank, world_size, device)
     if dist.is_initialized():
         dist.destroy_process_group()
 

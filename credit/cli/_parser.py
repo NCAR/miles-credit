@@ -95,6 +95,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--backend", default="nccl", choices=["nccl", "gloo", "mpi"], help="Distributed backend (default: nccl)"
     )
+    p.add_argument(
+        "--variance-only",
+        action="store_true",
+        help="Skip the scaler fit; only (re)write loss.args.variance_path from the existing scaler(s)",
+    )
 
     # ---- train ----
     p = sub.add_parser("train", help="Train a CREDIT v2 model")

@@ -28,6 +28,21 @@ class Regridder(BasePreblock):
             the unique destination coordinates for unstructured grids.
         flip_axis: Axes to flip on the input before regridding (e.g. ``[-1, -2]``
             to flip both spatial axes). ``None`` skips flipping.
+        renormalize: If ``True``, divide each destination cell by the weight of
+            the *valid* (non-NaN) source cells it received:
+            ``sum(w * x) / sum(w)`` over valid sources. This fixes two artifacts
+            of a source grid that does not cover the destination grid (an ocean
+            mesh with no land cells, regridded with ``destarea`` weights):
+
+            - partially covered cells (coastlines) are no longer diluted by the
+              uncovered fraction;
+            - cells with no valid source come out NaN instead of 0.
+
+            NaN source cells are skipped rather than propagated, so a coastal
+            cell takes the mean of its valid part. Default ``False``: the plain
+            ``W @ x`` product, where any NaN source poisons the cell. For a
+            source with full coverage and no NaN both modes agree, since every
+            weight sum is 1.
 
     Config example::
 
@@ -37,6 +52,7 @@ class Regridder(BasePreblock):
             variables:
                 - "era5/prognostic/3d/T"
             reshape_to_xy: true
+            renormalize: true   # optional; for partial-coverage (e.g. ocean-only) sources
     """
 
     def __init__(
@@ -46,6 +62,7 @@ class Regridder(BasePreblock):
         data_types: list[str] | None = None,
         reshape_to_xy: bool = True,
         flip_axis: list[int] | None = None,
+        renormalize: bool = False,
     ):
         super().__init__()
         dst_lat = None
@@ -92,6 +109,7 @@ class Regridder(BasePreblock):
         self.data_types = data_types or ["input", "target"]
         self.reshape_to_xy = reshape_to_xy
         self.flip_axis = flip_axis
+        self.renormalize = renormalize
         # Real destination-grid coordinates (None when reshape_to_xy=False or the
         # weight file lacks xc_b/yc_b) — consumed by GridSchema.resolve to determine
         # the actual output grid when this preblock is active. Not a torch buffer:
@@ -164,7 +182,15 @@ class Regridder(BasePreblock):
 
         # 4. Flatten leading dims and transpose: sparse mm expects (n_a, N) input, returns (n_b, N).
         x_flat = x.reshape(-1, self.n_a).T
-        y_flat = torch.sparse.mm(W, x_flat).T  # Shape: (N, n_b)
+        if self.renormalize:
+            # Weighted mean over the valid sources of each destination cell. The valid mask
+            # can differ per column (sample, level, time), so the weight sum is a second mm.
+            valid = ~torch.isnan(x_flat)
+            num = torch.sparse.mm(W, torch.where(valid, x_flat, torch.zeros_like(x_flat)))
+            den = torch.sparse.mm(W, valid.to(x_flat.dtype))
+            y_flat = torch.where(den > 0, num / den, torch.full_like(num, float("nan"))).T
+        else:
+            y_flat = torch.sparse.mm(W, x_flat).T  # Shape: (N, n_b)
 
         # 5. Restore leading dimensions and apply destination shape
         if self.reshape_to_xy and self.dst_shape is not None:

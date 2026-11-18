@@ -128,6 +128,78 @@ data:
       
         
 ```
+
+#### Horizontal grid coordinates
+
+By default `LocalDataset` reads the grid from the first data file it can open,
+looking for a longitude/latitude pair under a table of common names
+(`longitude`/`latitude`, `lon`/`lat`, `XLONG`/`XLAT`, `nav_lon`/`nav_lat`,
+`grid_xt`/`grid_yt`, `geolon`/`geolat`, `lonCell`/`latCell`). Three optional
+source-level keys cover the cases that don't fit:
+
+| Key | Use when |
+|---|---|
+| `coordinate_file` | The data files carry no coordinates; geography lives in a separate grid file |
+| `lat_name` / `lon_name` | The coordinate variables exist but aren't in the name table (must be given as a pair) |
+| `grid_type` | Auto-classification gets it wrong — `rectilinear`, `curvilinear`, or `unstructured` |
+
+Classification is automatic: 2D lat/lon give a `curvilinear` grid, lat/lon
+sharing one dimension give an `unstructured` mesh, and 1D lat/lon on separate
+dimensions give a `rectilinear` grid. Where 1D lat/lon are the same length and
+on different dimensions — a square grid, say — the file's data variables decide
+it: data indexed by one horizontal dimension is unstructured, by two is
+rectilinear.
+
+Each grid type writes forecast output in its own CF-appropriate layout:
+
+| `grid_type` | Output dimensions | Coordinates |
+|---|---|---|
+| `rectilinear` | `latitude`, `longitude` | 1D dimension coordinates |
+| `curvilinear` | `y`, `x` | 2D `latitude`/`longitude` auxiliary coordinates, plus the native projection axes when the source has them |
+| `unstructured` | `ncol` | 1D per-cell `latitude`/`longitude` auxiliary coordinates |
+
+```yaml
+data:
+  source:
+    Regional_Model:
+      dataset_type: local
+      coordinate_file: '/data/grids/domain_grid.nc'   # lat/lon read from here
+      lat_name: 'XLAT'                                # optional; both or neither
+      lon_name: 'XLONG'
+      variables:
+        prognostic:
+          vars_2D: [ 'T2', 'PSFC' ]
+          path: '/data/wrfout_%Y.nc'
+```
+
+Two behaviours worth knowing:
+
+* **`coordinate_file` is authoritative and strict.** When set, it is the sole
+  source of grid truth, and any failure — file missing, no recognisable
+  coordinate pair, or a grid whose shape disagrees with the data — raises at
+  dataset init rather than warning. The default in-file path keeps its original
+  warn-and-continue behaviour. Vertical `levels` always come from the data
+  files, never from the coordinate file.
+* **`x`/`y` are never read as geographic coordinates.** On a projected grid they
+  carry projection units, not degrees, so a file with only `x`/`y` and no
+  lat/lon reports a clear error instead of silently treating metres as degrees.
+  Supply the real lat/lon through `coordinate_file` (a projected dataset that
+  also stores 2D `XLAT`/`XLONG` needs nothing extra — that pair is detected and
+  classified as `curvilinear`).
+
+Where a curvilinear source's dimensions *do* carry 1D coordinate variables,
+those projection axes are preserved and written to the forecast output
+alongside the 2D `latitude`/`longitude`, with their attributes copied verbatim
+from the source file. They are found from the dimensions of the latitude
+variable rather than by name, so any naming works; a source without them
+(bare dimensions, as in raw WRF output) simply writes lat/lon alone.
+
+`credit check -c config.yml` reports a local source that can supply no grid,
+which is worth running before submitting a job: nothing in the *training* path
+reads lat/lon, so such a run trains to completion and only fails later, in
+`credit rollout`, when the output coordinates are written. The grid is not
+stored in the checkpoint, so adding `coordinate_file:` afterwards makes an
+already-trained run usable again.
 ### ARCOERA5Dataset
 *API reference: {py:class}`credit.datasets.gen_2.era5.ARCOERA5Dataset`* · `dataset_type: arco_era5`
 
@@ -223,6 +295,32 @@ The GEFS Dataset reads the raw GEFS (Global Ensemble Forecast System) initializa
 files from the public `gfs-ensemble-forecast-system` Google Cloud bucket. Each selected
 ensemble member contains atmospheric and surface fields on the six cube-sphere tiles,
 making it useful for initializing ensemble rollouts.
+
+Alongside the native GEFS variable names, three **derived variables** may be requested in
+`vars_3D`. They are computed on read and do not appear in the raw files:
+
+| Name | Derived from | Notes |
+|------|--------------|-------|
+| `u_a` | `u_s` | Unstaggered zonal wind, averaged from the staggered cell edges onto cell centers. |
+| `v_a` | `v_w` | Unstaggered meridional wind, likewise. |
+| `Qtot` | `sphum`, `liq_wat`, `ice_wat`, `rainwat`, `snowwat`, `graupel` | Total water: the elementwise sum of water vapour and the five condensate species, matching gen1's `combine_microphysics_terms`. |
+
+`Qtot` is summed per grid point, so vertical profiles are preserved. Because water vapour
+is included it is *total water*, not specific humidity — feeding it to a model whose
+humidity channel was trained on vapour alone is a physics change, not just a rename.
+
+Derived variables neither require nor consume their source fields: the raw species stay
+independently requestable, and asking for `Qtot` together with any of them returns both.
+Note that `Qtot` reads six variables, so in `mode: remote` it costs six times the range
+reads of a single field.
+
+```yaml
+variables:
+  prognostic:
+    vars_3D: [ 't', 'Qtot', 'u_a', 'v_a' ]   # combined total water
+    # vars_3D: [ 't', 'sphum', 'liq_wat' ]   # or the raw species, uncombined
+    vars_2D: [ 'ps', 't2m' ]
+```
 ## Writing Your Own Dataset
 
 To plug in a dataset CREDIT does not ship — a new data source, file layout, or

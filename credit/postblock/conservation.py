@@ -77,8 +77,57 @@ def _pred(batch_dict: dict, var_key: str) -> torch.Tensor:
     return batch_dict["y_processed"][_src(var_key)][var_key]
 
 
+def _init_surface_geopotential(fixer, surface_geopotential_name, surface_geopotential_var, physics):
+    """Set up the energy fixers' surface geopotential source: exactly one of a
+    variable name in the ``save_loc_physics`` statics file, or a static var key
+    read from the input dict on every forward pass."""
+    name = type(fixer).__name__
+    if (surface_geopotential_name is None) == (surface_geopotential_var is None):
+        raise ValueError(
+            f"{name}: set exactly one of surface_geopotential_name (a variable in save_loc_physics) "
+            "or surface_geopotential_var (a static var key in the input, e.g. 'SRC/static/2d/PHIS')."
+        )
+    fixer.surface_geopotential_var = surface_geopotential_var
+    fixer.GPH_surf = None
+    if surface_geopotential_name is not None:
+        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
+        gph_name = (
+            surface_geopotential_name[0]
+            if isinstance(surface_geopotential_name, (list, tuple))
+            else surface_geopotential_name
+        )
+        fixer.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+
+
+def _surface_geopotential(fixer, batch_dict, device) -> torch.Tensor:
+    """Surface geopotential: ``(H, W)`` from the statics file, or ``(B, 1, H, W)`` from the input."""
+    if fixer.surface_geopotential_var is None:
+        return fixer.GPH_surf.to(device)
+    return fixer._input(batch_dict, fixer.surface_geopotential_var)[:, :, -1, ...].to(device)
+
+
 def _set_pred(batch_dict: dict, var_key: str, tensor: torch.Tensor) -> None:
     batch_dict["y_processed"][_src(var_key)][var_key] = tensor
+
+
+def _record_diagnostic(fixer, batch_dict: dict, name: str, value: torch.Tensor) -> None:
+    """Store a detached per-sample diagnostic as ``batch_dict["fixer_diagnostics"]["<block>/<name>"]``.
+
+    ``<block>`` is the postblock's config name (set by ``build_postblocks``), so
+    the trainer can log how large each fixer's correction is: a fixer's output
+    always closes its budget, so the correction itself is the only sign of how
+    far the raw prediction is from closing it.
+    """
+    block = getattr(fixer, "block_name", None) or type(fixer).__name__
+    batch_dict.setdefault("fixer_diagnostics", {})[f"{block}/{name}"] = value.detach()
+
+
+def _record_energy_diagnostics(fixer, batch_dict: dict, dE: torch.Tensor, C_global: torch.Tensor) -> None:
+    """Energy-fixer diagnostics: the correction as a mass-weighted mean ``dT`` (K)
+    and the budget imbalance it absorbed (W m-2, positive = the fixer added energy)."""
+    area = fixer.core.area.to(dE.device).sum()
+    _record_diagnostic(fixer, batch_dict, "dT_K", dE / C_global)
+    _record_diagnostic(fixer, batch_dict, "imbalance_Wm2", dE / (fixer.N_seconds * area))
 
 
 def _apply_energy_correction(
@@ -116,19 +165,22 @@ def _apply_energy_correction(
         sp_pred: predicted surface pressure; required when ``flag_sigma``.
 
     Returns:
-        The corrected temperature field, same shape as ``T_pred``.
+        ``(T_corrected, dE, C_global)``: the corrected temperature field (same
+        shape as ``T_pred``), the energy added per sample [J], and the
+        predicted state's total heat capacity ``sum(cp * dm)`` [J K-1], so
+        ``dE / C_global`` is the mass-weighted mean temperature correction.
     """
+    # Spread the deficit by cp-weighted air mass: a single uniform dT.  Both
+    # integrals use the *predicted* state, so the energy actually added is
+    # dT * sum(cp * dm) == dE exactly.
+    if flag_sigma:
+        C_column = core.integral(CP_t1, sp_pred) / GRAVITY  # J K-1 m-2
+    else:
+        C_column = core.integral(CP_t1) / GRAVITY
+    C_global = core.weighted_sum(C_column, axis=(-2, -1))  # J K-1
+    dE = net_forcing + global_TE_t0 - global_TE_t1
     if scale_by_mass:
-        # Spread the deficit by cp-weighted air mass: a single uniform dT.  Both
-        # integrals use the *predicted* state, so the energy actually added is
-        # dT * sum(cp * dm) == dE exactly.
-        if flag_sigma:
-            C_column = core.integral(CP_t1, sp_pred) / GRAVITY  # J K-1 m-2
-        else:
-            C_column = core.integral(CP_t1) / GRAVITY
-        C_global = core.weighted_sum(C_column, axis=(-2, -1))  # J K-1
-        dE = net_forcing + global_TE_t0 - global_TE_t1
-        return T_pred + (dE / C_global).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
+        return T_pred + (dE / C_global).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1), dE, C_global
 
     # total energy correction ratio; broadcast to (B, 1, 1, 1)
     E_correct_ratio = (net_forcing + global_TE_t0) / global_TE_t1
@@ -136,7 +188,7 @@ def _apply_energy_correction(
 
     # let thermal energy carry the corrected total energy amount
     E_t1_correct = E_level_t1 * E_correct_ratio
-    return (E_t1_correct - E_qgk_t1) / CP_t1
+    return (E_t1_correct - E_qgk_t1) / CP_t1, dE, C_global
 
 
 class TracerFixer(nn.Module):
@@ -227,6 +279,9 @@ class GlobalMassFixer(nn.Module):
         mass_dry_b = (p_dry_b * sp_pred * grid_area).sum((-2, -1)) / GRAVITY
 
         sp_correct_ratio = (mass_dry_sum_t0 - mass_dry_a) / mass_dry_b
+        global_mean_sp = (sp_pred * grid_area).sum((-2, -1)) / grid_area.sum()
+        _record_diagnostic(self, batch_dict, "ps_ratio_minus_1", sp_correct_ratio - 1)
+        _record_diagnostic(self, batch_dict, "dPS_Pa", global_mean_sp * (sp_correct_ratio - 1))
         sp_pred = sp_pred * sp_correct_ratio.unsqueeze(1).unsqueeze(2)
 
         # back to (B, 1, 1, H, W)
@@ -341,6 +396,7 @@ class GlobalWaterFixer(nn.Module):
 
         residual = -TWC_sum - E_sum - P_sum
         P_correct_ratio = (P_sum + residual) / P_sum
+        _record_diagnostic(self, batch_dict, "precip_ratio_minus_1", P_correct_ratio - 1)
         precip = precip * P_correct_ratio.unsqueeze(-1).unsqueeze(-1)
 
         _set_pred(batch_dict, self.precip_var, precip.unsqueeze(1).unsqueeze(2))
@@ -407,7 +463,12 @@ class GlobalNetEnergyFixer(nn.Module):
     Args:
         T_var, q_var, U_var, V_var: 3d atmosphere state keys.
         surface_geopotential_name: variable name of surface geopotential in the
-            statics file (a one-element list is accepted for gen1 parity).
+            ``save_loc_physics`` statics file (a one-element list is accepted for
+            gen1 parity). Set this or ``surface_geopotential_var``.
+        surface_geopotential_var: static var key of surface geopotential in the
+            input dict (``input_source_key``), e.g. ``"E3SM_ATM/static/2d/PHIS"``.
+            It is read after the ic_only preblocks, so it is on the model grid
+            even when the dataset regrids it.
         toa_net_solar_var, toa_net_thermal_var: TOA net flux keys in ``y_processed``.
         surf_net_solar_var, surf_net_thermal_var: surface net radiation keys.
         surf_sh_var, surf_lh_var: surface sensible / latent heat flux keys.
@@ -428,7 +489,6 @@ class GlobalNetEnergyFixer(nn.Module):
         q_var,
         U_var,
         V_var,
-        surface_geopotential_name,
         toa_net_solar_var,
         toa_net_thermal_var,
         surf_net_solar_var,
@@ -436,10 +496,12 @@ class GlobalNetEnergyFixer(nn.Module):
         surf_sh_var,
         surf_lh_var,
         lead_time_periods,
+        surface_geopotential_name=None,
         sp_var=None,
         flux_units="J m-2",
         input_source_key="x_physical",
         scale_by_mass=False,
+        surface_geopotential_var=None,
         **physics,
     ):
         super().__init__()
@@ -470,13 +532,7 @@ class GlobalNetEnergyFixer(nn.Module):
         if self.flag_sigma and self.sp_var is None:
             raise ValueError("GlobalNetEnergyFixer: sp_var is required when grid_type is 'sigma'.")
 
-        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
-        gph_name = (
-            surface_geopotential_name[0]
-            if isinstance(surface_geopotential_name, (list, tuple))
-            else surface_geopotential_name
-        )
-        self.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+        _init_surface_geopotential(self, surface_geopotential_name, surface_geopotential_var, physics)
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -495,7 +551,7 @@ class GlobalNetEnergyFixer(nn.Module):
         U_input = self._input(batch_dict, self.U_var)[:, :, -1, ...].to(device)
         V_input = self._input(batch_dict, self.V_var)[:, :, -1, ...].to(device)
 
-        GPH_surf = self.GPH_surf.to(device)
+        GPH_surf = _surface_geopotential(self, batch_dict, device)
 
         # heat capacity at constant pressure
         CP_t0 = (1 - q_input) * CP_DRY + q_input * CP_VAPOR
@@ -540,7 +596,7 @@ class GlobalNetEnergyFixer(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        T_pred = _apply_energy_correction(
+        T_pred, dE, C_global = _apply_energy_correction(
             self.core,
             scale_by_mass=self.scale_by_mass,
             flag_sigma=self.flag_sigma,
@@ -554,6 +610,7 @@ class GlobalNetEnergyFixer(nn.Module):
             sp_pred=sp_pred if self.flag_sigma else None,
         )
 
+        _record_energy_diagnostics(self, batch_dict, dE, C_global)
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
         return batch_dict
@@ -581,6 +638,9 @@ class GlobalEnergyFixerUpDown(nn.Module):
     Args:
         T_var, q_var, U_var, V_var, sp_var: atmosphere state keys.
         surface_geopotential_name: variable name of PHIS in the statics file.
+            Set this or ``surface_geopotential_var``.
+        surface_geopotential_var: static var key of PHIS in the input dict
+            (``input_source_key``); see :class:`GlobalNetEnergyFixer`.
         toa_down_solar_input_var: SOLIN key in the input dict.
         toa_up_solar_var, toa_up_olr_var: TOA upwelling flux keys.
         surf_down_solar_var, surf_up_solar_var, surf_down_lw_var, surf_up_lw_var, surf_sh_var, surf_lh_var:
@@ -597,7 +657,6 @@ class GlobalEnergyFixerUpDown(nn.Module):
         U_var,
         V_var,
         sp_var,
-        surface_geopotential_name,
         toa_down_solar_input_var,
         toa_up_solar_var,
         toa_up_olr_var,
@@ -608,8 +667,10 @@ class GlobalEnergyFixerUpDown(nn.Module):
         surf_sh_var,
         surf_lh_var,
         lead_time_periods,
+        surface_geopotential_name=None,
         input_source_key="x_physical",
         scale_by_mass=False,
+        surface_geopotential_var=None,
         **physics,
     ):
         super().__init__()
@@ -634,13 +695,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
             physics
         )
 
-        ds_physics = get_forward_data(os.path.expandvars(physics["save_loc_physics"]))
-        gph_name = (
-            surface_geopotential_name[0]
-            if isinstance(surface_geopotential_name, (list, tuple))
-            else (surface_geopotential_name)
-        )
-        self.GPH_surf = torch.from_numpy(ds_physics[gph_name].values).float()
+        _init_surface_geopotential(self, surface_geopotential_name, surface_geopotential_var, physics)
 
     def _input(self, batch_dict, var_key):
         return batch_dict[self.input_source_key][_src(var_key)][var_key]
@@ -662,7 +717,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         if not self.flag_sigma:
             raise NotImplementedError("GlobalEnergyFixerUpDown (gen2) currently supports the hybrid-sigma grid only.")
 
-        GPH_surf = self.GPH_surf.to(device)
+        GPH_surf = _surface_geopotential(self, batch_dict, device)
 
         CP_t0 = (1 - q_input) * CP_DRY + q_input * CP_VAPOR
         CP_t1 = (1 - q_pred) * CP_DRY + q_pred * CP_VAPOR
@@ -708,7 +763,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
         global_TE_t0 = self.core.weighted_sum(TE_t0, axis=(-2, -1))
         global_TE_t1 = self.core.weighted_sum(TE_t1, axis=(-2, -1))
 
-        T_pred = _apply_energy_correction(
+        T_pred, dE, C_global = _apply_energy_correction(
             self.core,
             scale_by_mass=self.scale_by_mass,
             flag_sigma=self.flag_sigma,
@@ -722,6 +777,7 @@ class GlobalEnergyFixerUpDown(nn.Module):
             sp_pred=sp_pred,
         )
 
+        _record_energy_diagnostics(self, batch_dict, dE, C_global)
         # back to (B, L, 1, H, W)
         _set_pred(batch_dict, self.T_var, T_pred.unsqueeze(2))
         return batch_dict

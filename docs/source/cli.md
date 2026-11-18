@@ -125,6 +125,12 @@ Your config is also saved as `{save_loc}/model.yml` (with its change history tra
 **When to use it:** once, after `credit begin` and before `credit train`.  If
 you change your variable list or level selection, re-run it.
 
+If the loss sets `loss.args.variance_path`, preprocess then makes a second, shorter
+pass with the fitted scaler and writes the per-level target variances in loss units
+there (see [Losses](Losses.md#loss-space-variances-variance_path)).
+`credit preprocess --variance-only -c my_run.yml` rewrites just that file from the
+existing scaler.
+
 ---
 
 ## `credit train` — train a model

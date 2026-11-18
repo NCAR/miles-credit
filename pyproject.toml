@@ -28,7 +28,7 @@ dependencies = [
     "pygrib",
     "numcodecs",
     "echo-opt",
-    "bridgescaler",
+    "bridgescaler>=0.9.0",  # DSpatialStandardScalerTensor (spatial_variables)
     "segmentation-models-pytorch",
     "haversine",
     "pvlib",

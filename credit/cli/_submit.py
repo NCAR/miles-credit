@@ -43,6 +43,8 @@ def _preprocess(args: argparse.Namespace) -> None:
     from credit.applications.preprocess import main
 
     sys.argv = ["credit-preprocess", "-c", args.config, "--backend", args.backend]
+    if getattr(args, "variance_only", False):
+        sys.argv.append("--variance-only")
     main()
 
 

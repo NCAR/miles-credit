@@ -104,9 +104,10 @@ physical `y_processed` untouched for autoregressive rollout assembly. Omit
 
 If the scaler stores some variables per grid point (fit with `spatial_variables`
 in the `bridgescaler_transform` preblock), list the same variables under
-`spatial_variables` here. They are flattened to `(B, H*W)` before scaling and
-restored afterward, as in the scaler pre/postblocks. Without it, bridgescaler's
-column-count check fails on the first training batch. `credit check` reports a
+`spatial_variables` here. The per-location scaler is applied to the tensor as it
+is; a scaler file fit before per-location scaling has one column per grid point
+instead, so those variables are flattened to `(B, H*W)` around the transform,
+and without the list its column-count check fails on the first training batch. `credit check` reports a
 `flatten_to_tensor` block whose `spatial_variables` differ from those of the
 preblock that fits the same `scaler_path`.
 
@@ -311,6 +312,33 @@ close the budget. They read the t0 state from `batch_dict[input_source_key]`
 grid, or `[lon2d, lat2d, p_level]` for pressure levels), `grid_type`
 (`"sigma"` default or `"pressure"`), and `midpoint`.
 
+Each budget fixer (mass, water, energy) records the size of the correction it applied
+in `batch_dict["fixer_diagnostics"]`, keyed by its config name. The gen2 trainer logs
+these to `training_log.csv` (see [Losses](Losses.md#per-variable-logging)).
+
+**Train on the prediction before the fixers.** A fixer that rescales or shifts a
+field hides that field's raw global mean from a loss computed on its output. Put a
+`snapshot` block before the budget fixers and point `loss.args.pred_key` at it (see
+[Scoring the prediction before the fixers](Losses.md#scoring-the-prediction-before-the-fixers)).
+Run the mass fixer before the energy fixer, which integrates over the corrected
+surface pressure.
+
+### `snapshot` (Snapshot)
+
+**AutoAPI:** {py:obj}`credit.postblock.snapshot.Snapshot`
+
+Copies the prediction as it stands at that point in the chain to a second key, so
+later blocks can keep modifying `key` while `out_key` keeps the earlier version.
+Only the dict structure is copied: the tensors are shared and stay on the autograd
+graph, so it costs no memory.
+
+```yaml
+type: "snapshot"
+args:
+  key: "y_processed"          # default
+  out_key: "y_processed_raw"  # default
+```
+
 ### `tracer_fixer` (TracerFixer)
 
 **AutoAPI:** {py:obj}`credit.postblock.conservation.TracerFixer`
@@ -431,6 +459,16 @@ args:
   grid_type: "sigma"
   midpoint: false
 ```
+
+Both energy fixers (this one and `global_energy_fixer_net`) need surface
+geopotential. Give exactly one of:
+
+- `surface_geopotential_name`: a variable in the `save_loc_physics` file, read once
+  at startup. It must already be on the model grid.
+- `surface_geopotential_var`: a static var key in the input dict (`x_physical`), such
+  as `"E3SM_ATM/static/2d/PHIS"`, read on every step. The input dict is captured after
+  the `ic_only` preblocks, so a static that the dataset regrids arrives on the model
+  grid, in physical units, and needs no separate file.
 
 ## Filtering, Masking, and Advection
 

@@ -111,9 +111,15 @@ That is the minimum. The full option set:
 | `scaler_path` | — | Fitted bridgescaler JSON. Required for `inverse_variance` and `learnable`. |
 | `variable_weights` | `{}` | Manual multipliers per `var_key`, applied on top of **every** mode. |
 | `normalize_weights` | `true` | Rescale the combination weights to mean 1. |
+| `variance_path` | — | Loss-space variance file from `credit preprocess`; see below. |
+| `variance_type` | `"temporal"` | `temporal` or `pooled` (with `variance_path`). |
+| `mask_correction` | `true` | With `variance_path`, divide each level's weight by its observed fraction. |
+| `per_level_variance` | `true` | With `inverse_variance`, weight each level of a 3D variable by its own variance. `false` uses one level-mean variance per variable. |
 | `include_computed_diagnostics` | `true` | Score postblock-computed diagnostics (see below). |
 | `use_latitude_weights` | `false` | Apply cos(lat) spatial weighting per variable. |
 | `latitude_weights` | — | Path to a dataset with a `latitude` coordinate. Required when the above is true. |
+| `pred_key` | `"y_processed"` | Which prediction to score. `y_processed_raw` with a `snapshot` postblock scores it before the budget fixers; see below. |
+| `valid_pred_key` | *(pred_key)* | Which prediction validation scores (and checkpoints are selected on). |
 
 ### Choosing the univariate loss
 
@@ -179,9 +185,18 @@ many orders of magnitude.
 
 ### `inverse_variance` (default)
 
-Weight each variable by `1 / σ²`, with `σ²` read from the fitted bridgescaler at
-`scaler_path`. For MSE this approximates training in normalized space, which is
-usually what you want as a starting point.
+Weight each level of each variable by `1 / σ²`, with `σ²` read from the fitted
+bridgescaler at `scaler_path`. The scaler normalizes every level separately, so for
+MSE this reproduces training in normalized space, which is usually what you want as
+a starting point. Each variable's score is the mean over its levels, so a 3D variable
+counts as much as a 2D one in the combination, not 3D-levels times as much.
+
+Set `per_level_variance: false` to use one variance per variable, the mean over its
+levels. That was the behavior before 2026-10. It lets the high-variance levels set the
+weight, so a variable whose variance spans orders of magnitude across levels loses
+most of its levels from the objective. Specific humidity is the usual case: upper-air
+levels have variances around 1e-14 against 1e-5 near the surface. Use it only to
+reproduce an older run.
 
 Variances are read from `DStandardScalerTensor.var_x_` directly, estimated from
 t-digest centroid moments for `DQuantileScalerTensor`, or taken from `sd_²` for the
@@ -190,6 +205,9 @@ weight 1.0 with a logged warning — worth watching for, since a silent 1.0 amon
 1/σ² weights effectively drops that variable from the objective. Postblock-computed
 diagnostics (e.g. `geopotential_diagnostic`) are never in the scaler, so give them
 a `variable_weights` entry of about `1 / σ²` in their physical units.
+For a grid-wise (`spatial_variables`) scaler each level's variance is the mean of
+the per-grid-point variances over the cells it observed (cells that were NaN in
+every sample are skipped), i.e. the variable's typical *local* variability.
 
 Log- and sqrt-transformed variables are handled automatically. When a
 `log_transform` (or `sqrt_transform`) preblock feeds the scaler and an
@@ -242,6 +260,63 @@ loss:
     var_weighting: "inverse_variance"
     scaler_path: '/path/to/scaler.json'
 ```
+
+### Loss-space variances (`variance_path`)
+
+Optional. The scaler (with its `_physical.json` sidecar) gives each level one
+variance pooled over time and, for per-channel scalers, over the whole map, and it
+does not account for masked fields. Setting `variance_path` replaces the variances
+of every variable the file covers with ones measured where the loss actually
+scores, and lets you choose the variance over time at each grid point instead of
+the pooled one:
+
+```yaml
+loss:
+  type: base
+  args:
+    var_weighting: "inverse_variance"
+    scaler_path: '/path/to/scaler.json'           # still used for variables the file lacks
+    variance_path: '/path/to/loss_variances.json'  # written by credit preprocess
+    variance_type: "temporal"                     # temporal | pooled
+    mask_correction: true
+    use_latitude_weights: true
+    latitude_weights: '/path/to/grid.nc'
+    # variance_batches: 250                       # preprocess only; default half the scaler batches
+    # variance_masks:                             # preprocess only; for masks that are not NaN
+    #   ERA5/prognostic/2d/sst: {op: "!=", value: 0}
+    #   ERA5/prognostic/2d/soil_moisture: {mask_var: ERA5/static/2d/land_sea_mask, op: ">", value: 0.5}
+```
+
+After fitting the scaler, `credit preprocess` runs a second pass: the `per_step`
+preblocks with the fitted scaler, then every `postblocks.per_step` block that writes
+`y_target_processed` (the target twin). That reproduces `y_target_processed` exactly
+as the trainer builds it, so square/exp inverses, clips in normalized space and NaN
+fills are all accounted for. For each variable and level the file records:
+
+| Field | Meaning |
+|-------|---------|
+| `temporal_variance` | Variance over time at each grid point, averaged over observed points. A forecast of each point's climatology scores about 1. |
+| `pooled_variance` | Variance over time and space together, what a per-channel scaler normalizes by. |
+| `observed_fraction` | Fraction of the field that is observed. |
+
+Averages are cos(lat)-weighted when `use_latitude_weights` is on, like the loss.
+A point is observed where the target is finite just before the scaler. Fields
+masked another way (a fill value such as 0, or a separate 0/1 mask variable) need
+a `variance_masks` rule: `op`/`value` compare the variable itself, or `mask_var`
+(any input or target variable, e.g. a static land-sea mask, broadcast over levels),
+using its values just before the scaler. A rule key may be a full var key or a
+`/`-delimited prefix. Converting such fills to NaN with a `fill_values` preblock
+before the scaler is usually better still, since the scaler then skips them too.
+
+With `mask_correction: true`, each level's weight is divided by its observed
+fraction. Unobserved points (land in an ocean field) add almost no error once the
+model learns their fill value, so they shrink a masked variable's loss by that
+fraction; the correction undoes the dilution.
+
+Variables not in the file keep their scaler variance (with a warning). The metrics
+accept the same three keys. `credit check` warns when the file is missing or older
+than the scaler, errors on a level-count mismatch, and notes `variable_weights`
+entries that a unit-correcting multiplier would now apply twice; remove those.
 
 ### `manual`
 
@@ -350,6 +425,47 @@ this is a small distortion; if you are overriding most variables, prefer `manual
 weights you control directly.
 ```
 
+## Scoring the prediction before the fixers
+
+The global budget fixers (`global_mass_fixer`, `global_water_fixer`, the energy
+fixers) each rescale or shift one field so that a global budget closes. A loss computed
+on their output cannot see that field's raw global mean (or scale): with
+`scale_by_mass: true` the energy fixer returns `T_raw - <T_raw> + const`, so adding
+any constant to the raw temperature leaves the fixed one, and the loss, unchanged.
+Nothing then pulls the raw prediction back toward the truth in that direction. The
+fixer silently absorbs the difference, and the loss on the delivered temperature
+pushes on the fields the fixer trusts (the predicted fluxes, moisture and winds)
+instead. Chapman, Schreck & Sha (2026,
+[arXiv:2607.18416](https://arxiv.org/abs/2607.18416)) show this with a water fixer:
+the raw precipitation drifted while every delivered field closed its budget exactly.
+
+The fix is to score the prediction *before* the fixers and keep the fixers for the
+delivered field. A `snapshot` postblock copies the prediction at that point:
+
+```yaml
+postblocks:
+  per_step:
+    # ... reconstruct, scaler, square, target twin ...
+    tracer_fixer:  {type: tracer_fixer, args: {...}}
+    snapshot_raw:  {type: snapshot, args: {key: y_processed, out_key: y_processed_raw}}
+    mass_fixer:    {type: global_mass_fixer, args: {...}}
+    water_fixer:   {type: global_water_fixer, args: {...}}
+    energy_fixer:  {type: global_energy_fixer_net, args: {...}}
+
+loss:
+  type: base
+  args:
+    pred_key: y_processed_raw      # train on the raw prediction
+    valid_pred_key: y_processed    # validate (and select checkpoints) on the delivered one
+```
+
+The fixed `y_processed` still rolls forward to the next step in multi-step training
+and rollout, so the model sees corrected states as input; only the loss moves. When
+`valid_pred_key` differs from `pred_key`, validation also scores the raw prediction
+and logs it as `valid_loss_raw`. `credit check` warns when a water or energy fixer
+runs before the prediction the training loss scores, and when the mass fixer runs
+after an energy fixer.
+
 ## Per-variable logging
 
 `BaseLoss` exposes detached per-variable scores through `last_var_losses` after each
@@ -360,6 +476,24 @@ which variable is driving a plateau. The per-variable columns are controlled by
 `trainer.save_metric_vars`: `True` (the default) writes every per-variable
 column, a list of variable names writes only matching columns, and `False` (or
 `[]`) writes the combined aggregates only.
+
+Two kinds of column are written regardless of `save_metric_vars`: `valid_loss_raw`
+(above) and the conservation fixers' correction sizes,
+`train_fixer/<block>/<quantity>` and `valid_fixer/<block>/<quantity>`, where
+`<block>` is the postblock's config name. A fixer's output always closes its
+budget, so the size of the correction it had to apply is the only record of how far
+the raw prediction is from closing it:
+
+| Fixer | Quantity | Meaning |
+|---|---|---|
+| energy | `dT_K` | Mass-weighted mean temperature correction (K per step). |
+| energy | `imbalance_Wm2` | Energy the fixer added, as a global-mean flux (W m⁻²; positive = heating). |
+| mass | `ps_ratio_minus_1` | Surface-pressure scaling factor minus 1. |
+| mass | `dPS_Pa` | Change in global-mean surface pressure (Pa). |
+| water | `precip_ratio_minus_1` | Precipitation scaling factor minus 1. |
+
+They are averaged over the forecast steps of each batch and across ranks, and are
+not shown in the progress bar.
 
 ## Using a plain registry loss
 
