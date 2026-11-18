@@ -55,9 +55,9 @@ def _denorm_block_confs(conf):
             continue
         args = block.get("args") or {}
         if (args.get("out_key") or args.get("key") or "y_processed") != "y_processed":
-            continue  # target twin
+            continue  # target twin: writes y_target_processed, not y_processed
         if block["type"] == "reconstruct" and args.get("in_key", "y_pred") != "y_pred":
-            continue  # target twin
+            continue  # target twin: reads the flat target `y`, not the prediction
         blocks[name] = block
 
     has_inverse = any(
@@ -76,13 +76,6 @@ def _denorm_block_confs(conf):
     return blocks
 
 
-def _build_denorm_postblocks(conf):
-    """Instantiate the denormalisation postblock chain (see ``_denorm_block_confs``)."""
-    from credit.postblock import _build_postblock_section
-
-    return _build_postblock_section(_denorm_block_confs(conf))
-
-
 def _denormalize(chain, metadata, tensor):
     """Run flat model-space ``tensor`` through ``chain``; return ``{var_key: (B, n_lev, n_time, H, W)}``."""
     import torch
@@ -95,13 +88,19 @@ def _denormalize(chain, metadata, tensor):
 
 
 def _resolve_field(field, var_keys):
-    """Match ``field`` to a variable key: exact key first, else the unique short name (last path segment)."""
+    """Match ``field`` to a variable key: the exact key first, else the short name (last path segment).
+
+    Returns None if nothing matches.
+
+    Raises:
+        ValueError: if the short name matches variables in more than one source; use the full key.
+    """
     if field in var_keys:
         return field
-    for key in var_keys:
-        if key.split("/")[-1] == field:
-            return key
-    return None
+    matches = [key for key in var_keys if key.split("/")[-1] == field]
+    if len(matches) > 1:
+        raise ValueError(f"Field '{field}' is ambiguous; use one of the full keys: {', '.join(sorted(matches))}")
+    return matches[0] if matches else None
 
 
 def _plot(args) -> None:
@@ -132,10 +131,12 @@ def _plot(args) -> None:
     with open(args.config) as f:
         conf = yaml.safe_load(f)
 
+    from credit.postblock import _build_postblock_section
+
     denorm_chain = None
     if args.denorm:  # fail fast, before the slow model/data loading
         try:
-            denorm_chain = _build_denorm_postblocks(conf)
+            denorm_chain = _build_postblock_section(_denorm_block_confs(conf))
         except ValueError as exc:
             print(str(exc), file=sys.stderr)
             sys.exit(1)
@@ -202,8 +203,6 @@ def _plot(args) -> None:
         print("ERROR: preblocks did not produce an 'x' or 'input' key in batch.", file=sys.stderr)
         sys.exit(1)
     y = _batch.get("y", _batch.get("target"))
-    if "meta" in _batch:
-        meta = _batch["meta"]
     with torch.no_grad():
         y_pred = model(x)
 
@@ -221,7 +220,7 @@ def _plot(args) -> None:
         logger.info("Inverse-normalised outputs to physical units via postblocks.per_step")
 
         def _get_field(field):
-            key = _resolve_field(field, pred_vars)
+            key = _resolve_field(field, pred_vars)  # may raise ValueError if the short name is ambiguous
             if key is None:
                 return None
             # (B, n_levels, n_time, H, W) -> (n_levels, H, W) for the first sample and time step
@@ -243,7 +242,11 @@ def _plot(args) -> None:
         available_fields = sorted(channel_map.keys())
 
     for field in args.field:
-        got = _get_field(field)
+        try:
+            got = _get_field(field)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            continue
         if got is None:
             print(f"Field '{field}' not found. Available: {', '.join(available_fields)}", file=sys.stderr)
             continue

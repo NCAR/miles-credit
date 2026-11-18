@@ -168,16 +168,21 @@ credit plot -c my_experiment.yml --field VAR_2T \
 Each PNG is saved to `<save_loc>/plots/` and shows **truth | prediction | difference**
 as a global map.
 
-`--denorm` converts outputs from normalised (σ) units to physical units using the
-mean and std files from your config — e.g. Kelvin for temperature, Pascals for surface
-pressure. Without `--denorm` the colourbar is in standard-deviation units, which is
-useful for diagnosing normalisation issues but harder to interpret at a glance.
+`--denorm` converts outputs from normalised (σ) units to physical units by running the
+inverse scaler (and any `exp_transform`/`square_transform`) from your config's
+`postblocks.per_step` — e.g. Kelvin for temperature, Pascals for surface pressure.
+Without `--denorm` the colourbar is in standard-deviation units, which is useful for
+diagnosing normalisation issues but harder to interpret at a glance.
+
+`--field` takes the variable names from your `data.source` config (so `2m_temperature`
+if that is what your config calls it), or the full key such as `ERA5/prognostic/2d/VAR_2T`.
+A name that is not found prints the list of available fields.
 
 **What to look for:**
 
 | Symptom | Likely cause |
 |---------|-------------|
-| Loss > 100 or NaN | Normalisation broken — check mean/std paths |
+| Loss > 100 or NaN | Normalisation broken — check `scaler_path` in the scaler pre/postblocks |
 | Prediction is uniform (no structure) | Too few epochs or learning rate too high |
 | Tiling / grid artefacts in prediction | Normal at early epochs for window-based models; disappears with training |
 | Difference panel is smooth and small | Training is going well |

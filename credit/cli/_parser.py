@@ -339,7 +339,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--denorm",
         action="store_true",
-        help="Convert output to physical units by running postblocks.per_step (reconstruct + inverse scaler); needs an inverse bridgescaler_transform",
+        help="Show physical units by running the inverse scaler in postblocks.per_step",
     )
 
     # ---- ask ----

@@ -255,9 +255,10 @@ required.
 `--denorm` converts to physical units by running the prediction-side blocks of
 `postblocks.per_step` (`reconstruct`, the inverse `bridgescaler_transform`, and any
 `exp_transform`/`square_transform`); physics fixers and diagnostics are skipped.  The
-config therefore needs an inverse scaler in `postblocks.per_step`, which every gen2
-training config already has (`credit check` warns if it is missing).  Without
-`--denorm` the plot shows normalised values.
+config therefore needs an inverse scaler in `postblocks.per_step` (`credit check` warns
+if it is missing).  Without `--denorm` the plot shows normalised values.  `--field` takes
+the variable names from your `data.source` config, or a full key such as
+`ERA5/prognostic/2d/VAR_2T`.
 
 **When to use it:** to eyeball whether the model is producing realistic
 weather patterns after a few epochs of training.

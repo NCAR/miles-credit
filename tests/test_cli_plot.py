@@ -3,6 +3,8 @@
 All tests run on CPU with no real data files; the bridgescaler file is synthesized in tmp_path.
 """
 
+import math
+
 import pytest
 import torch
 
@@ -154,6 +156,13 @@ def metadata():
     }
 
 
+def _build_chain(conf):
+    from credit.cli import _denorm_block_confs
+    from credit.postblock import _build_postblock_section
+
+    return _build_postblock_section(_denorm_block_confs(conf))
+
+
 class TestDenormBlockConfs:
     def test_keeps_only_prediction_side_unit_blocks(self, tmp_path):
         from credit.cli import _denorm_block_confs
@@ -185,9 +194,9 @@ class TestDenormBlockConfs:
 
 class TestDenormalize:
     def test_inverse_scales_to_physical_units(self, tmp_path, metadata):
-        from credit.cli import _build_denorm_postblocks, _denormalize
+        from credit.cli import _denormalize
 
-        chain = _build_denorm_postblocks(_denorm_conf(_make_scaler(tmp_path)))
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
         # Flat model-space tensor (B=1, C=4, H=2, W=3): all zeros -> physical value == mean
         out = _denormalize(chain, metadata, torch.zeros(1, 4, 2, 3))
         assert out[T_KEY].shape == (1, 3, 1, 2, 3)
@@ -196,19 +205,85 @@ class TestDenormalize:
         assert torch.allclose(out[SP_KEY][0, 0, 0], torch.full((2, 3), MEAN_SP[0]))
 
     def test_unit_normalised_value_scales_by_std(self, tmp_path, metadata):
-        from credit.cli import _build_denorm_postblocks, _denormalize
+        from credit.cli import _denormalize
 
-        chain = _build_denorm_postblocks(_denorm_conf(_make_scaler(tmp_path)))
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
         out = _denormalize(chain, metadata, torch.ones(1, 4, 2, 3))
         assert torch.allclose(out[T_KEY][0, 0, 0], torch.full((2, 3), MEAN_T[0] + 2.0))  # std = sqrt(4)
         assert torch.allclose(out[SP_KEY][0, 0, 0], torch.full((2, 3), MEAN_SP[0] + 2000.0))  # std = sqrt(4e6)
 
     def test_accepts_5d_model_output_with_singleton_time(self, tmp_path, metadata):
-        from credit.cli import _build_denorm_postblocks, _denormalize
+        from credit.cli import _denormalize
 
-        chain = _build_denorm_postblocks(_denorm_conf(_make_scaler(tmp_path)))
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
         out = _denormalize(chain, metadata, torch.zeros(1, 4, 1, 2, 3))
         assert out[SP_KEY].shape == (1, 1, 1, 2, 3)
+
+
+class TestDenormalizeTransforms:
+    """exp_transform / square_transform run after the inverse scaler, as in training."""
+
+    TP_KEY = "ERA5/diagnostic/2d/TP"
+
+    def _setup(self, tmp_path, transform_type):
+        from bridgescaler import save_scaler_dict
+        from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+        s = DStandardScalerTensor(channels_last=False)
+        s.mean_x_ = torch.zeros(1)
+        s.var_x_ = torch.ones(1)
+        s.x_columns_ = [0]
+        s.n_ = 100
+        s._fit = True
+        path = str(tmp_path / "tp_scaler.json")
+        save_scaler_dict({"target": {"ERA5": {self.TP_KEY: s}}}, path)
+        conf = {
+            "postblocks": {
+                "per_step": {
+                    "reconstruct": {"type": "reconstruct"},
+                    "scaler": {
+                        "type": "bridgescaler_transform",
+                        "args": {"scaler_path": path, "variables": [], "method": "inverse_transform"},
+                    },
+                    "unit": {"type": transform_type, "args": {"variables": [self.TP_KEY]}},
+                }
+            }
+        }
+        metadata = {"target": {"_channel_map": {self.TP_KEY: {"slice": slice(0, 1), "orig_shape": (1, 1)}}}}
+        return _build_chain(conf), metadata
+
+    def test_exp_transform_is_applied(self, tmp_path):
+        from credit.cli import _denormalize
+
+        chain, metadata = self._setup(tmp_path, "exp_transform")
+        y = torch.full((1, 1, 2, 2), 2.0)
+        out = _denormalize(chain, metadata, y)[self.TP_KEY]
+        # ExpTransform inverts y = log(x + eps) - log(eps):  x = eps * exp(y) - eps
+        assert torch.allclose(out, torch.full_like(out, 1e-8 * math.exp(2.0) - 1e-8))
+
+    def test_square_transform_is_applied(self, tmp_path):
+        from credit.cli import _denormalize
+
+        chain, metadata = self._setup(tmp_path, "square_transform")
+        out = _denormalize(chain, metadata, torch.full((1, 1, 2, 2), 3.0))[self.TP_KEY]
+        assert torch.allclose(out, torch.full_like(out, 9.0))
+
+
+class TestPlotFailFast:
+    def test_exits_before_loading_model_when_no_inverse_scaler(self, tmp_path, capsys):
+        import argparse
+
+        import yaml
+
+        from credit.cli import _plot
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(yaml.safe_dump({"save_loc": str(tmp_path), "postblocks": {"per_step": {}}}))
+        args = argparse.Namespace(config=str(cfg), denorm=True, checkpoint=None, output_dir=None)
+        with pytest.raises(SystemExit) as exc:
+            _plot(args)
+        assert exc.value.code == 1
+        assert "inverse scaler" in capsys.readouterr().err
 
 
 class TestResolveField:
@@ -223,6 +298,12 @@ class TestResolveField:
         from credit.cli import _resolve_field
 
         assert _resolve_field(T_KEY, self.KEYS) == T_KEY
+
+    def test_ambiguous_short_name_raises(self):
+        from credit.cli import _resolve_field
+
+        with pytest.raises(ValueError, match="ambiguous"):
+            _resolve_field("SP", [SP_KEY, "OTHER/prognostic/2d/SP"])
 
     def test_unknown_returns_none(self):
         from credit.cli import _resolve_field

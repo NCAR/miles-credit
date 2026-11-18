@@ -42,15 +42,7 @@ from ._common import (
 )
 from ._convert import _convert, _init, _write_reload_config
 from ._parser import _build_parser, main
-from ._plot import (
-    _build_channel_map,
-    _denorm_block_confs,
-    _build_denorm_postblocks,
-    _denormalize,
-    _resolve_field,
-    _metrics,
-    _plot,
-)
+from ._plot import _build_channel_map, _denorm_block_confs, _denormalize, _metrics, _plot, _resolve_field
 from ._submit import (
     _build_pbs_script,
     _build_preprocess_pbs_script,
@@ -95,10 +87,8 @@ __all__ = [
     "_agent_read_file",
     "_ask",
     "_build_channel_map",
-    "_build_denorm_postblocks",
     "_denorm_block_confs",
     "_denormalize",
-    "_resolve_field",
     "_build_parser",
     "_build_pbs_script",
     "_build_preprocess_pbs_script",
@@ -124,6 +114,7 @@ __all__ = [
     "_load_slurm_config",
     "_metrics",
     "_plot",
+    "_resolve_field",
     "_print_ensemble_rollout_plan",
     "_print_job_plan",
     "_prompt",

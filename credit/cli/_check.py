@@ -862,26 +862,17 @@ def _check_channel_counts(conf: dict, rep: _Report) -> None:
 def _check_plot_denorm_ready(conf: dict, rep: _Report) -> None:
     """Warn when ``credit plot --denorm`` would have nothing to denormalize with.
 
-    ``--denorm`` runs the prediction-side ``postblocks.per_step`` chain, so it needs a
-    ``bridgescaler_transform`` doing ``inverse_transform`` on the prediction (``y_processed``).
+    ``--denorm`` needs an inverse ``bridgescaler_transform`` acting on ``y_processed``; the rule
+    lives in ``credit.cli._plot._denorm_block_confs`` so the two cannot drift apart.
     """
-    per_step = _get(conf, "postblocks", "per_step", default={}) or {}
-    for block in per_step.values():
-        if not isinstance(block, dict) or block.get("type") != "bridgescaler_transform":
-            continue
-        args = block.get("args") or {}
-        if args.get("method", "inverse_transform") == "inverse_transform" and _block_output_key(block) == "y_processed":
-            return
-    rep.warn(
-        "postblocks.per_step",
-        "No bridgescaler_transform with method: inverse_transform acts on y_processed, so "
-        "`credit plot --denorm` cannot convert model output to physical units.",
-        fix=(
-            "scaler:\n"
-            "  type: bridgescaler_transform\n"
-            "  args: {scaler_path: /path/to/scaler.json, variables: [], method: inverse_transform}"
-        ),
-    )
+    from ._plot import _denorm_block_confs
+
+    try:
+        _denorm_block_confs(conf)
+    except ValueError as exc:
+        rep.warn(
+            "postblocks.per_step", "`credit plot --denorm` cannot convert model output to physical units.", fix=str(exc)
+        )
 
 
 def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
