@@ -330,7 +330,10 @@ credit plot -c my_experiment.yml --field VAR_2T SP VAR_10U --denorm
 credit plot -c my_experiment.yml --field U --level 5 --denorm
 ```
 
-Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
+`--denorm` runs the inverse scaler from your `postblocks.per_step` to show physical
+units. `--field` takes the variable names from your `data.source` config (use the full key,
+e.g. `ERA5/prognostic/2d/VAR_2T`, if a short name is ambiguous). Plots are saved to
+`<save_loc>/plots/`. No GPU required — runs on CPU.
 
 **What to look for:**
 
@@ -338,7 +341,7 @@ Plots are saved to `<save_loc>/plots/`. No GPU required — runs on CPU.
 |---|---|
 | Recognisable weather patterns after ~10 epochs | Training is going well |
 | Uniform grey prediction | Too few epochs, or LR/normalisation problem |
-| Loss > 100 or growing | Check `scaler_path` in the `bridgescaler_transform` preblock (or `mean_path` / `std_path` if using the gen1-style `era5_normalizer`) |
+| Loss > 100 or growing | Check `scaler_path` in the `bridgescaler_transform` pre/postblocks |
 | Small smooth difference map | Model is converging correctly |
 
 > **More detail**: `credit plot --help`

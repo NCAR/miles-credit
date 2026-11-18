@@ -1,12 +1,12 @@
-"""Unit tests for credit plot helpers: _build_channel_map and _build_denorm_stats.
+"""Unit tests for credit plot helpers: _build_channel_map and the postblock-based --denorm path.
 
-All tests run on CPU with no real data files required.
-_build_denorm_stats is tested with in-memory xarray datasets injected via monkeypatching.
+All tests run on CPU with no real data files; the bridgescaler file is synthesized in tmp_path.
 """
 
-import numpy as np
+import math
+
 import pytest
-import xarray as xr
+import torch
 
 
 # ---------------------------------------------------------------------------
@@ -33,14 +33,6 @@ def _make_conf(vars_3d=None, vars_2d=None, diag_2d=None, n_levels=3):
                     },
                 }
             },
-        },
-        "preblocks": {
-            "norm": {
-                "args": {
-                    "mean_path": "/fake/mean.nc",
-                    "std_path": "/fake/std.nc",
-                }
-            }
         },
     }
 
@@ -103,107 +95,217 @@ class TestBuildChannelMap:
 
 
 # ---------------------------------------------------------------------------
-# _build_denorm_stats
+# --denorm: postblock-based denormalisation
 # ---------------------------------------------------------------------------
 
-
-def _make_mock_datasets(vars_3d, vars_2d, diag_2d, n_levels, mean_val=10.0, std_val=2.0):
-    """Build in-memory mean and std xarray Datasets for testing."""
-    levels = list(range(n_levels))
-    data_vars = {}
-    for vn in vars_3d:
-        data_vars[vn] = xr.DataArray(
-            np.full(n_levels, mean_val, dtype=np.float32),
-            dims=["level"],
-            coords={"level": levels},
-        )
-    for vn in list(vars_2d) + list(diag_2d):
-        data_vars[vn] = xr.DataArray(np.float32(mean_val))
-    return xr.Dataset(data_vars)
+T_KEY = "ERA5/prognostic/3d/T"
+SP_KEY = "ERA5/prognostic/2d/SP"
+MEAN_T, VAR_T = [250.0, 260.0, 270.0], [4.0, 4.0, 4.0]
+MEAN_SP, VAR_SP = [101325.0], [4.0e6]
 
 
-class TestBuildDenormStats:
-    def _patch_xr(self, monkeypatch, conf, mean_val=10.0, std_val=2.0):
-        """Monkeypatch xr.open_dataset to return in-memory datasets."""
-        src = conf["data"]["source"]["ERA5"]
-        v = src["variables"]
-        vars_3d = (v.get("prognostic") or {}).get("vars_3D", [])
-        vars_2d = (v.get("prognostic") or {}).get("vars_2D", [])
-        diag_2d = (v.get("diagnostic") or {}).get("vars_2D", [])
-        n_levels = len(src["levels"])
+def _make_scaler(tmp_path):
+    from bridgescaler import save_scaler_dict
+    from bridgescaler.distributed_tensor import DStandardScalerTensor
 
-        mean_ds = _make_mock_datasets(vars_3d, vars_2d, diag_2d, n_levels, mean_val=mean_val)
-        std_ds = _make_mock_datasets(vars_3d, vars_2d, diag_2d, n_levels, mean_val=std_val)
+    scalers = {}
+    for key, mean, var in ((T_KEY, MEAN_T, VAR_T), (SP_KEY, MEAN_SP, VAR_SP)):
+        s = DStandardScalerTensor(channels_last=False)
+        s.mean_x_ = torch.tensor(mean)
+        s.var_x_ = torch.tensor(var)
+        s.x_columns_ = list(range(len(mean)))
+        s.n_ = 100
+        s._fit = True
+        scalers[key] = s
+    path = str(tmp_path / "scaler.json")
+    save_scaler_dict({"target": {"ERA5": scalers}}, path)
+    return path
 
-        call_count = {"n": 0}
 
-        def _fake_open(path, **kwargs):
-            ds = mean_ds if call_count["n"] == 0 else std_ds
-            call_count["n"] += 1
-            return ds
+def _denorm_conf(scaler_path):
+    return {
+        "postblocks": {
+            "per_step": {
+                "reconstruct": {"type": "reconstruct", "args": {"detach": False}},
+                "scaler": {
+                    "type": "bridgescaler_transform",
+                    "args": {"scaler_path": scaler_path, "variables": [], "method": "inverse_transform"},
+                },
+                # physics fixer: must be skipped (its args would not even construct)
+                "fixer": {"type": "global_mass_fixer", "args": {"bogus": True}},
+                # target twin: must be skipped
+                "reconstruct_target": {"type": "reconstruct", "args": {"in_key": "y", "out_key": "y_target_processed"}},
+                "scaler_target": {
+                    "type": "bridgescaler_transform",
+                    "args": {"scaler_path": scaler_path, "variables": [], "key": "y_target_processed"},
+                },
+            }
+        }
+    }
 
-        import xarray as _xr
 
-        monkeypatch.setattr(_xr, "open_dataset", _fake_open)
+@pytest.fixture
+def metadata():
+    return {
+        "target": {
+            "_channel_map": {
+                T_KEY: {"slice": slice(0, 3), "orig_shape": (3, 1)},
+                SP_KEY: {"slice": slice(3, 4), "orig_shape": (1, 1)},
+            }
+        }
+    }
 
-    def test_output_length_matches_total_channels(self, monkeypatch):
-        from credit.cli import _build_denorm_stats
 
-        conf = _make_conf(vars_3d=["U", "V"], vars_2d=["SP"], diag_2d=["precip"], n_levels=4)
-        self._patch_xr(monkeypatch, conf)
-        mean_arr, std_arr = _build_denorm_stats(conf)
-        # 2×4 + 1 + 1 = 10
-        assert len(mean_arr) == 10
-        assert len(std_arr) == 10
+def _build_chain(conf):
+    from credit.cli import _denorm_block_confs
+    from credit.postblock import _build_postblock_section
 
-    def test_mean_values_propagated(self, monkeypatch):
-        from credit.cli import _build_denorm_stats
+    return _build_postblock_section(_denorm_block_confs(conf))
 
-        conf = _make_conf(vars_2d=["SP", "VAR_2T"], n_levels=2)
-        self._patch_xr(monkeypatch, conf, mean_val=273.0, std_val=5.0)
-        mean_arr, std_arr = _build_denorm_stats(conf)
-        assert np.allclose(mean_arr, 273.0)
-        assert np.allclose(std_arr, 5.0)
 
-    def test_denorm_recovers_original_scale(self, monkeypatch):
-        """x_norm * std + mean should recover original value."""
-        from credit.cli import _build_denorm_stats
+class TestDenormBlockConfs:
+    def test_keeps_only_prediction_side_unit_blocks(self, tmp_path):
+        from credit.cli import _denorm_block_confs
 
-        conf = _make_conf(vars_2d=["SP"], n_levels=2)
-        mean_val, std_val = 101325.0, 2000.0
-        self._patch_xr(monkeypatch, conf, mean_val=mean_val, std_val=std_val)
-        mean_arr, std_arr = _build_denorm_stats(conf)
+        blocks = _denorm_block_confs(_denorm_conf(_make_scaler(tmp_path)))
+        assert list(blocks) == ["reconstruct", "scaler"]
 
-        original = np.float32(103325.0)  # some physical SP value
-        normalised = (original - mean_val) / std_val
-        recovered = normalised * std_arr[0] + mean_arr[0]
-        assert abs(recovered - original) < 1.0  # within 1 Pa
+    def test_no_inverse_scaler_raises_with_fix(self):
+        from credit.cli import _denorm_block_confs
 
-    def test_missing_variable_gives_passthrough(self, monkeypatch):
-        """Variable not in stat files → mean=0, std=1 (no-op transform)."""
-        from credit.cli import _build_denorm_stats
+        conf = {"postblocks": {"per_step": {"reconstruct": {"type": "reconstruct"}}}}
+        with pytest.raises(ValueError, match="bridgescaler_transform"):
+            _denorm_block_confs(conf)
 
-        conf = _make_conf(vars_2d=["SP", "MISSING_VAR"], n_levels=2)
+    def test_forward_only_scaler_is_not_an_inverse(self, tmp_path):
+        from credit.cli import _denorm_block_confs
 
-        # Only SP is in the datasets
-        src = conf["data"]["source"]["ERA5"]
-        mean_ds = xr.Dataset({"SP": xr.DataArray(np.float32(101325.0))})
-        std_ds = xr.Dataset({"SP": xr.DataArray(np.float32(2000.0))})
+        conf = _denorm_conf(_make_scaler(tmp_path))
+        conf["postblocks"]["per_step"]["scaler"]["args"]["method"] = "transform"
+        with pytest.raises(ValueError):
+            _denorm_block_confs(conf)
 
-        call_count = {"n": 0}
+    def test_missing_postblocks_raises(self):
+        from credit.cli import _denorm_block_confs
 
-        def _fake_open(path, **kwargs):
-            ds = mean_ds if call_count["n"] == 0 else std_ds
-            call_count["n"] += 1
-            return ds
+        with pytest.raises(ValueError):
+            _denorm_block_confs({})
 
-        import xarray as _xr
 
-        monkeypatch.setattr(_xr, "open_dataset", _fake_open)
+class TestDenormalize:
+    def test_inverse_scales_to_physical_units(self, tmp_path, metadata):
+        from credit.cli import _denormalize
 
-        mean_arr, std_arr = _build_denorm_stats(conf)
-        # SP: channel 0 — real stats
-        assert abs(mean_arr[0] - 101325.0) < 1.0
-        # MISSING_VAR: channel 1 — passthrough (mean=0, std=1)
-        assert mean_arr[1] == pytest.approx(0.0)
-        assert std_arr[1] == pytest.approx(1.0)
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
+        # Flat model-space tensor (B=1, C=4, H=2, W=3): all zeros -> physical value == mean
+        out = _denormalize(chain, metadata, torch.zeros(1, 4, 2, 3))
+        assert out[T_KEY].shape == (1, 3, 1, 2, 3)
+        for lev, mean in enumerate(MEAN_T):
+            assert torch.allclose(out[T_KEY][0, lev, 0], torch.full((2, 3), mean))
+        assert torch.allclose(out[SP_KEY][0, 0, 0], torch.full((2, 3), MEAN_SP[0]))
+
+    def test_unit_normalised_value_scales_by_std(self, tmp_path, metadata):
+        from credit.cli import _denormalize
+
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
+        out = _denormalize(chain, metadata, torch.ones(1, 4, 2, 3))
+        assert torch.allclose(out[T_KEY][0, 0, 0], torch.full((2, 3), MEAN_T[0] + 2.0))  # std = sqrt(4)
+        assert torch.allclose(out[SP_KEY][0, 0, 0], torch.full((2, 3), MEAN_SP[0] + 2000.0))  # std = sqrt(4e6)
+
+    def test_accepts_5d_model_output_with_singleton_time(self, tmp_path, metadata):
+        from credit.cli import _denormalize
+
+        chain = _build_chain(_denorm_conf(_make_scaler(tmp_path)))
+        out = _denormalize(chain, metadata, torch.zeros(1, 4, 1, 2, 3))
+        assert out[SP_KEY].shape == (1, 1, 1, 2, 3)
+
+
+class TestDenormalizeTransforms:
+    """exp_transform / square_transform run after the inverse scaler, as in training."""
+
+    TP_KEY = "ERA5/diagnostic/2d/TP"
+
+    def _setup(self, tmp_path, transform_type):
+        from bridgescaler import save_scaler_dict
+        from bridgescaler.distributed_tensor import DStandardScalerTensor
+
+        s = DStandardScalerTensor(channels_last=False)
+        s.mean_x_ = torch.zeros(1)
+        s.var_x_ = torch.ones(1)
+        s.x_columns_ = [0]
+        s.n_ = 100
+        s._fit = True
+        path = str(tmp_path / "tp_scaler.json")
+        save_scaler_dict({"target": {"ERA5": {self.TP_KEY: s}}}, path)
+        conf = {
+            "postblocks": {
+                "per_step": {
+                    "reconstruct": {"type": "reconstruct"},
+                    "scaler": {
+                        "type": "bridgescaler_transform",
+                        "args": {"scaler_path": path, "variables": [], "method": "inverse_transform"},
+                    },
+                    "unit": {"type": transform_type, "args": {"variables": [self.TP_KEY]}},
+                }
+            }
+        }
+        metadata = {"target": {"_channel_map": {self.TP_KEY: {"slice": slice(0, 1), "orig_shape": (1, 1)}}}}
+        return _build_chain(conf), metadata
+
+    def test_exp_transform_is_applied(self, tmp_path):
+        from credit.cli import _denormalize
+
+        chain, metadata = self._setup(tmp_path, "exp_transform")
+        y = torch.full((1, 1, 2, 2), 2.0)
+        out = _denormalize(chain, metadata, y)[self.TP_KEY]
+        # ExpTransform inverts y = log(x + eps) - log(eps):  x = eps * exp(y) - eps
+        assert torch.allclose(out, torch.full_like(out, 1e-8 * math.exp(2.0) - 1e-8))
+
+    def test_square_transform_is_applied(self, tmp_path):
+        from credit.cli import _denormalize
+
+        chain, metadata = self._setup(tmp_path, "square_transform")
+        out = _denormalize(chain, metadata, torch.full((1, 1, 2, 2), 3.0))[self.TP_KEY]
+        assert torch.allclose(out, torch.full_like(out, 9.0))
+
+
+class TestPlotFailFast:
+    def test_exits_before_loading_model_when_no_inverse_scaler(self, tmp_path, capsys):
+        import argparse
+
+        import yaml
+
+        from credit.cli import _plot
+
+        cfg = tmp_path / "c.yml"
+        cfg.write_text(yaml.safe_dump({"save_loc": str(tmp_path), "postblocks": {"per_step": {}}}))
+        args = argparse.Namespace(config=str(cfg), denorm=True, checkpoint=None, output_dir=None)
+        with pytest.raises(SystemExit) as exc:
+            _plot(args)
+        assert exc.value.code == 1
+        assert "inverse scaler" in capsys.readouterr().err
+
+
+class TestResolveField:
+    KEYS = [T_KEY, SP_KEY, "ERA5/diagnostic/2d/TP"]
+
+    def test_short_name(self):
+        from credit.cli import _resolve_field
+
+        assert _resolve_field("SP", self.KEYS) == SP_KEY
+
+    def test_full_key(self):
+        from credit.cli import _resolve_field
+
+        assert _resolve_field(T_KEY, self.KEYS) == T_KEY
+
+    def test_ambiguous_short_name_raises(self):
+        from credit.cli import _resolve_field
+
+        with pytest.raises(ValueError, match="ambiguous"):
+            _resolve_field("SP", [SP_KEY, "OTHER/prognostic/2d/SP"])
+
+    def test_unknown_returns_none(self):
+        from credit.cli import _resolve_field
+
+        assert _resolve_field("NOPE", self.KEYS) is None

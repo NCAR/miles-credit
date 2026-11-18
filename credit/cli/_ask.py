@@ -82,7 +82,7 @@ trainer:
 |---------|-------------|-----|
 | Training loop hangs on startup | DataLoader OOM (too many workers × prefetch × batch × channels) | Reduce `thread_workers` to 1 or 0, or `prefetch_factor` to 1 |
 | `RendezvousConnectionError` on Derecho | Single-node job using c10d rendezvous | Use `--nodes 1` so `credit submit` generates `--standalone` |
-| Loss > 100 or growing | Bad normalization or wrong data paths | Check `mean_path`/`std_path`; run `credit plot --denorm` |
+| Loss > 100 or growing | Bad normalization or wrong data paths | Check `scaler_path` in the scaler pre/postblocks; run `credit plot --denorm` |
 | Loss stuck (not decreasing) | LR too low/high, wrong scheduler, EMA misconfigured | Check scheduler config; try reducing LR 10×; check warmup_steps |
 | `KeyError: 'linear-warmup-cosine'` | Old CREDIT version | `pip install -e . --no-deps` to reinstall |
 | Checkpoint not found | Wrong `save_loc` or first epoch | Set `load_weights: False` for first run |
