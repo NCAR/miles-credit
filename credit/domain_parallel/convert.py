@@ -129,6 +129,12 @@ def convert_to_domain_parallel(model, manager, shard_dim=-2, custom_converters=N
     Returns:
         The model with replaced layers (modified in-place).
     """
+    if getattr(model, "_lon_halo_refresh", False):
+        raise ValueError(
+            "convert_to_domain_parallel: the model uses padding_conf.refresh_lon_halo, whose pre-hooks take over "
+            "the convs' padding; domain parallelism sizes its halos from that padding. Turn one of them off."
+        )
+
     counts = {
         "conv2d": 0,
         "conv3d": 0,
