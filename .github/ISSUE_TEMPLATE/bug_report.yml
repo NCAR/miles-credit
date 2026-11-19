@@ -6,8 +6,7 @@ body:
     attributes:
       value: |
         Thanks for reporting a bug! The **Steps to reproduce** section is required: the PR
-        that fixes this issue will be checked against these exact steps, so the more precisely
-        they recreate the problem, the faster it can be fixed and verified.
+        that fixes this issue will be checked against it, so a precise description of the problem is ideal.
 
   - type: textarea
     id: description
