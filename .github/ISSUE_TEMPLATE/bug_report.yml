@@ -45,7 +45,7 @@ body:
     id: actual
     attributes:
       label: Actual behavior and error output
-      description: What happened instead. Paste the full traceback or log output (it is formatted automatically).
+      description: What happened instead; paste a traceback or log output.
       render: shell
     validations:
       required: true
