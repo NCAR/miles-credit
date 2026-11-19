@@ -22,7 +22,7 @@ body:
       label: Steps to reproduce
       description: |
         The minimal sequence of commands (and config, if relevant) that triggers the bug,
-        starting from a fresh checkout or install. Reviewers re-run these steps to confirm a fix.
+        starting from a fresh checkout or install. 
         Use generic paths (e.g. `/glade/derecho/scratch/$USER/...`) and point to shared data
         (`/glade/campaign/aiml/credit/` or a cloud URL) rather than private files.
       placeholder: |
