@@ -35,7 +35,7 @@ import multiprocessing as mp
 import os
 import sys
 import warnings
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 import pandas as pd
 import torch
 import torch.distributed as dist
@@ -75,7 +75,8 @@ os.environ["MKL_NUM_THREADS"] = "1"
 # ---------------------------------------------------------------------------
 
 
-def main() -> None:
+def _build_parser() -> ArgumentParser:
+    """Build the ``rollout_gen2`` argument parser (``credit rollout`` forwards its flags here)."""
     parser = ArgumentParser(
         description="CREDIT Gen2 combined batch + single-forecast rollout.",
         epilog="""
@@ -132,11 +133,22 @@ Examples:
         default=False,
         help="Emit INFO logs from all workers, not just rank 0. Useful for debugging per-worker issues.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def _parse_args(argv: list[str] | None = None) -> Namespace:
+    """Parse and cross-validate rollout arguments (``argv=None`` reads ``sys.argv``)."""
+    parser = _build_parser()
+    args = parser.parse_args(argv)
     try:
         check_rollout_flags(args.run_mode, args.init_time)
     except ValueError as exc:
         parser.error(str(exc))
+    return args
+
+
+def main() -> None:
+    args = _parse_args()
 
     # ── Load config ──────────────────────────────────────────────────────────
     try:

@@ -6,8 +6,6 @@ before the slow rollout imports, and so the override logic is unit-testable on C
 
 import argparse
 
-import pandas as pd
-
 
 def init_time_arg(value: str) -> str:
     """Argparse ``type=`` for ``--init-time``: parse ISO 8601 and normalize to naive UTC.
@@ -19,6 +17,8 @@ def init_time_arg(value: str) -> str:
     Returns:
         The init time as a naive ISO 8601 string, e.g. ``2020-06-01T00:00:00``.
     """
+    import pandas as pd  # deferred: this module is imported by the ``credit`` CLI parser at startup
+
     try:
         ts = pd.Timestamp(value)
     except (ValueError, TypeError) as exc:

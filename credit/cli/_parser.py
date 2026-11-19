@@ -4,14 +4,14 @@ import argparse
 import sys
 import textwrap
 
+from credit.rollout_args import init_time_arg
+
 from ._ask import _ask
 from ._begin import _begin
 from ._check import _check
 from ._common import _setup_logging
 from ._convert import _convert, _init
 from ._plot import _metrics, _plot
-from credit.rollout_args import init_time_arg
-
 from ._submit import _preprocess, _realtime, _rollout, _rollout_ensemble, _submit, _train
 
 

@@ -1183,6 +1183,50 @@ class TestBuildParser:
         with pytest.raises(SystemExit, match="conflicts with --run-mode batch"):
             self._forwarded_argv(monkeypatch, ["--run-mode", "batch", "--init-time", "2020-06-01T00"])
 
+    def test_rollout_gen2_parser_accepts_forwarded_argv(self, monkeypatch):
+        """Contract: rollout_gen2's own parser accepts everything ``credit rollout`` forwards."""
+        from credit.applications.rollout_gen2 import _parse_args
+
+        argv = self._forwarded_argv(
+            monkeypatch,
+            ["--run-mode", "single", "--init-time", "2020-06-01T06Z", "--save-dir", "/out", "-m", "none", "-p", "8"],
+        )
+        args = _parse_args(argv[1:])
+        assert args.model_config == "cfg.yml"
+        assert args.num_cpus == 8
+        assert args.run_mode == "single"
+        assert args.init_time == "2020-06-01T06:00:00"
+        assert args.save_dir == "/out"
+        assert args.mode == "none"
+
+    def test_rollout_gen2_parser_accepts_minimal_forwarded_argv(self, monkeypatch):
+        from credit.applications.rollout_gen2 import _parse_args
+
+        args = _parse_args(self._forwarded_argv(monkeypatch, [])[1:])
+        assert args.run_mode is None and args.init_time is None and args.save_dir is None and args.mode is None
+
+    def test_rollout_gen2_parser_normalizes_init_time(self):
+        from credit.applications.rollout_gen2 import _parse_args
+
+        assert _parse_args(["-c", "cfg.yml", "--init-time", "2020-06-01T06+00:00"]).init_time == "2020-06-01T06:00:00"
+        with pytest.raises(SystemExit):
+            _parse_args(["-c", "cfg.yml", "--init-time", "2020-06-01T00-07:00"])
+
+    def test_rollout_gen2_parser_rejects_batch_with_init_time(self, capsys):
+        from credit.applications.rollout_gen2 import _parse_args
+
+        with pytest.raises(SystemExit):
+            _parse_args(["-c", "cfg.yml", "--run-mode", "batch", "--init-time", "2020-06-01T00"])
+        assert "conflicts with --run-mode batch" in capsys.readouterr().err
+
+    def test_cli_parser_does_not_import_pandas(self):
+        """``credit --help`` / ``credit check`` should not pay for a pandas import."""
+        import subprocess
+
+        code = "import sys, credit.cli._parser; print('pandas' in sys.modules)"
+        out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True).stdout
+        assert out.strip() == "False"
+
     def test_realtime_required_init_time(self):
         parser = _build_parser()
         with pytest.raises(SystemExit):
