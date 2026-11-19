@@ -731,7 +731,10 @@ class CrossFormer(BaseModel):
                 don't break. The decoder is always the PixelShuffle (ICNR-initialized,
                 zero-init bias) path; the checkerboard-prone ConvTranspose2d alternative
                 this used to select has been removed.
-            padding_conf (dict): padding configuration
+            padding_conf (dict): padding configuration: ``activate``, ``mode`` ('earth' or 'mirror'),
+                ``pad_lat``, ``pad_lon``; optional ``refresh_lon_halo`` (bool, 'earth' only: rebuild the longitude
+                halo before every conv and attention block, see ``lon_halo.py``), ``pole_flip_channels`` and
+                ``pole_flip_offsets`` (negate vector components in the pole padding, see ``TensorPadding``)
             post_conf (dict): configuration for postblock processing
             **kwargs:
         """
@@ -903,6 +906,29 @@ class CrossFormer(BaseModel):
 
             logger.info("using postblock")
             self.postblock = PostBlock(post_conf)
+
+        # Per-layer longitude halo refresh (padding_conf.refresh_lon_halo; credit/models/wxformer/lon_halo.py):
+        # rebuild the longitude halo from the real columns before every conv and attention block, instead of the
+        # convs zero-padding the outer edge of the padded grid. Hooks only; state_dict keys are unchanged.
+        if self.use_padding and padding_conf.get("refresh_lon_halo", False):
+            from credit.models.wxformer.lon_halo import install_lon_halo_refresh
+
+            pad_lon = list(padding_conf.get("pad_lon", (0, 0)))
+            n_stages = len(self.layers)
+            if padding_conf.get("mode", "earth") != "earth" or pad_lon[0] != pad_lon[1]:
+                raise ValueError("refresh_lon_halo needs mode 'earth' and a symmetric pad_lon")
+            if pad_lon[0] % 2**n_stages or image_width % 2**n_stages:
+                raise ValueError(
+                    f"refresh_lon_halo needs pad_lon ({pad_lon[0]}) and image_width ({image_width}) "
+                    f"to divide by 2**{n_stages}"
+                )
+            install_lon_halo_refresh(
+                self,
+                pad_lon[0],
+                image_width + 2 * pad_lon[0],
+                roots=[self.layers, self.up_block1, self.up_block2, self.up_block3, self.up_block4],
+            )
+            logger.info("longitude halo refresh on: %s", self._lon_halo_counts)
 
     def forward(self, x):
         x_copy = None
