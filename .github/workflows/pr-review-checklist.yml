@@ -46,6 +46,7 @@ jobs:
           - [ ] Paths in code and example config files are user generic. Data not included in the repository should have a cloud URL or be located in /glade/campaign/aiml/credit/.
           - [ ] The reviewer has provided both positive and constructive feedback in their review response.
           - [ ] Changes affecting GPU-related functionality have been run by the submitter on Casper and/or Derecho to verify that the code runs as expected.
+          - [ ] For bug fixes, the reviewer has followed the linked issue's steps to reproduce and confirmed the bug no longer occurs.
 
           ## Recommended
           - [ ] Updated public facing methods have full docstrings.

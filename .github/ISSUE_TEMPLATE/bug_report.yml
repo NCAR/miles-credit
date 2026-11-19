@@ -28,7 +28,7 @@ body:
       placeholder: |
         1. pip install -e . --no-deps   (commit abc1234)
         2. credit check -c config/gen_2/examples/example-end-to-end.yml
-        3. credit rollout -c config/gen_2/examples/example-end-to-end.yml --init-time 2020-06-01T00
+        3. credit rollout -c config/gen_2/examples/example-end-to-end.yml
         4. See error below
     validations:
       required: true
