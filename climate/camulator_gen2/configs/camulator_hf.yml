@@ -1,8 +1,19 @@
 # ===================================================================================================================== #
-# CAMulator, reproduced in the gen2 pipeline: the training setup and rollout of the Hugging Face checkpoints
-# (huggingface.co/willychap/camulator), which were trained with the gen1 code on
-# WillyChap/miles-credit@camulator_huggingface (config: climate/camulator_config.yml at 5102a3b9^, run
-# NEW_CLI_JOHN_CASPER_extended_v2).
+# CAMulator, reproduced in the gen2 pipeline: the training setup and rollout of the Hugging Face checkpoint
+# (huggingface.co/willychap/camulator = epoch 69 of run NEW_CLI_JOHN_CASPER_extended_v2), which was trained with the
+# gen1 code on WillyChap/miles-credit@camulator_huggingface.
+#
+# That run was a staged fine-tune of an older checkpoint, and its config was edited between stages; the training
+# section below is the stage that produced epoch 69 (epochs 63-69), reconstructed from the run directory
+# (/glade/derecho/scratch/wchapman/CREDIT_runs/NEW_CLI_JOHN_CASPER_extended_v2: config_reload.yml,
+# camulator_config_extended_v2.yml, training_log.csv, and the optimizer state saved in each checkpoint):
+#   epochs 0-37   up_block4 only, 1, 2 then 4 steps, lr 5e-5 then 2.5e-5, 150 batches/epoch
+#   epochs 38-62  up_block4 only, 3 steps, lr 2.5e-5, 150 then (from 58) 300 batches/epoch
+#   epochs 63-69  up_block1-4, 3 steps, lr 2.5e-5, 300 batches/epoch, new AdamW at epoch 63   <- this config
+#   epochs 70-79  same, optimizer reset again at epoch 70 (not released)
+# Loss in every stage: MSE, latitude weights cos(lat)^0.4, TREFHT/PRECT/QFLX weighted 3, water penalty 0.1.
+# Not recoverable from the run directory: the per-GPU batch size for epochs 63-69 (8 in the 04-20 config, 12 in the
+# 04-27 one; the epoch times suggest 12). HF ran 4 A100s on one Casper node (DDP).
 #
 # Needs the camulator_gen2 package:   pip install -e climate/camulator_gen2   (add --no-deps on NCAR shared envs)
 # See climate/camulator_gen2/README.md for what each custom object reproduces and what still differs.
@@ -36,6 +47,10 @@ custom_objects:
     object_type: loss
     module_path: camulator_gen2.losses
     module_name: HFLoss
+  hf_camulator:
+    object_type: model
+    module_path: camulator_gen2.models
+    module_name: HFCamulator
 
 # ---- Training data ---- #
 # HF's training config set train_years [1980, 2012] / valid_years [2013, 2014], but the gen1 year filter matches any
@@ -118,7 +133,9 @@ trainer:
   cpu_offload: False
   activation_checkpoint: True
 
-  load_weights: False        # True to continue from save_loc/checkpoint.pt (HF continued training this way)
+  # Epoch 63 started from the epoch-62 weights with a new AdamW (the trainable set changed). To redo that stage, put
+  # checkpoint.pt00062.pt in save_loc as checkpoint.pt and set start_epoch: 63 (or reload_epoch with its training log).
+  load_weights: True
   load_optimizer: False
   load_scaler: False
   load_scheduler: False
@@ -131,21 +148,21 @@ trainer:
   save_best_weights: True
   save_every_epoch: True
 
-  save_metric_vars: ["PRECT", "TREFHT", "TAUX", "TAUY", "U", "T"]
+  save_metric_vars: ["PRECT", "TREFHT", "TAUX", "TAUY", "U", "T", "SHFLX", "LHFLX", "FSDS_J", "FSUTOA", "FLUT"]
 
-  learning_rate: 1.0e-04
-  weight_decay: 0
+  learning_rate: 2.5e-05     # constant: HF had use_scheduler False
+  weight_decay: 0            # AdamW betas (0.9, 0.95), as in HF
 
-  train_batch_size: 8        # per GPU
-  valid_batch_size: 8
+  train_batch_size: 12       # per GPU (see the header: 8 or 12)
+  valid_batch_size: 12
 
-  batches_per_epoch: 0       # 0 = the whole training set
-  valid_batches_per_epoch: 100
+  batches_per_epoch: 300
+  valid_batches_per_epoch: 20
   stopping_patience: 5000
 
-  start_epoch: 0
-  num_epoch: 21              # epochs per job
-  epochs: &epochs 200
+  start_epoch: 63
+  num_epoch: 7               # epochs 63-69
+  epochs: &epochs 70
 
   use_tensorboard: True
   use_ema: False
@@ -165,8 +182,10 @@ trainer:
   prefetch_factor: 2
 
 # ---- Model (as released) ---- #
+# hf_camulator is the gen2 camulator model plus HF's trainable_layers / frozen_layers (camulator_gen2.models).
 model:
-  type: "camulator"
+  type: "hf_camulator"
+  trainable_layers: [up_block1, up_block2, up_block3, up_block4]
   frames: 1
   image_height: 192
   image_width: 288
@@ -262,7 +281,7 @@ postblocks:
       type: reconstruct
       args:
         detach: False        # keep the fixers in the gradient, as in HF
-    tracer_fixer: &tracer_fixer
+    tracer_fixer:
       type: hf_tracer_fixer
       args:
         mean_path: /glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
@@ -273,12 +292,8 @@ postblocks:
           - CESM/diagnostic/2d/CLDHGH
           - CESM/diagnostic/2d/CLDLOW
           - CESM/diagnostic/2d/CLDMED
-          - CESM/diagnostic/2d/FSDS_J
-          - CESM/diagnostic/2d/FSUS
-          - CESM/diagnostic/2d/FSUTOA
-          - CESM/diagnostic/2d/FLUT
         tracer_thres: 0.0
-        tracer_thres_max: [null, null, 1, 1, 1, null, null, null, null]
+        tracer_thres_max: [null, null, 1, 1, 1]
         # HF clipped every Qtot level with the level-0 statistics (CAMULATOR_QTOT_TRACER_BUG.md); False fixes it.
         replicate_level0_stats_bug: True
     inverse_scale: &inverse_scale
@@ -390,15 +405,19 @@ postblocks:
         variables: *target_variables
 
 # ---- Loss (HF) ---- #
-# Latitude-weighted MSE in normalized space on y_pred_hf (after the tracer and mass fixers, before water and energy)
-# plus 0.05 * water penalty; validation scores the fully fixed y_pred without the penalty.
+# Training: weighted MSE in normalized space on y_pred_hf (after the tracer and mass fixers, before water and energy)
+# plus 0.1 * water penalty. Validation (last step only, as in HF): weighted MAE on the fully fixed y_pred, no penalty.
 loss:
   type: hf_loss
   args:
     latitude_weights: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+    latitude_weight_power: 0.4
+    variable_weights: {TREFHT: 3.0, PRECT: 3.0, QFLX: 3.0}
     pred_key: y_pred_hf
     valid_pred_key: y_pred
-    water_penalty_weight: 0.05
+    water_penalty_weight: 0.1
+    train_loss: mse
+    valid_loss: mae
 
 # ---- Inference (HF Quick Climate order) ---- #
 # HF rollout (climate/Model_State.py on the HF branch): model with the tracer fixer inside it, then wind filter, then
@@ -412,7 +431,26 @@ inference:
     per_step:
       reconstruct:
         type: reconstruct
-      tracer_fixer: *tracer_fixer
+      # The released inference config (climate/camulator_config.yml on the HF branch) clips 9 variables; training
+      # (epoch 69) clipped 5. Same statistics and level-0 Qtot bug as the training block.
+      tracer_fixer:
+        type: hf_tracer_fixer
+        args:
+          mean_path: /glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+          std_path: /glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+          tracer_vars:
+            - CESM/prognostic/3d/Qtot
+            - CESM/diagnostic/2d/PRECT
+            - CESM/diagnostic/2d/CLDHGH
+            - CESM/diagnostic/2d/CLDLOW
+            - CESM/diagnostic/2d/CLDMED
+            - CESM/diagnostic/2d/FSDS_J
+            - CESM/diagnostic/2d/FSUS
+            - CESM/diagnostic/2d/FSUTOA
+            - CESM/diagnostic/2d/FLUT
+          tracer_thres: 0.0
+          tracer_thres_max: [null, null, 1, 1, 1, null, null, null, null]
+          replicate_level0_stats_bug: True
       wind_filter:
         type: wind_artifact_filter
         args:
@@ -481,12 +519,13 @@ inference:
       zlib: true
       complevel: 0
 
-# Same resources as config/gen_2/camulator/camulator_gen2_casper.yml; size them for a real training run.
+# HF's resources: one Casper node, 4 A100s (DDP).
 pbs:
   conda: credit-aiml
   job_name: "camulator_hf"
-  walltime: "00:30:00"
-  ncpus: 8
-  ngpus: 1
-  mem: "64GB"
-  gpu_type: "h100"
+  walltime: "12:00:00"
+  nodes: 1
+  ncpus: 32
+  ngpus: 4
+  mem: "250GB"
+  gpu_type: "a100"
