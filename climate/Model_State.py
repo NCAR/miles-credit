@@ -36,14 +36,18 @@ except ImportError:
     CREDIT_AVAILABLE = False
     logging.warning("CREDIT modules not fully available - initialization may be limited")
 
-# Import post-processing components
+# Import post-processing components. These are the gen1 fixers: they take the whole
+# post_conf and are called with {"y_pred", "x"} tensors, as below. The names exported
+# by ``credit.postblock`` are the gen2 fixers, which have a different signature.
 try:
-    from credit.postblock import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
+    from credit.postblock.gen1 import GlobalMassFixer, GlobalWaterFixer, GlobalEnergyFixer
 
     POSTBLOCK_AVAILABLE = True
-except ImportError:
+    _POSTBLOCK_IMPORT_ERROR = None
+except ImportError as exc:
     POSTBLOCK_AVAILABLE = False
-    logging.warning("credit.postblock not available - conservation fixers disabled")
+    _POSTBLOCK_IMPORT_ERROR = exc
+    logging.warning(f"credit.postblock.gen1 not available ({exc}) - conservation fixers cannot be used")
 
 try:
     from WindPP import post_process_wind_artifacts
@@ -545,11 +549,16 @@ class CAMulatorStepper:
         post_conf = self.conf["model"]["post_conf"]
 
         # Check which conservation fixers are enabled
-        self.flag_mass = POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_mass_fixer"]["activate"]
-        self.flag_water = POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_water_fixer"]["activate"]
-        self.flag_energy = (
-            POSTBLOCK_AVAILABLE and post_conf["activate"] and post_conf["global_energy_fixer"]["activate"]
-        )
+        self.flag_mass = post_conf["activate"] and post_conf["global_mass_fixer"]["activate"]
+        self.flag_water = post_conf["activate"] and post_conf["global_water_fixer"]["activate"]
+        self.flag_energy = post_conf["activate"] and post_conf["global_energy_fixer"]["activate"]
+
+        # A config that asks for fixers must get them: running without them is a
+        # different model, so fail here rather than warn and roll out unconstrained.
+        if (self.flag_mass or self.flag_water or self.flag_energy) and not POSTBLOCK_AVAILABLE:
+            raise ImportError(
+                "The config activates conservation fixers, but credit.postblock.gen1 could not be imported"
+            ) from _POSTBLOCK_IMPORT_ERROR
 
         # Initialize conservation fixers
         if self.flag_mass:

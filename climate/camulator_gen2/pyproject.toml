@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camulator-gen2"
+version = "0.1.0"
+description = "CREDIT custom objects that reproduce the Hugging Face CAMulator training and inference in the gen2 pipeline"
+readme = "README.md"
+requires-python = ">=3.11"
+# bridgescaler comes with miles-credit. On NCAR's shared conda envs install with --no-deps.
+dependencies = ["miles-credit"]
+
+[tool.setuptools]
+packages = ["camulator_gen2"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
