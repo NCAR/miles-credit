@@ -1,0 +1,492 @@
+# ===================================================================================================================== #
+# CAMulator, reproduced in the gen2 pipeline: the training setup and rollout of the Hugging Face checkpoints
+# (huggingface.co/willychap/camulator), which were trained with the gen1 code on
+# WillyChap/miles-credit@camulator_huggingface (config: climate/camulator_config.yml at 5102a3b9^, run
+# NEW_CLI_JOHN_CASPER_extended_v2).
+#
+# Needs the camulator_gen2 package:   pip install -e climate/camulator_gen2   (add --no-deps on NCAR shared envs)
+# See climate/camulator_gen2/README.md for what each custom object reproduces and what still differs.
+#
+#   credit check -c climate/camulator_gen2/configs/camulator_hf.yml
+#   credit train -c climate/camulator_gen2/configs/camulator_hf.yml
+#   credit rollout -c climate/camulator_gen2/configs/camulator_hf.yml
+#
+# For a rollout from a released checkpoint, put it in save_loc as checkpoint.pt (e.g. copy checkpoint.pt00069.pt).
+#
+# Paths below are the NCAR glade locations. Assets that ship with the HF model:
+#   scaler: build it from the mean/std NetCDF with  python -m camulator_gen2.make_scaler --mean ... --std ... --out ...
+#   mean/std: mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc (+ std_...)
+#   statics:  b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc (fixers),
+#             f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc (loss latitude weights)
+# ===================================================================================================================== #
+
+save_loc: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_hf_gen2'
+seed: 1000
+
+custom_objects:
+  hf_tracer_fixer:
+    object_type: postblock
+    module_path: camulator_gen2.postblocks
+    module_name: HFTracerFixer
+  hf_water_fixer:
+    object_type: postblock
+    module_path: camulator_gen2.postblocks
+    module_name: HFWaterFixer
+  hf_loss:
+    object_type: loss
+    module_path: camulator_gen2.losses
+    module_name: HFLoss
+
+# ---- Training data ---- #
+# HF's training config set train_years [1980, 2012] / valid_years [2013, 2014], but the gen1 year filter matches any
+# file whose path contains the year string, and every CESM file name contains "1980"
+# (b.e21.CREDIT_climate_branch_1980_<year>...). So HF trained on all of 1980-2014, and its validation years were
+# also training years. These dates reproduce that; set end_datetime to 2012-12-31 for a held-out 2013-2014.
+data:
+  source:
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+        diagnostic:
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: "/glade/campaign/cisl/aiml/credit/cesm_exercise/forcing/dynamic_forcing/%Y_forcing.zarr"
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/static/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "1980-01-01"
+  end_datetime: "2014-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  # HF gen1 forecast_len: 2 is three 6 h steps (gen1 is 0-indexed, gen2 1-indexed). Each step is backpropagated
+  # on its own and the input is detached between steps, which is the gen2 trainer's default.
+  forecast_len: 3
+
+  lead_time_periods: 6
+  skip_periods: null
+
+validation_data:
+  source:
+    CESM:
+      dataset_type: "local"
+      level_coord: "lev"
+      variables:
+        prognostic:
+          vars_3D: ['U', 'V', 'T', 'Qtot']
+          vars_2D: ['PS', 'TREFHT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+        diagnostic:
+          vars_2D: ['PRECT', 'TS', 'CLDHGH', 'CLDLOW', 'CLDMED', 'TAUX', 'TAUY', 'U10',
+                    'QFLX', 'FSDS_J', 'FLDS_J', 'FSUS', 'FLUS', 'SHFLX', 'LHFLX', 'FSUTOA', 'FLUT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/data/b.e21.CREDIT_climate_branch_1980_%Y_zmdata_ERA5scaled_zmdata_Qtot.zarr'
+        dynamic_forcing:
+          vars_2D: ['SOLIN', 'SST', 'ICEFRAC', 'co2vmr_3d']
+          path: "/glade/campaign/cisl/aiml/credit/cesm_exercise/forcing/dynamic_forcing/%Y_forcing.zarr"
+        static:
+          vars_2D: ['z_norm', 'LANDM_COSLAT']
+          path: '/glade/campaign/cisl/aiml/credit/cesm_exercise/static/statics_b_credit_runs_f32_02.nc'
+
+  start_datetime: "2013-01-01"
+  end_datetime: "2014-12-31"
+  timestep: "6h"
+
+  history_len: 1
+  forecast_len: 3
+
+  lead_time_periods: 6
+  skip_periods: null
+
+# ---- Training (HF values) ---- #
+trainer:
+  type: gen2
+
+  parallelism:
+    data: ddp
+    tensor: 1
+    domain: 1
+
+  cpu_offload: False
+  activation_checkpoint: True
+
+  load_weights: False        # True to continue from save_loc/checkpoint.pt (HF continued training this way)
+  load_optimizer: False
+  load_scaler: False
+  load_scheduler: False
+  reload_epoch: True
+
+  skip_validation: False
+  update_learning_rate: True
+
+  save_backup_weights: True
+  save_best_weights: True
+  save_every_epoch: True
+
+  save_metric_vars: ["PRECT", "TREFHT", "TAUX", "TAUY", "U", "T"]
+
+  learning_rate: 1.0e-04
+  weight_decay: 0
+
+  train_batch_size: 8        # per GPU
+  valid_batch_size: 8
+
+  batches_per_epoch: 0       # 0 = the whole training set
+  valid_batches_per_epoch: 100
+  stopping_patience: 5000
+
+  start_epoch: 0
+  num_epoch: 21              # epochs per job
+  epochs: &epochs 200
+
+  use_tensorboard: True
+  use_ema: False
+
+  use_scheduler: False
+  scheduler:
+    scheduler_type: cosine-annealing
+    T_max: *epochs
+    last_epoch: -1
+
+  amp: False
+  grad_accum_every: 1
+  grad_max_norm: 1.0
+
+  thread_workers: 8
+  valid_thread_workers: 4
+  prefetch_factor: 2
+
+# ---- Model (as released) ---- #
+model:
+  type: "camulator"
+  frames: 1
+  image_height: 192
+  image_width: 288
+  levels: 32
+  channels: 4               # 3D prognostic: U V T Qtot
+  surface_channels: 2       # 2D prognostic: PS TREFHT
+  input_only_channels: 6    # dynamic_forcing (4) + static (2)
+  output_only_channels: 17  # diagnostic variables
+
+  patch_width: 1
+  patch_height: 1
+  frame_patch_size: 1
+
+  dim: [256, 512, 1024, 2048]
+  depth: [2, 2, 18, 2]
+  global_window_size: [4, 4, 2, 1]
+  local_window_size: 3
+  cross_embed_kernel_sizes:
+    - [4, 8, 16, 32]
+    - [2, 4]
+    - [2, 4]
+    - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  attn_dropout: 0.
+  ff_dropout: 0.
+
+  use_spectral_norm: True
+  interp: True
+
+  padding_conf:
+    activate: True
+    mode: earth
+    pad_lat: [48, 48]
+    pad_lon: [48, 48]
+
+# ---- Normalization ---- #
+# The gen1 Mixed_Modal mean/std, as a bridgescaler JSON (python -m camulator_gen2.make_scaler). PS is scaled per
+# gridpoint, as in gen1; every scaler block that uses this file must list it in spatial_variables.
+preblocks:
+  per_step:
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables: [CESM/prognostic/2d/PS]
+        variables: &scaler_variables
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/dynamic_forcing/2d/SOLIN
+          - CESM/dynamic_forcing/2d/SST
+          - CESM/dynamic_forcing/2d/ICEFRAC
+          - CESM/dynamic_forcing/2d/co2vmr_3d
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+        method: transform
+        scaler_params:
+          channels_last: False
+    concat:
+      type: concat
+
+# ---- Training postblocks ---- #
+# HF training step (trainerERA5.py on the HF branch), and the gen2 blocks that reproduce it:
+#   model, with the tracer fixer inside it  -> reconstruct + tracer_fixer (normalized space, before anything else)
+#   mass fixer (outside the model)          -> inverse_scale + mass_fixer
+#   MSE scored HERE                          -> flatten_hf writes y_pred_hf, which HFLoss scores in training
+#   water fixer, penalty (P_ratio - 1)^2     -> water_fixer (HFWaterFixer stores the penalty)
+#   energy fixer (up/down)                   -> energy_fixer_updown
+#   fully fixed state -> next step's input   -> y_processed seeds the next step; flatten writes y_pred,
+#                                               which HFLoss scores in validation (as HF did)
+# No wind filter: HF applied it only at inference.
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: False        # keep the fixers in the gradient, as in HF
+    tracer_fixer: &tracer_fixer
+      type: hf_tracer_fixer
+      args:
+        mean_path: /glade/derecho/scratch/wchapman/b_credit_runs/mean_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+        std_path: /glade/derecho/scratch/wchapman/b_credit_runs/std_6h_Coupled_1980_2014_32lev_1.0deg_ERA5scaled_F32_Qtot_Mixed_Modal.nc
+        tracer_vars:
+          - CESM/prognostic/3d/Qtot
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+        tracer_thres: 0.0
+        tracer_thres_max: [null, null, 1, 1, 1, null, null, null, null]
+        # HF clipped every Qtot level with the level-0 statistics (CAMULATOR_QTOT_TRACER_BUG.md); False fixes it.
+        replicate_level0_stats_bug: True
+    inverse_scale: &inverse_scale
+      type: bridgescaler_transform
+      args:
+        method: inverse_transform
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables: [CESM/prognostic/2d/PS]
+        variables: &target_variables
+          - CESM/prognostic/3d/U
+          - CESM/prognostic/3d/V
+          - CESM/prognostic/3d/T
+          - CESM/prognostic/3d/Qtot
+          - CESM/prognostic/2d/PS
+          - CESM/prognostic/2d/TREFHT
+          - CESM/diagnostic/2d/PRECT
+          - CESM/diagnostic/2d/TS
+          - CESM/diagnostic/2d/CLDHGH
+          - CESM/diagnostic/2d/CLDLOW
+          - CESM/diagnostic/2d/CLDMED
+          - CESM/diagnostic/2d/TAUX
+          - CESM/diagnostic/2d/TAUY
+          - CESM/diagnostic/2d/U10
+          - CESM/diagnostic/2d/QFLX
+          - CESM/diagnostic/2d/FSDS_J
+          - CESM/diagnostic/2d/FLDS_J
+          - CESM/diagnostic/2d/FSUS
+          - CESM/diagnostic/2d/FLUS
+          - CESM/diagnostic/2d/SHFLX
+          - CESM/diagnostic/2d/LHFLX
+          - CESM/diagnostic/2d/FSUTOA
+          - CESM/diagnostic/2d/FLUT
+    mass_fixer: &mass_fixer
+      type: global_mass_fixer
+      args:
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        fix_level_num: 14
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
+    flatten_hf:
+      type: flatten_to_tensor
+      args:
+        method: transform
+        key: y_processed
+        out_key: y_pred_hf
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables: [CESM/prognostic/2d/PS]
+        variables: *target_variables
+    water_fixer:
+      type: hf_water_fixer
+      args: &water_args
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        q_var: CESM/prognostic/3d/Qtot
+        sp_var: CESM/prognostic/2d/PS
+        precip_var: CESM/diagnostic/2d/PRECT
+        evapor_var: CESM/diagnostic/2d/QFLX
+    energy_fixer_updown: &energy_fixer_updown
+      type: global_energy_fixer_updown
+      args:
+        save_loc_physics: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/b.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+        lon_lat_level_name: [lon2d, lat2d, hyai, hybi]
+        grid_type: sigma
+        midpoint: true
+        lead_time_periods: 6
+        surface_geopotential_name: PHIS
+        T_var: CESM/prognostic/3d/T
+        q_var: CESM/prognostic/3d/Qtot
+        U_var: CESM/prognostic/3d/U
+        V_var: CESM/prognostic/3d/V
+        sp_var: CESM/prognostic/2d/PS
+        toa_down_solar_input_var: CESM/dynamic_forcing/2d/SOLIN
+        toa_up_solar_var: CESM/diagnostic/2d/FSUTOA
+        toa_up_olr_var: CESM/diagnostic/2d/FLUT
+        surf_down_solar_var: CESM/diagnostic/2d/FSDS_J
+        surf_up_solar_var: CESM/diagnostic/2d/FSUS
+        surf_down_lw_var: CESM/diagnostic/2d/FLDS_J
+        surf_up_lw_var: CESM/diagnostic/2d/FLUS
+        surf_sh_var: CESM/diagnostic/2d/SHFLX
+        surf_lh_var: CESM/diagnostic/2d/LHFLX
+    flatten:
+      type: flatten_to_tensor
+      args:
+        method: transform
+        key: y_processed
+        out_key: y_pred
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables: [CESM/prognostic/2d/PS]
+        variables: *target_variables
+    # target twin: the trainer's default metrics compare y_processed with y_target_processed
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: y
+        out_key: y_target_processed
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        method: inverse_transform
+        key: y_target_processed
+        scaler_path: /glade/campaign/cisl/aiml/credit/cesm_exercise/scaler_spatial_PS.json
+        spatial_variables: [CESM/prognostic/2d/PS]
+        variables: *target_variables
+
+# ---- Loss (HF) ---- #
+# Latitude-weighted MSE in normalized space on y_pred_hf (after the tracer and mass fixers, before water and energy)
+# plus 0.05 * water penalty; validation scores the fully fixed y_pred without the penalty.
+loss:
+  type: hf_loss
+  args:
+    latitude_weights: /glade/campaign/cisl/aiml/wchapman/MLWPS/STAGING/f.e21.CREDIT_climate.statics_1.0deg_32levs_latlon_F32_hyai_fixed.nc
+    pred_key: y_pred_hf
+    valid_pred_key: y_pred
+    water_penalty_weight: 0.05
+
+# ---- Inference (HF Quick Climate order) ---- #
+# HF rollout (climate/Model_State.py on the HF branch): model with the tracer fixer inside it, then wind filter, then
+# mass, water and energy fixers. The wind filter works on normalized values, so it sits before inverse_scale.
+inference:
+  run_mode: single
+  mode: none
+  save_forecast: '/glade/derecho/scratch/$USER/CREDIT_runs/camulator_hf_gen2/rollout'
+
+  postblocks:
+    per_step:
+      reconstruct:
+        type: reconstruct
+      tracer_fixer: *tracer_fixer
+      wind_filter:
+        type: wind_artifact_filter
+        args:
+          u_var: CESM/prognostic/3d/U
+          v_var: CESM/prognostic/3d/V
+          target_vars:
+            - CESM/prognostic/3d/U
+            - CESM/prognostic/3d/V
+            - CESM/prognostic/3d/T
+            - CESM/prognostic/3d/Qtot
+          mask_level: 14
+          target_levels: [9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+          # HF inference_config.yml values (tuned for normalized fields)
+          speed_threshold: 2.8
+          smooth_sigma: 1.2
+          smooth_sigma_zonal: 2.0
+          smooth_sigma_meridional: 0.5
+          dilation_zonal: 15
+          dilation_meridional: 5
+          falloff_sigma: 4.0
+          preserve_amplitude: true
+      inverse_scale: *inverse_scale
+      mass_fixer: *mass_fixer
+      water_fixer:
+        type: global_water_fixer
+        args: *water_args
+      energy_fixer_updown: *energy_fixer_updown
+
+  batch_forecast:
+    forecast_length: "180d"
+    first_init_date: "1981-01-01"
+    last_init_date: "1981-12-31"
+    init_interval: "1d"
+
+  single_forecast:
+    forecast_length: "30d"
+    start_datetime: "1981-01-01T00:00Z"
+
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: month
+    metadata: "/glade/campaign/cisl/aiml/credit/cesm_exercise/camulator_metadata.yaml"
+    variables:
+      - name: "CESM/prognostic/2d/PS"
+      - name: "CESM/prognostic/2d/TREFHT"
+      - name: "CESM/diagnostic/2d/PRECT"
+      - name: "CESM/diagnostic/2d/TS"
+      - name: "CESM/diagnostic/2d/CLDHGH"
+      - name: "CESM/diagnostic/2d/CLDLOW"
+      - name: "CESM/diagnostic/2d/CLDMED"
+      - name: "CESM/diagnostic/2d/TAUX"
+      - name: "CESM/diagnostic/2d/TAUY"
+      - name: "CESM/diagnostic/2d/U10"
+      - name: "CESM/diagnostic/2d/QFLX"
+      - name: "CESM/diagnostic/2d/SHFLX"
+      - name: "CESM/diagnostic/2d/LHFLX"
+      - name: "CESM/diagnostic/2d/FSDS_J"
+      - name: "CESM/diagnostic/2d/FLDS_J"
+      - name: "CESM/diagnostic/2d/FSUS"
+      - name: "CESM/diagnostic/2d/FLUS"
+      - name: "CESM/diagnostic/2d/FSUTOA"
+      - name: "CESM/diagnostic/2d/FLUT"
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 0
+
+# Same resources as config/gen_2/camulator/camulator_gen2_casper.yml; size them for a real training run.
+pbs:
+  conda: credit-aiml
+  job_name: "camulator_hf"
+  walltime: "00:30:00"
+  ncpus: 8
+  ngpus: 1
+  mem: "64GB"
+  gpu_type: "h100"
