@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "camulator-smallscale"
+version = "0.1.0"
+description = "CAMulator fine-tuning experiments on small-scale variability (AMSE, SDL + CRPS, wavelet losses) as CREDIT custom objects"
+readme = "README.md"
+requires-python = ">=3.11"
+# miles-credit brings torch, torch-harmonics and bridgescaler. On NCAR's shared conda envs install with --no-deps.
+dependencies = ["miles-credit", "camulator-gen2"]
+
+[tool.setuptools]
+packages = ["camulator_smallscale"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
