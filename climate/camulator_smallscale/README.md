@@ -41,6 +41,62 @@ The shared fine-tune protocol (`FINETUNE` in `make_configs.py`):
 - count epochs from 0 and keep every epoch's checkpoint;
 - default to 4 epochs of 300 updates.
 
+Arms so far: `null` (HFLoss unchanged) and `amse`.
+
+## Custom objects
+
+| Name | Type | What it does |
+|---|---|---|
+| `amse_hf_loss` (`losses.AMSEHFLoss`) | loss | HFLoss plus the AMSE adjustment of Subich et al. (2025); see below |
+| `start_state_perturbation` (`preblocks.StartStatePerturbation`) | preblock | Seeded start-state perturbation for twin runs and ensembles; put it under `preblocks.ic_only` |
+| `mps_safe_hf_camulator` (`models.MPSSafeHFCamulator`) | model | `hf_camulator` that stays correct on Apple MPS (local configs only) |
+
+### AMSE loss
+
+By total wavenumber, the area-weighted MSE splits into an amplitude term and a decorrelation term weighted by
+`sqrt(Px Py)`. AMSE weights the decorrelation term by `max(Px, Py)` instead. That way a scale that no longer matches
+the truth cannot lower the loss by losing amplitude.
+
+`AMSEHFLoss` is HFLoss plus the difference, `sum_l 2 [max(Px,Py) - sqrt(Px Py)] (1 - coh_l) / (4 pi)` per channel.
+HF's channel weights apply on top.
+- It is zero when the spectra match, and the loss then equals HFLoss (bit for bit when prediction equals truth).
+- Validation is exactly HFLoss, so validation curves compare directly with the null arm.
+- The constraint is on the global spectrum only, so variance can shift between latitudes. With HF's cos(lat)^0.4
+  weights, part of the damping incentive remains at high latitudes.
+- Spectra come from `spectral.SphericalSpectra`, truncated at total wavenumber 144 (about 280 km).
+
+### Start-state perturbations
+
+`kind: white` (Gaussian, std = `amplitude`), `band` (wavenumbers `lmin..lmax`, area-weighted RMS = `amplitude`) or
+`file` (a precomputed field times `amplitude`). The noise depends only on `seed` and the forecast start time, so every
+arm gets the same perturbation for the same start date:
+
+```yaml
+custom_objects:
+  start_state_perturbation:
+    object_type: preblock
+    module_path: camulator_smallscale.preblocks
+    module_name: StartStatePerturbation
+preblocks:
+  ic_only:
+    perturb:
+      type: start_state_perturbation
+      args: {variables: [CESM/prognostic/3d/T], amplitude: 0.01, kind: white, seed: 1}
+```
+
+## Converting CESM output (`convert`)
+
+`python -m camulator_smallscale.convert` turns raw CAM 6-hourly history (`cam.h1`, one file per day) into per-year
+CREDIT zarrs, one time step per chunk. It needs only xarray and numpy, so it runs in NCAR's `npl` environment. The
+recipes reproduce the training data: two days of 1981 match the existing training zarr for all 27 model variables to
+float32 rounding. The module docstring lists every recipe.
+
+```bash
+python -m camulator_smallscale.convert --hist-dir <case>/atm/hist --case <case> --years 2015 2025 --out-dir <dir>
+python -m camulator_smallscale.convert --hist-dir <case>/atm/hist --case <case> --years 2026 2048 --out-dir <dir> --forcing-only
+python -m camulator_smallscale.convert verify --converted <zarr> --reference <zarr>
+```
+
 ## Apple MPS
 
 On MPS, `Conv2d` silently returns wrong values once `in_channels * kH * kW` exceeds about 2**16, still the case on
