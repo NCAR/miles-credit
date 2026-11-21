@@ -118,7 +118,9 @@ class HFLoss(BaseLoss):
         for i in range(elementwise.shape[1]):
             var_loss = torch.mul(elementwise[:, i], lat_weights)
             if var_weights is not None:
-                var_loss = var_loss * var_weights[i].to(var_loss.device)
+                # A 0-dim float64 weight times a float32 tensor computes in float32 anyway; casting first gives the
+                # same result and works on Apple MPS, which has no float64.
+                var_loss = var_loss * var_weights[i].to(device=var_loss.device, dtype=var_loss.dtype)
             channel_losses.append(var_loss.mean())
         channel_losses = torch.stack(channel_losses)
         loss = torch.mean(channel_losses)
