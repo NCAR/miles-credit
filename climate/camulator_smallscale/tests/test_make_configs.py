@@ -6,10 +6,15 @@ A stand-in local root is built from the file names the HF config uses, so the te
 import os
 import posixpath
 
+import numpy as np
 import pytest
+import xarray as xr
 import yaml
 
 from camulator_smallscale import make_configs as mc
+from camulator_smallscale.losses import AMSEHFLoss
+from credit.losses import load_loss
+from credit.registry import load_custom_objects
 
 
 def _flatten(node, prefix=""):
@@ -135,3 +140,32 @@ def test_stage_clone_is_a_copy(tmp_path):
     with open(dest, "ab") as f:
         f.write(b"-trained")
     assert checkpoint.read_bytes() == b"weights"
+
+
+def test_amse_differs_from_null_only_in_the_loss():
+    null = _flatten(mc.build_config("null", "derecho"))
+    amse = _flatten(mc.build_config("amse", "derecho"))
+    changed = {key for key in set(null) | set(amse) if null.get(key, object()) != amse.get(key, object())}
+    allowed = {
+        "custom_objects.amse_hf_loss.object_type",
+        "custom_objects.amse_hf_loss.module_path",
+        "custom_objects.amse_hf_loss.module_name",
+        "loss.type",
+        "loss.args.amse_weight",
+        "loss.args.rel_eps",
+        "save_loc",
+        "inference.save_forecast",
+    }
+    assert changed == allowed, sorted(changed ^ allowed)
+    # Every HFLoss argument survives.
+    assert {k for k in null if k.startswith("loss.args.")} <= set(amse)
+
+
+def test_amse_loss_builds_from_its_config(local_root):
+    conf = mc.build_config("amse", "local", local_root=str(local_root))
+    lat_file = str(local_root / "assets" / "lat.nc")
+    xr.Dataset(coords={"latitude": np.linspace(-90, 90, 9), "longitude": np.arange(16) * 22.5}).to_netcdf(lat_file)
+    conf["loss"]["args"]["latitude_weights"] = lat_file
+    load_custom_objects(conf)
+    criterion = load_loss(conf)
+    assert isinstance(criterion, AMSEHFLoss) and criterion.amse_weight == 1.0

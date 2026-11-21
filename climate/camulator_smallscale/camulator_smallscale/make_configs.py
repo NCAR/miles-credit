@@ -68,6 +68,17 @@ FINETUNE = {
 # What each arm changes on top of FINETUNE. The null arm is the HF loss as it is.
 ARMS = {
     "null": {},
+    # HFLoss plus the AMSE adjustment (camulator_smallscale.losses.AMSEHFLoss); every HFLoss argument is kept.
+    "amse": {
+        "custom_objects": {
+            "amse_hf_loss": {
+                "object_type": "loss",
+                "module_path": "camulator_smallscale.losses",
+                "module_name": "AMSEHFLoss",
+            }
+        },
+        "loss": {"type": "amse_hf_loss", "args": {"amse_weight": 1.0, "rel_eps": 1e-06}},
+    },
 }
 
 # The local target: 1981 only (the year with full 3-D truth on the laptop), one sample per update, a few updates.
