@@ -14,10 +14,9 @@ numcodecs
 einops
 echo-opt
 bridgescaler
-segmentation-models-pytorch
 haversine
 pvlib
-torch-harmonics<0.9
+timm
 torch_geometric
 fsspec
 gcsfs

@@ -2,7 +2,7 @@ from typing import Optional, Union
 
 import numpy as np
 import torch
-from torch_harmonics import InverseRealSHT
+from credit._optional import require
 from credit.boundary_padding import TensorPadding
 
 
@@ -204,6 +204,7 @@ class SphericalRandomField(torch.nn.Module):
         if variance_scale is None:
             variance_scale = length_scale ** (0.5 * (2 * smoothness - 2.0))
 
+        InverseRealSHT = require("torch_harmonics", "SphericalNoise").InverseRealSHT
         self.inverse_sht = (
             InverseRealSHT(self.latitude_modes, self.longitude_modes, grid=grid_type, norm="backward")
             .to(dtype=dtype)

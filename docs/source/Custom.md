@@ -29,6 +29,11 @@ There are two ways a class enters a registry:
    and never touch CREDIT's source. **This is the common case and the focus of
    this guide.**
 
+Before writing a new model, check [credit-zoo](https://github.com/NCAR/credit-zoo), NCAR's collection of
+ready-made architectures (Aurora, Pangu-Weather, GraphCast, FourCastNet, SFNO, U-Net, and more). Its models
+are registered exactly this way, through `custom_objects:`, and it is a good reference for packaging your
+own. See [More models: credit-zoo](Models_gen2.md#more-models-credit-zoo).
+
 ## The seven object types
 
 Every custom class must subclass the CREDIT base class for its type. The base

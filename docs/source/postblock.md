@@ -138,7 +138,6 @@ model:
 Inside `credit/postblock.py`, append your postblock to the list of postblock operations `self.operations`, the order that you want it.
 
 ```python
-from credit.skebs import SKEBS
 import logger
 from torch import nn
 
@@ -148,6 +147,9 @@ class PostBlock(nn.Module):
         ...
         # SKEBS
         if post_conf["skebs"]["activate"]:
+            # imported here so the optional torch-harmonics dependency is only needed when SKEBS is on
+            from credit.skebs import SKEBS
+
             logger.info("SKEBS registered")
             opt = SKEBS(post_conf)
             self.operations.append(opt)

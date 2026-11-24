@@ -1,3 +1,10 @@
+# The unet_downscaling model lives in credit-zoo: pip install git+https://github.com/NCAR/credit-zoo.git
+custom_objects:
+  unet_downscaling:
+    object_type: model
+    module_path: credit_zoo.models.unet_downscaling.unet_downscaling
+    module_name: DownscalingSegmentationModel
+
 # simple yaml file for the conus404 dataset; use for testing code
 
 #---------------------

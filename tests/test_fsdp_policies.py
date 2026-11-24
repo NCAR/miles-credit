@@ -4,7 +4,7 @@ FSDP policy comparison test: hard-coded vs auto-detect for legacy models.
 Run with:
   torchrun --nproc_per_node=2 tests/test_fsdp_policies.py
 
-Tests crossformer, wxformer, unet, fuxi, swin with both the current hard-coded
+Tests crossformer, wxformer, fuxi, swin with both the current hard-coded
 wrap policy and the generic auto-detect path, then reports discovered layer sets
 and whether FSDP wrap + fwd + bwd succeeds for each.
 """
@@ -143,17 +143,6 @@ def _make_crossformer():
     )
 
 
-def _make_unet():
-    from credit.models.unet.unet import SegmentationModel
-
-    return SegmentationModel(
-        in_channels=C_IN,
-        out_channels=C_OUT,
-        init_features=16,
-        levels=2,
-    )
-
-
 def _make_fuxi():
     from credit.models.fuxi.fuxi import Fuxi
 
@@ -187,7 +176,6 @@ def _make_swin():
 MODELS = [
     ("wxformer", "crossformer", _make_wxformer),
     ("crossformer", "crossformer", _make_crossformer),
-    ("unet", "unet", _make_unet),
     ("fuxi", "fuxi", _make_fuxi),
     ("swin", "swin", _make_swin),
 ]
