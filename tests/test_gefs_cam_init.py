@@ -5,7 +5,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-from credit.gefs import load_member_tiles, unstagger_winds
+import credit.gefs as gefs
+from credit.gefs import download_gefs_run, load_member_tiles, unstagger_winds
 
 INIT = "2026-11-19 0000"
 
@@ -78,3 +79,46 @@ def test_load_member_tiles_rejects_unknown_variables(tmp_path):
     root = _write_member_tiles(tmp_path)
     with pytest.raises(ValueError, match="valid GEFS variables"):
         load_member_tiles(str(root), INIT, "c00", ["not_a_gefs_variable"])
+
+
+class _FakeGCS:
+    """Stands in for gcsfs.GCSFileSystem: ls returns bucket paths without the gs:// prefix, like gcsfs."""
+
+    def __init__(self, files):
+        self.files = files  # remote path -> bytes
+        self.got = []
+
+    def exists(self, path):
+        prefix = path.removeprefix("gs://").rstrip("/") + "/"
+        return any(f.startswith(prefix) for f in self.files)
+
+    def ls(self, path):
+        prefix = path.removeprefix("gs://").rstrip("/") + "/"
+        return sorted(f for f in self.files if f.startswith(prefix))
+
+    def du(self, path):
+        return len(self.files[path])
+
+    def get(self, path, local_path):
+        self.got.append(path)
+        with open(local_path, "wb") as fobj:
+            fobj.write(self.files[path])
+
+
+def test_download_gefs_run_fetches_full_remote_paths_and_resumes(tmp_path, monkeypatch):
+    remote = "gfs-ensemble-forecast-system/gefs.20261119/00/atmos/init/c00"
+    files = {f"{remote}/gfs_ctrl.nc": b"ctrl", f"{remote}/gfs_data.tile1.nc": b"0123456789"}
+    fake = _FakeGCS(files)
+    monkeypatch.setattr(gefs.gcsfs, "GCSFileSystem", lambda **kwargs: fake)
+
+    download_gefs_run(INIT, str(tmp_path), n_pert_members=0)
+    local = tmp_path / "gefs.20261119" / "00" / "c00"
+    assert sorted(fake.got) == sorted(files)
+    assert (local / "gfs_data.tile1.nc").read_bytes() == b"0123456789"
+
+    # A truncated file is fetched again; a complete one is left alone.
+    (local / "gfs_data.tile1.nc").write_bytes(b"012")
+    fake.got.clear()
+    download_gefs_run(INIT, str(tmp_path), n_pert_members=0)
+    assert fake.got == [f"{remote}/gfs_data.tile1.nc"]
+    assert (local / "gfs_data.tile1.nc").read_bytes() == b"0123456789"

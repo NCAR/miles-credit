@@ -40,12 +40,12 @@ def download_gefs_run(init_date_str: str, out_path: str, n_pert_members: int = 3
                 member_file = member_file_path.split("/")[-1]
                 out_file = join(out_member_path, member_file)
                 # Check if file exists before downloading
-                if not exists(join(out_member_path, member_file)):
-                    fs.get(member_file, out_file)
+                if not exists(out_file):
+                    fs.get(member_file_path, out_file)
                 # If file exists but download was interrupted, delete file and try again.
-                elif fs.du(member_file) != getsize(out_file):
+                elif fs.du(member_file_path) != getsize(out_file):
                     os.remove(out_file)
-                    fs.get(member_file, out_file)
+                    fs.get(member_file_path, out_file)
     return
 
 
