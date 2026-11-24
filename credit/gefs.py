@@ -172,7 +172,7 @@ def unstagger_winds(ds, u_var="u_s", v_var="v_w", out_u="u_a", out_v="v_a"):
     ds["lon"].attrs["axis"] = "X"
     ds["lat"].attrs["axis"] = "Y"
     ds[out_u] = xr.DataArray(
-        0.5 * ds[u_var][:, :-1, :].values + ds[u_var][:, 1:, :].values,
+        0.5 * (ds[u_var][:, :-1, :].values + ds[u_var][:, 1:, :].values),
         coords=dict(
             lev=ds["lev"],
             lat=ds["lat"],
@@ -183,7 +183,7 @@ def unstagger_winds(ds, u_var="u_s", v_var="v_w", out_u="u_a", out_v="v_a"):
         dims=("lev", "lat", "lon"),
     )
     ds[out_v] = xr.DataArray(
-        0.5 * ds[v_var][:, :, :-1].values + ds[v_var][:, :, 1:].values,
+        0.5 * (ds[v_var][:, :, :-1].values + ds[v_var][:, :, 1:].values),
         coords=dict(
             lev=ds["lev"],
             y=ds["lat"],
