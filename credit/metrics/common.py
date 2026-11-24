@@ -93,6 +93,8 @@ class R2ScoreMetric(BaseVariableMetric):
     R² = 1 - SS_res / SS_tot, where SS_res is the (latitude-weighted) residual
     sum of squares ``mean(w * (pred - target)²)`` and SS_tot is the
     (latitude-weighted) total sum of squares ``mean(w * (target - mean_w(target))²)``.
+    The score is computed in float64, and the guard against a constant target
+    scales with ``mean(w * target²)``, so R² does not depend on the variable's units.
 
     - R² = 1: perfect forecast.
     - R² = 0: forecast is no better than predicting the target mean.
@@ -112,11 +114,17 @@ class R2ScoreMetric(BaseVariableMetric):
 
     def _score_variable(self, pred: torch.Tensor, target: torch.Tensor, var_key: str | None = None) -> torch.Tensor:
         lat_w = self._lat_w(pred)
-        w = lat_w if lat_w is not None else 1.0
+        # float64 so variables in small physical units (e.g. a moisture tendency in kg kg-1 s-1, whose
+        # squared deviations are ~1e-15) keep their precision.
+        pred, target = pred.double(), target.double()
+        w = lat_w.double() if lat_w is not None else 1.0
         ss_res = (w * (pred - target) ** 2).mean()
         target_mean = (w * target).mean()
         ss_tot = (w * (target - target_mean) ** 2).mean()
-        return 1.0 - ss_res / (ss_tot + 1e-12)
+        # The guard against a constant target is relative to the target's own scale. A fixed absolute epsilon
+        # (formerly 1e-12) swamps ss_tot for small-unit variables and drives R² to ~1 whatever the forecast.
+        eps = torch.finfo(torch.float64).eps * (w * target**2).mean() + torch.finfo(torch.float64).tiny
+        return (1.0 - ss_res / (ss_tot + eps)).float()
 
 
 class LogVarianceRatioMetric(BaseVariableMetric):
