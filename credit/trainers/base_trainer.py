@@ -48,11 +48,22 @@ logger = logging.getLogger(__name__)
 DEFAULT_DISPLAY_METRICS = ("rmse", "r2score", "bias")
 
 
-def _atomic_save(obj: Any, path: str) -> None:
-    """torch.save via a temp file + rename, so a killed job never leaves a truncated checkpoint."""
-    tmp = f"{path}.tmp"
-    torch.save(obj, tmp)
-    os.replace(tmp, path)
+def _atomic_save(*items: tuple[Any, str]) -> None:
+    """torch.save each ``(obj, path)`` to a temp file, then rename them all into place.
+
+    A killed job never leaves a truncated checkpoint. Files saved in one call
+    (checkpoint.pt + checkpoint_ema.pt) are written first and renamed back to
+    back, so a kill can only split the pair in the instant between two renames.
+    """
+    for obj, path in items:
+        torch.save(obj, f"{path}.tmp")
+    for _, path in items:
+        os.replace(f"{path}.tmp", path)
+
+
+def _checkpoint_position(ckpt: dict) -> tuple[Any, int]:
+    """(epoch, batch_in_epoch) of a loaded checkpoint; batch 0 means end of epoch."""
+    return ckpt.get("epoch"), int(ckpt.get("batch_in_epoch") or 0)
 
 
 @dataclass
@@ -240,6 +251,10 @@ class EMATracker:
 
 
 class BaseTrainer(ABC):
+    # Subclasses whose train_one_epoch() saves and resumes mid-epoch checkpoints
+    # (trainer.checkpoints_per_epoch) set this to True.
+    supports_mid_epoch_checkpoints: bool = False
+
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict[str, Any]):
         """
         Abstract base class for training and validating machine learning models.
@@ -277,10 +292,24 @@ class BaseTrainer(ABC):
         ) and (torch.distributed.is_available() and torch.distributed.is_initialized())
         self.epochs = trainer_conf.get("epochs", 1)
         self.start_epoch = trainer_conf.get("start_epoch", 0)
+        # Internal: set by load_model_states_and_optimizer() from a mid-epoch
+        # checkpoint.pt (reload_epoch: True). Not meant to be set by hand.
         self.resume_at_batch = int(trainer_conf.get("resume_at_batch", 0) or 0)
         self.checkpoints_per_epoch = int(trainer_conf.get("checkpoints_per_epoch", 0) or 0)
         if self.checkpoints_per_epoch < 0:
             raise ValueError(f"trainer.checkpoints_per_epoch must be >= 0, got {self.checkpoints_per_epoch}")
+        if self.checkpoints_per_epoch and not self.supports_mid_epoch_checkpoints:
+            logger.warning(
+                f"trainer.checkpoints_per_epoch={self.checkpoints_per_epoch} is ignored: {type(self).__name__} "
+                "only saves at the end of each epoch (mid-epoch checkpoints are gen2-only)."
+            )
+            self.checkpoints_per_epoch = 0
+        if self.checkpoints_per_epoch and self.mode == "fsdp":
+            raise ValueError(
+                "trainer.checkpoints_per_epoch is not supported with legacy FSDP (trainer.mode: fsdp): its "
+                "checkpoint is three files overwritten in place, so a job killed mid-save can leave weights that "
+                "don't match the saved batch. Use trainer.parallelism.data: fsdp2, or set checkpoints_per_epoch: 0."
+            )
         self.skip_validation = trainer_conf.get("skip_validation", False)
         self.load_weights = trainer_conf.get("load_weights", False)
         self.use_scheduler = trainer_conf.get("use_scheduler", True)
@@ -334,6 +363,7 @@ class BaseTrainer(ABC):
                 ema_ckpt = torch.load(ema_path, map_location="cpu", weights_only=False)
                 self.ema.load_state_dict(ema_ckpt["model_state_dict"])
                 logger.info(f"Resumed EMA from {ema_path} (step {self.ema.step})")
+                self._warn_if_ema_mismatch(ema_ckpt)
             else:
                 logger.info(f"EMA enabled (decay={ema_decay})")
         else:
@@ -545,13 +575,13 @@ class BaseTrainer(ABC):
             return
         # mmap: only the small resume fields are read, not the model/optimizer tensors.
         ckpt = torch.load(path, map_location="cpu", mmap=True)
-        saved_batch = int(ckpt.get("batch_in_epoch") or 0)
+        saved_epoch, saved_batch = _checkpoint_position(ckpt)
         expected_epoch = start_epoch if self.resume_at_batch > 0 else start_epoch - 1
-        if ckpt.get("epoch") != expected_epoch or saved_batch != self.resume_at_batch:
+        if saved_epoch != expected_epoch or saved_batch != self.resume_at_batch:
             if self.resume_at_batch > 0:
                 logger.warning(
                     f"trainer.resume_at_batch={self.resume_at_batch} (epoch {start_epoch}) does not match "
-                    f"checkpoint.pt (epoch {ckpt.get('epoch')}, batch {saved_batch}); epoch {start_epoch} "
+                    f"checkpoint.pt (epoch {saved_epoch}, batch {saved_batch}); epoch {start_epoch} "
                     "restarts from batch 0."
                 )
             return
@@ -579,6 +609,25 @@ class BaseTrainer(ABC):
             )
         elif rng_state is not None:
             self._set_rng_state(rng_state)
+
+    def _warn_if_ema_mismatch(self, ema_ckpt: dict) -> None:
+        """Warn when checkpoint_ema.pt was saved at a different point than checkpoint.pt.
+
+        The two are renamed into place back to back, so a job killed in between
+        can pair new weights with the previous save's EMA.
+        """
+        path = os.path.join(self.save_loc, "checkpoint.pt")
+        if not os.path.exists(path):
+            return
+        # mmap: only the position fields are read, not the model/optimizer tensors.
+        ckpt = torch.load(path, map_location="cpu", mmap=True)
+        ema_pos, ckpt_pos = _checkpoint_position(ema_ckpt), _checkpoint_position(ckpt)
+        if ema_pos != ckpt_pos:
+            logger.warning(
+                f"checkpoint_ema.pt (epoch {ema_pos[0]}, batch {ema_pos[1]}) does not match checkpoint.pt "
+                f"(epoch {ckpt_pos[0]}, batch {ckpt_pos[1]}); the EMA weights lag or lead the model "
+                "(likely a job killed between the two writes)."
+            )
 
     @staticmethod
     def _set_rng_state(state: dict) -> None:
@@ -653,12 +702,19 @@ class BaseTrainer(ABC):
                     "scaler_state_dict": scaler.state_dict(),
                     **resume_fields,
                 }
-                _atomic_save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
+                files = [(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))]
                 if ema_sd is not None:
-                    _atomic_save(
-                        {"epoch": epoch, "batch_in_epoch": resume_fields["batch_in_epoch"], "model_state_dict": ema_sd},
-                        os.path.join(self.save_loc, "checkpoint_ema.pt"),
+                    files.append(
+                        (
+                            {
+                                "epoch": epoch,
+                                "batch_in_epoch": resume_fields["batch_in_epoch"],
+                                "model_state_dict": ema_sd,
+                            },
+                            os.path.join(self.save_loc, "checkpoint_ema.pt"),
+                        )
                     )
+                _atomic_save(*files)
                 if self.save_every_epoch and not mid_epoch:
                     copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)
         elif self.mode != "fsdp":
@@ -672,17 +728,15 @@ class BaseTrainer(ABC):
                     "scaler_state_dict": scaler.state_dict(),
                     **resume_fields,
                 }
-                _atomic_save(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))
-
+                files = [(state_dict, os.path.join(self.save_loc, "checkpoint.pt"))]
                 if self.ema is not None:
-                    _atomic_save(
-                        {
-                            "epoch": epoch,
-                            "batch_in_epoch": resume_fields["batch_in_epoch"],
-                            "model_state_dict": self.ema.state_dict(),
-                        },
-                        os.path.join(self.save_loc, "checkpoint_ema.pt"),
-                    )
+                    ema_state = {
+                        "epoch": epoch,
+                        "batch_in_epoch": resume_fields["batch_in_epoch"],
+                        "model_state_dict": self.ema.state_dict(),
+                    }
+                    files.append((ema_state, os.path.join(self.save_loc, "checkpoint_ema.pt")))
+                _atomic_save(*files)
 
                 if self.save_every_epoch and not mid_epoch:
                     copy_checkpoint(os.path.join(self.save_loc, "checkpoint.pt"), epoch)

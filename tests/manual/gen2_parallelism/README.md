@@ -81,3 +81,29 @@ a single 4-GPU node, plus a ddp-vs-domain parity gate. `run_smoke_2node.pbs`
 runs the combo config on 8 GPUs / 2 nodes so FSDP2 shards across nodes. The
 `ac_casper` config is the single-GPU Casper variant; run it on Casper with
 plain `python` (no launcher) to exercise the single-process path.
+
+## Mid-epoch checkpoint resume
+
+**Mid-epoch checkpoints (issue #514)** (`trainer.checkpoints_per_epoch`) are
+unit-tested on CPU in `tests/test_mid_epoch_resume.py`; the multi-rank
+acceptance gate is its own run:
+
+```bash
+qsub tests/manual/gen2_parallelism/run_mid_epoch_resume.pbs
+```
+
+This trains the `ddp` and `fsdp2` smoke configs (2 GPUs each) for one epoch
+three times: a **ref** run, uninterrupted; a **killed** run with
+`checkpoints_per_epoch: 5` (a save after every batch) in which every rank
+hard-exits right after the batch-3 save (`kill_after_mid_epoch_save.py`); and a
+**resumed** run that reloads that checkpoint with `reload_epoch: true`. It gates
+on the resumed run logging `Resuming epoch 0 at batch 3` and on
+`check_mid_epoch_resume.py` matching its `train_loss`, `lr` and final weights to
+the ref run (rtol=1e-3 rather than exact, to allow float differences from
+reloading state in a new launch; a wrong resume batch, LR or sample order
+diverges far beyond that).
+
+Results (per-mode PASS/FAIL) are written to
+`/glade/derecho/scratch/$USER/tmp/mid_epoch_resume/SUMMARY.txt`, with
+`<mode>_ref.log`, `<mode>_killed.log`, `<mode>_resumed.log` and
+`<mode>_check.txt` per mode.

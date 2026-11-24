@@ -640,6 +640,25 @@ def test_negative_checkpoints_per_epoch_errors(conf):
     assert "trainer.checkpoints_per_epoch" in _wheres(_run(conf), "error")
 
 
+def test_checkpoints_per_epoch_gen2_is_clean(conf):
+    conf["trainer"]["checkpoints_per_epoch"] = 4
+    rep = _run(conf)
+    assert "trainer.checkpoints_per_epoch" not in _wheres(rep, "error") | _wheres(rep, "warning")
+
+
+def test_checkpoints_per_epoch_non_gen2_trainer_warns(conf):
+    conf["trainer"]["checkpoints_per_epoch"] = 4
+    conf["trainer"]["type"] = "era5-diffusion"
+    assert "trainer.checkpoints_per_epoch" in _wheres(_run(conf), "warning")
+
+
+def test_checkpoints_per_epoch_legacy_fsdp_errors(conf):
+    conf["trainer"]["checkpoints_per_epoch"] = 4
+    conf["trainer"].pop("parallelism", None)
+    conf["trainer"]["mode"] = "fsdp"
+    assert "trainer.checkpoints_per_epoch" in _wheres(_run(conf), "error")
+
+
 def test_removed_ensemble_gen2_trainer_points_to_ring_crps(conf):
     conf["trainer"]["type"] = "ensemble-gen2"
     rep = _run(conf)

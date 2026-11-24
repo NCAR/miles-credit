@@ -7,6 +7,7 @@ DistributedMultiStepBatchSampler, and a linear-warmup-cosine scheduler
 """
 
 import copy
+import logging
 import os
 import warnings
 
@@ -104,19 +105,19 @@ def _conf(save_loc, **trainer_overrides):
     }
 
 
-def _loader():
+def _loader(num_workers=0):
     dataset = _SeqDataset()
     sampler = DistributedMultiStepBatchSampler(
         dataset, batch_size=BATCH_SIZE, num_forecast_steps=1, num_replicas=1, rank=0, shuffle=True, seed=0
     )
-    return DataLoader(dataset, batch_sampler=sampler, num_workers=0)
+    return DataLoader(dataset, batch_sampler=sampler, num_workers=num_workers)
 
 
 def _metrics(pred, y):
     return {"mae": (pred - y).abs().mean().item()}
 
 
-def _train_epoch(conf):
+def _train_epoch_with_trainer(conf, num_workers=0):
     """Build model/optimizer the way train_gen2 does, then run epoch start_epoch."""
     torch.manual_seed(0)
     conf, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
@@ -125,9 +126,14 @@ def _train_epoch(conf):
     trainer = TrainerERA5Gen2(model, rank=0, conf=conf)
     trainer._restore_resume_state(conf["trainer"]["start_epoch"])
     results = trainer.train_one_epoch(
-        conf["trainer"]["start_epoch"], _loader(), optimizer, nn.MSELoss(), scaler, scheduler, _metrics
+        conf["trainer"]["start_epoch"], _loader(num_workers), optimizer, nn.MSELoss(), scaler, scheduler, _metrics
     )
-    return model, optimizer, results
+    return trainer, optimizer, results
+
+
+def _train_epoch(conf, num_workers=0):
+    trainer, optimizer, results = _train_epoch_with_trainer(conf, num_workers)
+    return trainer.model, optimizer, results
 
 
 def _resume_conf(conf):
@@ -143,7 +149,7 @@ def _resume_conf(conf):
 # ---------------------------------------------------------------------------
 
 
-def test_skip_first_batches_then_resets():
+def test_skip_first_batches_until_reset():
     sampler = _loader().batch_sampler
     sampler.set_epoch(3)
     full = list(sampler)
@@ -151,8 +157,26 @@ def test_skip_first_batches_then_resets():
     sampler.set_epoch(3)
     sampler.skip_first_batches(5)
     assert list(sampler) == full[5:]
-    # One-shot: the next pass (cycle() re-iteration, next epoch) starts at 0.
+    # Not one-shot: a multi-worker DataLoader iterator calls iter(sampler) twice on creation.
+    assert list(sampler) == full[5:]
+    sampler.skip_first_batches(0)
     assert list(sampler) == full
+
+
+@pytest.mark.parametrize("num_workers", [0, 2])
+def test_resumed_iterator_skips_and_later_passes_do_not(num_workers):
+    """The trainer's pattern: skip, create the iterator, reset; cycle() re-iteration starts at batch 0."""
+    loader = _loader(num_workers)
+    loader.batch_sampler.set_epoch(0)
+    full = [b["input"]["era5"]["era5/prognostic/2d/v0"] for b in loader]
+
+    loader.batch_sampler.set_epoch(0)
+    loader.batch_sampler.skip_first_batches(5)
+    it = iter(loader)
+    loader.batch_sampler.skip_first_batches(0)
+    resumed = [b["input"]["era5"]["era5/prognostic/2d/v0"] for b in it]
+    torch.testing.assert_close(resumed, full[5:])
+    torch.testing.assert_close([b["input"]["era5"]["era5/prognostic/2d/v0"] for b in loader], full)
 
 
 # ---------------------------------------------------------------------------
@@ -160,12 +184,18 @@ def test_skip_first_batches_then_resets():
 # ---------------------------------------------------------------------------
 
 
-class _Concrete(BaseTrainer):
+class _EndOfEpochOnly(BaseTrainer):
+    """A trainer without mid-epoch checkpoint support (like every non-gen2 trainer)."""
+
     def train_one_epoch(self, *a, **kw):
         pass
 
     def validate(self, *a, **kw):
         return {}
+
+
+class _Concrete(_EndOfEpochOnly):
+    supports_mid_epoch_checkpoints = True
 
 
 @pytest.mark.parametrize(
@@ -186,6 +216,18 @@ def test_mid_epoch_interval(tmp_path, overrides, bpe, accum, expected):
 def test_negative_checkpoints_per_epoch_rejected(tmp_path):
     with pytest.raises(ValueError, match="must be >= 0"):
         _Concrete(nn.Linear(1, 1), rank=0, conf=_conf(tmp_path, checkpoints_per_epoch=-1))
+
+
+def test_unsupported_trainer_ignores_checkpoints_per_epoch(tmp_path, caplog):
+    with caplog.at_level(logging.WARNING):
+        trainer = _EndOfEpochOnly(nn.Linear(1, 1), rank=0, conf=_conf(tmp_path, checkpoints_per_epoch=4))
+    assert trainer.checkpoints_per_epoch == 0
+    assert "is ignored" in caplog.text
+
+
+def test_legacy_fsdp_rejects_mid_epoch_checkpoints(tmp_path):
+    with pytest.raises(ValueError, match="legacy FSDP"):
+        _Concrete(nn.Linear(1, 1), rank=0, conf=_conf(tmp_path, mode="fsdp", checkpoints_per_epoch=4))
 
 
 def test_rescale_start_batch_on_layout_change():
@@ -231,6 +273,94 @@ def test_resume_matches_uninterrupted(tmp_path):
     assert len(results["train_loss"]) == BATCHES_PER_EPOCH
     torch.testing.assert_close(model.w, ref_model.w)
     assert opt.param_groups[0]["lr"] == pytest.approx(ref_opt.param_groups[0]["lr"])
+
+
+def _assert_resume_matches(tmp_path, num_workers=0, **overrides):
+    """Interrupted at the last mid-epoch checkpoint + resumed == one uninterrupted epoch."""
+    ref_trainer, ref_opt, ref_results = _train_epoch_with_trainer(_conf(tmp_path / "ref", **overrides), num_workers)
+
+    conf = _conf(tmp_path / "run", checkpoints_per_epoch=3, **overrides)
+    _train_epoch(conf, num_workers)
+    trainer, opt, results = _train_epoch_with_trainer(_resume_conf(conf), num_workers)
+
+    assert trainer.resume_at_batch == 8
+    np.testing.assert_allclose(results["train_loss"], ref_results["train_loss"], rtol=1e-6)
+    torch.testing.assert_close(trainer.model.w, ref_trainer.model.w)
+    assert opt.param_groups[0]["lr"] == pytest.approx(ref_opt.param_groups[0]["lr"])
+    return ref_trainer, trainer
+
+
+def test_resume_with_ema_matches_uninterrupted(tmp_path):
+    ref_trainer, trainer = _assert_resume_matches(tmp_path, use_ema=True, ema_decay=0.5)
+    torch.testing.assert_close(trainer.ema.state_dict(), ref_trainer.ema.state_dict())
+    assert trainer.ema.step == ref_trainer.ema.step
+
+
+def test_resume_with_grad_accum_matches_uninterrupted(tmp_path):
+    # Interval ceil(12 / 3) = 4 is already a multiple of 2, so the last save is at batch 8.
+    _assert_resume_matches(tmp_path, grad_accum_every=2)
+
+
+def test_resume_with_lambda_scheduler_matches_uninterrupted(tmp_path):
+    """The per-epoch lambda step is in the saved scheduler state, so resume must not step again."""
+    _assert_resume_matches(tmp_path, scheduler={"scheduler_type": "lambda"})
+
+
+def test_resume_with_dataloader_workers_matches_uninterrupted(tmp_path):
+    """With num_workers > 0 the worker seeds differ after resume; a dataset that doesn't sample still matches."""
+    _assert_resume_matches(tmp_path, num_workers=2)
+
+
+def test_ema_checkpoint_mismatch_warns(tmp_path, caplog):
+    conf = _conf(tmp_path, checkpoints_per_epoch=3, use_ema=True)
+    _train_epoch(conf)
+    # Simulate a kill between the two renames: checkpoint.pt at batch 8, EMA still from batch 4.
+    ema_path = os.path.join(tmp_path, "checkpoint_ema.pt")
+    ema = torch.load(ema_path, weights_only=False)
+    ema["batch_in_epoch"] = 4
+    torch.save(ema, ema_path)
+
+    with caplog.at_level(logging.WARNING):
+        _Concrete(_DropoutScaleModel(), rank=0, conf=_resume_conf(conf))
+    assert "checkpoint_ema.pt (epoch 0, batch 4) does not match checkpoint.pt (epoch 0, batch 8)" in caplog.text
+
+
+def test_ema_checkpoint_saved_with_model_checkpoint(tmp_path, caplog):
+    conf = _conf(tmp_path, checkpoints_per_epoch=3, use_ema=True)
+    _train_epoch(conf)
+    assert torch.load(os.path.join(tmp_path, "checkpoint_ema.pt"), weights_only=False)["batch_in_epoch"] == 8
+    assert not os.path.exists(os.path.join(tmp_path, "checkpoint_ema.pt.tmp"))
+    with caplog.at_level(logging.WARNING):
+        _Concrete(_DropoutScaleModel(), rank=0, conf=_resume_conf(conf))
+    assert "does not match" not in caplog.text
+
+
+def test_sampler_without_skip_fails_before_training(tmp_path):
+    """A run that couldn't resume from its own mid-epoch checkpoints fails at the start, not on resume."""
+    conf = _conf(tmp_path, checkpoints_per_epoch=3)
+    _, model, optimizer, scheduler, scaler = load_model_states_and_optimizer(
+        conf, _DropoutScaleModel(), torch.device("cpu")
+    )
+    trainer = TrainerERA5Gen2(model, rank=0, conf=conf)
+    plain_loader = DataLoader(_SeqDataset(), batch_size=BATCH_SIZE)
+    with pytest.raises(RuntimeError, match="skip_first_batches"):
+        trainer.train_one_epoch(0, plain_loader, optimizer, nn.MSELoss(), scaler, scheduler, _metrics)
+    assert not os.path.exists(os.path.join(tmp_path, "checkpoint.pt"))
+
+
+@pytest.mark.parametrize("has_log", [True, False])
+def test_weights_only_reload_restarts_mid_epoch_checkpoint_at_batch_0(tmp_path, has_log):
+    """Fresh optimizer/scheduler: resuming at the saved batch would restart the LR schedule mid-epoch."""
+    conf = _conf(tmp_path, checkpoints_per_epoch=3)
+    _train_epoch(conf)
+    if has_log:  # an earlier epoch finished, as in a multi-epoch run
+        pd.DataFrame({"epoch": [0]}).to_csv(tmp_path / "training_log.csv", index=False)
+
+    weights_only = copy.deepcopy(conf)
+    weights_only["trainer"].update(load_weights=True, reload_epoch=True)
+    resumed_conf, *_ = load_model_states_and_optimizer(weights_only, _DropoutScaleModel(), torch.device("cpu"))
+    assert resumed_conf["trainer"]["start_epoch"] == 0
+    assert resumed_conf["trainer"].get("resume_at_batch", 0) == 0
 
 
 def test_end_of_epoch_checkpoint_resumes_next_epoch(tmp_path):

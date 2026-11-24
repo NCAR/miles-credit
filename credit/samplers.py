@@ -82,9 +82,12 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
         self.skip_batches = 0
 
     def skip_first_batches(self, n_batches: int) -> None:
-        """Skip the first *n_batches* init batches of the NEXT iteration only.
+        """Skip the first *n_batches* init batches of every iteration until reset with 0.
 
-        Used to resume mid-epoch; call it after set_epoch()
+        Used to resume mid-epoch: call it after set_epoch(), create the
+        DataLoader iterator, then call ``skip_first_batches(0)``. It is not
+        one-shot because a multi-worker DataLoader iterator calls
+        ``iter(sampler)`` twice while it is being created.
         """
         self.skip_batches = int(n_batches)
 
@@ -92,7 +95,6 @@ class DistributedMultiStepBatchSampler(DistributedSampler):
         index_subset = list(super().__iter__())
         if self.skip_batches:
             index_subset = index_subset[self.skip_batches * self.batch_size :]
-            self.skip_batches = 0
         logger.debug(f"num indices: {len(index_subset)}")
         batch_sampler = MultiStepBatchSamplerSubset(
             self.dataset,

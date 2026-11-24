@@ -397,6 +397,7 @@ save_best_weights: True
 
 - **`save_backup_weights`** → Saves a **checkpoint at the start of every epoch** (acts as a recovery point).  
 - **`save_best_weights`** → Saves the **best model based on validation loss**.  
+- **`checkpoints_per_epoch`** → *(gen2 trainer only)* Also saves `checkpoint.pt` this many times per epoch, counting the end-of-epoch save (`4` → at 1/4, 1/2, 3/4 and the end; `0`, the default, → end of epoch only). With `reload_epoch: True` a killed job resumes at the saved batch. See [Mid-epoch checkpoints](Training.md#mid-epoch-checkpoints-gen2-only).  
 
 💡 *If `skip_validation: True`, `save_best_weights` will NOT work!*  
 

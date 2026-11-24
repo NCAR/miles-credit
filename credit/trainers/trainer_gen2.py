@@ -47,6 +47,8 @@ def _copy_named_input(input_dict: dict) -> dict:
 
 
 class TrainerERA5Gen2(BaseTrainer):
+    supports_mid_epoch_checkpoints = True
+
     def __init__(self, model: torch.nn.Module, rank: int, conf: dict):
         """
         Gen 2 trainer for the ERA5 nested data schema.
@@ -332,6 +334,21 @@ class TrainerERA5Gen2(BaseTrainer):
             "batch_size": getattr(_sampler, "batch_size", None),
         }
 
+        ckpt_interval = self._mid_epoch_checkpoint_interval(batches_per_epoch, grad_accum_every)
+        saves_mid_epoch = self._save_mid_epoch and 0 < ckpt_interval < batches_per_epoch
+        # Check before training, not at resume: a checkpoint this run can't resume from is useless.
+        if (start_batch > 0 or saves_mid_epoch) and not hasattr(_sampler, "skip_first_batches"):
+            raise RuntimeError(
+                "Mid-epoch checkpoints (trainer.checkpoints_per_epoch) need a sampler with skip_first_batches() "
+                f"(DistributedMultiStepBatchSampler); got {type(_sampler).__name__}. "
+                "Set trainer.checkpoints_per_epoch: 0 to save at the end of each epoch only."
+            )
+        if saves_mid_epoch and self.checkpoints_per_epoch > batches_per_epoch // grad_accum_every:
+            logger.warning(
+                f"trainer.checkpoints_per_epoch={self.checkpoints_per_epoch} exceeds the {batches_per_epoch} batches "
+                f"(grad_accum_every={grad_accum_every}) in this epoch; saving every {ckpt_interval} batch(es)."
+            )
+
         if start_batch > 0:
             start_batch = self._rescale_start_batch(start_batch, resume.sampler_layout, sampler_layout)
             if start_batch >= batches_per_epoch:
@@ -340,15 +357,9 @@ class TrainerERA5Gen2(BaseTrainer):
                     "complete, so it is not re-trained."
                 )
                 start_batch = batches_per_epoch
-            if not hasattr(_sampler, "skip_first_batches"):
-                raise RuntimeError(
-                    "Mid-epoch resume needs a sampler with skip_first_batches() (DistributedMultiStepBatchSampler); "
-                    f"got {type(_sampler).__name__}."
-                )
             _sampler.skip_first_batches(start_batch)
             logger.info(f"Resuming epoch {epoch} at batch {start_batch}/{batches_per_epoch}")
 
-        ckpt_interval = self._mid_epoch_checkpoint_interval(batches_per_epoch, grad_accum_every)
         if start_batch % grad_accum_every:
             logger.warning(
                 f"Resume batch {start_batch} is not a multiple of grad_accum_every={grad_accum_every}; "
@@ -368,6 +379,9 @@ class TrainerERA5Gen2(BaseTrainer):
         # RNG, which must happen before a mid-epoch RNG restore, as it did
         # before the checkpoint was taken.
         dl = itertools.chain(iter(trainloader), cycle(trainloader))
+        if start_batch > 0:
+            # The skip is baked into this epoch's iterator; later passes start at batch 0.
+            _sampler.skip_first_batches(0)
         if resume and resume.rng_state is not None:
             self._set_rng_state(resume.rng_state)
         results_dict = defaultdict(list, (resume.train_results if resume else None) or {})
@@ -592,7 +606,7 @@ class TrainerERA5Gen2(BaseTrainer):
             # Mid-epoch restart point. The interval is a multiple of
             # grad_accum_every, so this is always just after an optimizer step.
             done = steps + 1
-            if ckpt_interval and self._save_mid_epoch and done % ckpt_interval == 0 and done < batches_per_epoch:
+            if saves_mid_epoch and done % ckpt_interval == 0 and done < batches_per_epoch:
                 self._save_checkpoint(
                     epoch,
                     optimizer,

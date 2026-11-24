@@ -580,14 +580,28 @@ def _migrate_legacy_checkpoint(model, checkpoint):
     migrate_legacy_state_dict(getattr(model, "module", model), state_dict)
 
 
-def _apply_resume_position(conf, checkpoint):
+def _apply_resume_position(conf, checkpoint, restores_training_state=True):
     """Set trainer.start_epoch / trainer.resume_at_batch from a checkpoint's position.
 
     ``batch_in_epoch`` > 0 resumes inside that epoch; 0 or absent (incl. older
-    checkpoints) resumes at the next epoch.
+    checkpoints) resumes at the next epoch. ``trainer.resume_at_batch`` is an
+    internal key, written only here.
+
+    Without ``restores_training_state`` (weights-only reload: fresh optimizer and
+    scheduler), a mid-epoch checkpoint restarts its epoch from batch 0: resuming
+    at the saved batch would pair it with an LR schedule restarted from step 0.
     """
     batch_in_epoch = int(checkpoint.get("batch_in_epoch") or 0)
-    if batch_in_epoch > 0:
+    if batch_in_epoch > 0 and not restores_training_state:
+        conf["trainer"]["start_epoch"] = checkpoint["epoch"]
+        conf["trainer"]["resume_at_batch"] = 0
+        logging.warning(
+            f"checkpoint.pt was saved mid-epoch (epoch {checkpoint['epoch']}, batch {batch_in_epoch}), but "
+            "load_optimizer/load_scheduler/load_scaler are off, so epoch "
+            f"{checkpoint['epoch']} restarts from batch 0 with the loaded weights. Turn them on to resume "
+            "at the saved batch."
+        )
+    elif batch_in_epoch > 0:
         conf["trainer"]["start_epoch"] = checkpoint["epoch"]
         conf["trainer"]["resume_at_batch"] = batch_in_epoch
         logging.info(f"Resuming mid-epoch: epoch {checkpoint['epoch']}, batch {batch_in_epoch}")
@@ -693,7 +707,7 @@ def load_model_states_and_optimizer(conf, model, device):
         scaler = _make_scaler()
 
         if conf["trainer"].get("reload_epoch", False) and os.path.exists(os.path.join(save_loc, "training_log.csv")):
-            _apply_resume_position(conf, checkpoint)
+            _apply_resume_position(conf, checkpoint, restores_training_state=False)
 
     else:
         ckpt = os.path.join(save_loc, "checkpoint.pt")
