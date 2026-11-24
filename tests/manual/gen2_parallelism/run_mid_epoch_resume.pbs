@@ -11,7 +11,7 @@
 # checkpoint + exact resume). NOT run by GitHub CI. Needs a multi-GPU Derecho
 # node and the credit-main-derecho conda env.
 #
-#   qsub tests/manual/gen2_parallelism/run_mid_epoch_resume.pbs
+#   qsub -A <account> tests/manual/gen2_parallelism/run_mid_epoch_resume.pbs   (from the repo root)
 #
 # Per mode (ddp, fsdp2; 2 ranks each), three torchrun launches of the smoke
 # config (1 epoch / 5 batches):
@@ -28,7 +28,8 @@ set -u -o pipefail
 module --force purge
 module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
 
-REPO=${REPO:-/glade/work/schreck/repos/miles-credit-main}
+# The checkout under test: the directory qsub was run from (submit from the repo root).
+REPO=${REPO:-$PBS_O_WORKDIR}
 ENV_BIN=${ENV_BIN:-/glade/work/schreck/conda-envs/credit-main-derecho/bin}
 TORCHRUN=$ENV_BIN/torchrun
 PYCHK=$ENV_BIN/python
@@ -38,7 +39,8 @@ RTOL=${RTOL:-1e-3}
 mkdir -p "$WORKDIR"
 
 cd "$REPO"
-export PYTHONPATH="applications:${PYTHONPATH:-}"
+# $REPO first, so `credit` imports from this checkout rather than the conda env's install.
+export PYTHONPATH="$REPO:$REPO/applications:${PYTHONPATH:-}"
 export LOGLEVEL=INFO
 export NCCL_DEBUG=WARN
 export NCCL_SOCKET_IFNAME=lo
