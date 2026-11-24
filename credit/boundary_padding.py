@@ -3,7 +3,15 @@ import torch.nn.functional as F
 
 
 class TensorPadding:
-    def __init__(self, mode="earth", pad_lat=(40, 40), pad_lon=(40, 40), **kwargs):
+    def __init__(
+        self,
+        mode="earth",
+        pad_lat=(40, 40),
+        pad_lon=(40, 40),
+        pole_flip_channels=None,
+        pole_flip_offsets=None,
+        **kwargs,
+    ):
         """
         Initialize the TensorPadding class with the specified mode and padding sizes.
 
@@ -11,11 +19,41 @@ class TensorPadding:
             mode (str): The padding mode, either 'mirror' or 'earth'.
             pad_lat (list[int]): Padding sizes for the North-South (latitude) dimension [top, bottom].
             pad_lon (list[int]): Padding sizes for the West-East (longitude) dimension [left, right].
+            pole_flip_channels (list[int], optional): 'earth' mode only. Channels (dim 1) that change sign when
+                reflected across a pole: the eastward and northward components of vector fields (u, v, ...).
+                The pole padding copies the rows nearest the pole with a 180-degree longitude shift; across the
+                pole both components of a horizontal vector reverse, so without this the padded rows show the
+                network winds pointing the wrong way. Default: none (the original behaviour).
+            pole_flip_offsets (list[float], optional): one per ``pole_flip_channels`` entry. The flip is applied
+                to the (usually normalized) model input, so for a standardized channel z = (x - mu) / sigma the
+                physical reflection x -> -x is z -> -z - 2 mu / sigma: pass 2 mu / sigma here. Default: zeros
+                (exact for channels with zero mean).
         """
 
         self.mode = mode
         self.pad_NS = pad_lat
         self.pad_WE = pad_lon
+        self.pole_flip_channels = list(pole_flip_channels or [])
+        offsets = [0.0] * len(self.pole_flip_channels) if pole_flip_offsets is None else list(pole_flip_offsets)
+        if len(offsets) != len(self.pole_flip_channels):
+            raise ValueError(
+                f"pole_flip_offsets has {len(offsets)} entries for {len(self.pole_flip_channels)} pole_flip_channels"
+            )
+        if self.pole_flip_channels and mode != "earth":
+            raise ValueError("pole_flip_channels needs mode='earth'")
+        self.pole_flip_offsets = [float(v) for v in offsets]
+
+    def _pole_flip(self, rows):
+        """Negate the vector channels of the pole-padding rows ``rows`` (B, C, ...): z -> -z - offset."""
+        if not self.pole_flip_channels:
+            return rows
+        sign = torch.ones(rows.shape[1], device=rows.device, dtype=rows.dtype)
+        off = torch.zeros(rows.shape[1], device=rows.device, dtype=rows.dtype)
+        idx = torch.as_tensor(self.pole_flip_channels, device=rows.device)
+        sign[idx] = -1.0
+        off[idx] = torch.as_tensor(self.pole_flip_offsets, device=rows.device, dtype=rows.dtype)
+        shape = [1, rows.shape[1]] + [1] * (rows.dim() - 2)
+        return rows * sign.view(shape) - off.view(shape)
 
     def pad(self, x):
         """
@@ -62,8 +100,8 @@ class TensorPadding:
             shift_size = int(x.shape[-1] // 2)
             xroll = torch.roll(x, shifts=shift_size, dims=-1)
             # pad poles
-            xroll_flip_top = torch.flip(xroll[..., : self.pad_NS[0], :], (-2,))
-            xroll_flip_bot = torch.flip(xroll[..., -self.pad_NS[1] :, :], (-2,))
+            xroll_flip_top = self._pole_flip(torch.flip(xroll[..., : self.pad_NS[0], :], (-2,)))
+            xroll_flip_bot = self._pole_flip(torch.flip(xroll[..., -self.pad_NS[1] :, :], (-2,)))
             x = torch.cat([xroll_flip_top, x, xroll_flip_bot], dim=-2)
 
         if any(p > 0 for p in self.pad_WE):
