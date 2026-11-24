@@ -140,6 +140,8 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
     ]
     select_ua_variables = np.intersect1d(all_ua_variables, variables)
     select_surface_variables = np.intersect1d(all_surface_variables, variables)
+    if len(select_ua_variables) == 0 and len(select_surface_variables) == 0:
+        raise ValueError("You did not request any valid GEFS variables.")
     for t in range(1, num_tiles + 1):
         tile_ua_file = join(out_member_path, f"gfs_data.tile{t:d}.nc")
         tile_sfc_file = join(out_member_path, f"sfc_data.tile{t:d}.nc")
@@ -161,8 +163,6 @@ def load_member_tiles(path: str, init_date_str: str, member: str, variables: str
         if "smc" in select_surface_variables:
             # Only grab the topmost soil moisture value (0-10 cm) and multiply by 100 to convert to CLM kg m^2.
             member_tiles[-1]["smc"] = member_tiles[-1]["smc"][0] * 100
-        else:
-            raise ValueError("You did not request any valid GEFS variables.")
     return member_tiles
 
 
