@@ -35,12 +35,12 @@ def test_tiny_w2_artifacts_exist():
 
 def test_training_log_looks_healthy():
     """Ensure that the training log csv file looks healthy and matches expectations:
-        - 3 epochs total (as per CONFIG_FILE)
-        - lr scheduler is working (lr always decreases across epochs)
-        - train_loss decreases across all epochs
-        - valid_loss decreases from epoch 0 to 1
-        - valid_loss at epoch 2 is less than or "not too much greater than" at epoch 1
-          (CONFIG_FILE tuned ema_decay for *fast* training, so some overfitting might occur.)
+    - 3 epochs total (as per CONFIG_FILE)
+    - lr scheduler is working (lr always decreases across epochs)
+    - train_loss decreases across all epochs
+    - valid_loss decreases from epoch 0 to 1
+    - valid_loss at epoch 2 is less than or "not too much greater than" at epoch 1
+      (CONFIG_FILE tuned ema_decay for *fast* training, so some overfitting might occur.)
     """
     TRAIN_TOL = 0.9
     VALID_TOL01 = 0.7
@@ -93,8 +93,7 @@ def init_pred_truth():
         lats = np.linspace(90, -90, H)  # still worth checking against ERA5_grid_schema.nc
         lons = np.linspace(0, 360, W, endpoint=False)
         data = {
-            name: (("level", "lat", "lon"), a[ch]) if len(ch) > 1
-            else (("lat", "lon"), a[ch[0]])
+            name: (("level", "lat", "lon"), a[ch]) if len(ch) > 1 else (("lat", "lon"), a[ch[0]])
             for name, ch in chmap.items()
         }
         return xr.Dataset(data, coords={"level": levels, "lat": lats, "lon": lons})
@@ -157,7 +156,7 @@ def test_pred_beats_gauss(init_pred_truth):
     rng = np.random.default_rng(0)
     noise = init.map(lambda da: da.copy(data=rng.standard_normal(da.shape)))
     gauss = 0 + 1 * noise
-    ratios_ds = (mae(pred, truth) / mae(gauss, truth))
+    ratios_ds = mae(pred, truth) / mae(gauss, truth)
     TOLS_DS = BASE_TOL + xr.zeros_like(ratios_ds)
     TOLS_DS["specific_humidity_500"] = Q500_TOL
     ratios = ratios_ds.to_array()
@@ -173,7 +172,7 @@ def test_pred_beats_zeros(init_pred_truth):
     TOL = 0.9
     init, pred, truth = init_pred_truth
     zeros = xr.zeros_like(init)
-    ratios_ds = (mae(pred, truth) / mae(zeros, truth))
+    ratios_ds = mae(pred, truth) / mae(zeros, truth)
     ratios_ds = ratios_ds.drop_vars("specific_humidity_500")
     ratios = ratios_ds.to_array()
     assert np.all(ratios < TOL)
