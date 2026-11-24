@@ -251,7 +251,10 @@ your CREDIT environment first.
 :::
 
 If you want to launch ensemble rollouts, you can use `credit_gefs_init` to convert raw GEFS cube sphere data
-to grids for CREDIT models. 
+to grids for CREDIT models. GEFS surface pressure sits on the GEFS terrain; pass `--target_phis` (a netCDF file
+with the destination model's surface geopotential, e.g. the CAM statics file with `PHIS`) to move it to the
+destination model's terrain with the hypsometric equation. This needs `zh` in `--variables` and matters most over
+mountains, where the two terrains can differ by hundreds of meters.
 
 Realtime rollouts are handled by `credit_rollout_realtime`. Update the paths in the 
 data section of the config file to point to the GFS initial conditions zarr file. `credit_rollout_realtime`

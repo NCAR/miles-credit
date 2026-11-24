@@ -6,7 +6,19 @@ import pytest
 import xarray as xr
 
 import credit.gefs as gefs
-from credit.gefs import download_gefs_run, load_member_tiles, regrid_member, unstagger_winds
+from credit.gefs import (
+    GRAVITY,
+    RD,
+    STD_LAPSE_RATE,
+    adjust_surface_pressure,
+    download_gefs_run,
+    extrapolate_temperature_below,
+    interpolate_vertical_levels,
+    load_member_tiles,
+    load_target_surface_geopotential,
+    regrid_member,
+    unstagger_winds,
+)
 
 INIT = "2026-11-19 0000"
 
@@ -170,3 +182,95 @@ def test_regrid_member_fills_every_interface_level(tmp_path):
     expected_zh = 10.0 * np.arange(n_lev + 1)[:, None] + np.arange(6)[None, :]  # (levp, destination point)
     np.testing.assert_allclose(out["zh"].values.reshape(n_lev + 1, -1), expected_zh)
     np.testing.assert_allclose(out["ps"].values, 1.0e5)
+
+
+def test_adjust_surface_pressure_follows_the_hypsometric_equation():
+    ps, t_low = np.array([95000.0]), np.array([288.0])
+    same = adjust_surface_pressure(ps, np.array([500.0]), np.array([500.0]), t_low)
+    np.testing.assert_allclose(same, ps)
+    lower = adjust_surface_pressure(ps, np.array([500.0]), np.array([0.0]), t_low)
+    t_layer = 288.0 + 0.5 * STD_LAPSE_RATE * 500.0
+    np.testing.assert_allclose(lower, ps * np.exp(GRAVITY * 500.0 / (RD * t_layer)))
+    higher = adjust_surface_pressure(ps, np.array([500.0]), np.array([1000.0]), t_low)
+    assert higher[0] < ps[0] < lower[0]
+
+
+def test_extrapolate_temperature_below_only_changes_levels_under_the_source():
+    temperature = np.full((2, 1, 1), 280.0)
+    pressure = np.array([90000.0, 101000.0]).reshape(2, 1, 1)
+    out = extrapolate_temperature_below(temperature, pressure, np.array([[95000.0]]), np.array([[280.0]]))
+    assert out[0, 0, 0] == 280.0
+    expected = 280.0 * (101000.0 / 95000.0) ** (RD * STD_LAPSE_RATE / GRAVITY)
+    np.testing.assert_allclose(out[1, 0, 0], expected)
+    assert out[1, 0, 0] > 280.0
+
+
+def _vertical_case(tmp_path, gefs_surface_height=500.0):
+    """A 4-level GEFS column on 500 m terrain plus a 3-level destination grid that reaches closer to the ground."""
+    member_dir = tmp_path / pd.Timestamp(INIT).strftime("gefs.%Y%m%d/%H") / "c00"
+    member_dir.mkdir(parents=True)
+    gefs_a = np.array([0.0, 5000.0, 10000.0, 5000.0, 0.0])
+    gefs_b = np.array([0.0, 0.0, 0.2, 0.6, 1.0])
+    xr.Dataset({"vcoord": (("nvcoord", "levsp"), np.stack([gefs_a, gefs_b]))}).to_netcdf(member_dir / "gfs_ctrl.nc")
+    dest_file = tmp_path / "dest_levels.nc"
+    xr.Dataset({"hyai": ("ilev", [0.0, 2000.0, 500.0, 0.0]), "hybi": ("ilev", [0.0, 0.1, 0.9, 1.0])}).to_netcdf(
+        dest_file
+    )
+    shape = (2, 3)
+    ps = np.full(shape, 95000.0)
+    p_mid = 0.5 * ((gefs_a[:-1] + gefs_b[:-1] * 95000.0) + (gefs_a[1:] + gefs_b[1:] * 95000.0))
+    t = 288.0 * (p_mid / 95000.0) ** (RD * STD_LAPSE_RATE / GRAVITY)
+    zh = np.array([20000.0, 12000.0, 6000.0, 2000.0, gefs_surface_height])
+    regrid_ds = xr.Dataset(
+        {
+            "ps": (("lat", "lon"), ps),
+            "t": (("lev", "lat", "lon"), np.broadcast_to(t[:, None, None], (4, *shape)).copy()),
+            "sphum": (("lev", "lat", "lon"), np.full((4, *shape), 0.005)),
+            "zh": (("levp", "lat", "lon"), np.broadcast_to(zh[:, None, None], (5, *shape)).copy()),
+        },
+        coords={"lev": np.arange(4), "levp": np.arange(5), "lat": [-45.0, 45.0], "lon": [0.0, 120.0, 240.0]},
+    )
+    return regrid_ds, str(tmp_path), str(dest_file), t
+
+
+def test_interpolate_vertical_levels_without_target_terrain_is_unchanged(tmp_path):
+    regrid_ds, member_path, dest_file, t = _vertical_case(tmp_path)
+    out = interpolate_vertical_levels(regrid_ds, member_path, INIT, "c00", dest_file)
+    np.testing.assert_allclose(out["ps"].values, 95000.0)
+    np.testing.assert_allclose(out["t"].values[-1], t[-1])  # held constant below the lowest GEFS level
+
+
+def test_interpolate_vertical_levels_moves_to_the_target_terrain(tmp_path):
+    regrid_ds, member_path, dest_file, t = _vertical_case(tmp_path)
+    phis = np.zeros((2, 3))  # destination terrain at sea level, 500 m below GEFS
+    out = interpolate_vertical_levels(regrid_ds, member_path, INIT, "c00", dest_file, target_surface_geopotential=phis)
+    expected_ps = adjust_surface_pressure(
+        np.full((2, 3), 95000.0), np.full((2, 3), 500.0), phis / GRAVITY, t[-1], 0.005
+    )
+    np.testing.assert_allclose(out["ps"].values, expected_ps)
+    assert (out["ps"].values > 95000.0).all()
+    np.testing.assert_allclose(out["P"].values[-1], 0.5 * ((500.0 + 0.9 * expected_ps) + expected_ps))
+    assert (out["t"].values[-1] > t[-1]).all()  # warmer than the lowest GEFS level, not clamped
+
+
+def test_interpolate_vertical_levels_needs_surface_height(tmp_path):
+    regrid_ds, member_path, dest_file, _ = _vertical_case(tmp_path)
+    with pytest.raises(ValueError, match="zh"):
+        interpolate_vertical_levels(
+            regrid_ds.drop_vars("zh"), member_path, INIT, "c00", dest_file, target_surface_geopotential=np.zeros((2, 3))
+        )
+
+
+def test_load_target_surface_geopotential_checks_the_grid(tmp_path):
+    lat, lon = np.array([-45.0, 45.0]), np.array([0.0, 120.0, 240.0])
+    good = tmp_path / "phis.nc"
+    xr.Dataset(
+        {"PHIS": (("latitude", "longitude"), np.ones((2, 3)))}, coords={"latitude": lat, "longitude": lon}
+    ).to_netcdf(good)
+    np.testing.assert_allclose(load_target_surface_geopotential(str(good), "PHIS", lat, lon), 1.0)
+    flipped = tmp_path / "phis_flipped.nc"
+    xr.Dataset(
+        {"PHIS": (("latitude", "longitude"), np.ones((2, 3)))}, coords={"latitude": lat[::-1], "longitude": lon}
+    ).to_netcdf(flipped)
+    with pytest.raises(ValueError, match="latitude"):
+        load_target_surface_geopotential(str(flipped), "PHIS", lat, lon)

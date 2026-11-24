@@ -69,6 +69,20 @@ def main():
         default="",
         help="netCDF file containing vertical.",
     )
+    parser.add_argument(
+        "-g",
+        "--target_phis",
+        type=str,
+        default="",
+        help="Optional netCDF file with the destination model's surface geopotential on the destination grid. "
+        "When given, surface pressure is adjusted from the GEFS terrain to that terrain (needs zh in --variables).",
+    )
+    parser.add_argument(
+        "--target_phis_var",
+        type=str,
+        default="PHIS",
+        help="Surface geopotential variable name in --target_phis.",
+    )
 
     args = parser.parse_args()
     init_date_str = args.date
@@ -99,6 +113,8 @@ def main():
                 rename_dict_file=rename_dict_file,
                 meta_file=meta_file,
                 vertical_level_file=vertical_file,
+                target_surface_geopotential_file=args.target_phis,
+                target_surface_geopotential_var=args.target_phis_var,
             ),
             member_names,
         )
