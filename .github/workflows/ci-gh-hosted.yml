@@ -66,3 +66,19 @@ jobs:
         run: |
           source py313-credit/bin/activate
           pytest tests/CI_GH_HOSTED
+
+      # Upload artifacts for debugging purposes. Always, not just on failure, so that
+      # the artifacts from a successful run can be used as a reference when debugging.
+      - name: Upload artifacts for debugging
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tiny_w2-${{ matrix.os }}
+          path:  # All files were saved to CREDIT_CI_DIR, so start there,
+            # but then exclude "large" (~20-70 MB) unused files to reduce upload times
+            # (the tests only use checkpoint.pt, but not any of the other checkpoints).
+            ${{ env.CREDIT_CI_DIR }}
+            !${{ env.CREDIT_CI_DIR }}/**/backup_checkpoint.pt
+            !${{ env.CREDIT_CI_DIR }}/**/best_checkpoint*.pt
+            !${{ env.CREDIT_CI_DIR }}/**/checkpoint_ema.pt
+          retention-days: 7
