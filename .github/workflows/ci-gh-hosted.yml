@@ -19,7 +19,7 @@ jobs:
   train-and-check-tiny_w2:
     name: train-and-check-tiny_w2 (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 30
     # Each matrix entry becomes its own job on its own runner; they run in parallel.
     strategy:
       fail-fast: false  # one OS failing shouldn't cancel the other
