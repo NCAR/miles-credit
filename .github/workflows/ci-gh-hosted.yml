@@ -1,0 +1,85 @@
+# Integration tests (e.g. end-to-end workflows) hosted on github runners
+name: CI GH Hosted
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  train-and-check-tiny_w2:
+    name: train-and-check-tiny_w2 (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Each matrix entry becomes its own job on its own runner; they run in parallel.
+    strategy:
+      fail-fast: false  # one OS failing shouldn't cancel the other
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Don't leave the GitHub token on disk; nothing here pushes back to the repo.
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+
+      # Mirrors the quickstart's "main development branch" install, minus conda.
+      # uv downloads Python 3.13 itself if the runner doesn't have it.
+      - name: Install credit
+        run: |
+          uv venv py313-credit --python 3.13
+          source py313-credit/bin/activate
+          uv pip install ".[develop]"
+
+      # Create CREDIT_CI_DIR directory and env variable (used in config file paths)
+      - name: Create output directory
+        run: |
+          CREDIT_CI_DIR="$RUNNER_TEMP/credit-ci"
+          echo "CREDIT_CI_DIR=$CREDIT_CI_DIR" >> "$GITHUB_ENV"
+          mkdir -p "$CREDIT_CI_DIR"
+
+      # Each step is a fresh shell, so the venv has to be activated again every time.
+      - name: Preprocess (fit scalers)
+        run: |
+          source py313-credit/bin/activate
+          credit preprocess -c tests/CI_GH_HOSTED/tiny_w2.yml
+
+      - name: Train
+        run: |
+          source py313-credit/bin/activate
+          credit train -c tests/CI_GH_HOSTED/tiny_w2.yml
+
+      - name: Reasonableness checks
+        run: |
+          source py313-credit/bin/activate
+          pytest tests/CI_GH_HOSTED
+
+      # Upload artifacts for debugging purposes. Always, not just on failure, so that
+      # the artifacts from a successful run can be used as a reference when debugging.
+      - name: Upload artifacts for debugging
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tiny_w2-${{ matrix.os }}
+          # All files were saved to CREDIT_CI_DIR, so start there,
+          # but then exclude "large" (~20-70 MB) unused files to reduce upload times
+          # (the tests only use checkpoint.pt, but not any of the other checkpoints).
+          path: |
+            ${{ env.CREDIT_CI_DIR }}
+            !${{ env.CREDIT_CI_DIR }}/**/backup_checkpoint.pt
+            !${{ env.CREDIT_CI_DIR }}/**/best_checkpoint*.pt
+            !${{ env.CREDIT_CI_DIR }}/**/checkpoint_ema.pt
+          retention-days: 7

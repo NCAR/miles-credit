@@ -139,3 +139,13 @@ def _to_cpu(obj):
     if torch.is_tensor(obj):
         return obj.detach().cpu()
     return obj
+
+
+def _to_cpu_if_any_mps(obj):
+    """Recursively move tensors in a (possibly nested) container to CPU if any are on MPS."""
+    # bridgescaler accumulates stats in float64, which MPS (e.g., on macOS system) doesn't support,
+    # so it becomes necessary to move to CPU, e.g., just before calling bridgescale.scale_var_dict.
+    # For more details see issue #548.
+    if _any_mps(obj):
+        return _to_cpu(obj)
+    return obj
