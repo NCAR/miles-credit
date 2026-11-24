@@ -1,0 +1,206 @@
+# ---- Experiment output and reproducibility ----
+save_loc: ${CREDIT_CI_DIR}/tiny_w2
+seed: 2883
+# ---- Training data ----
+data:
+  source: &data_sources
+    ERA5:
+      dataset_type: weatherbench2_era5
+      level_coord: level
+      levels: [500, 850]
+      resolution: 240x121
+      variables:
+        prognostic:
+          vars_3D: ["temperature", "specific_humidity"]
+          vars_2D: ["surface_pressure", "2m_temperature"]
+        static:
+          vars_2D: ["geopotential_at_surface", "land_sea_mask"]
+        diagnostic: null
+    SOLAR:
+      dataset_type: tisr
+      num_integration_steps: 2160
+      lat_spec: [-90, 90, 121]
+      lon_spec: [0, 358.5, 240]
+      variables:
+        prognostic: null
+        diagnostic: null
+        dynamic_forcing:
+          vars_2D: ["tisr"]
+        static: null
+  start_datetime: '1979-01-01'
+  end_datetime: '2017-12-31 18:00:00'
+  timestep: 6h
+  history_len: 1
+  forecast_len: 1
+# ---- Validation data ----
+validation_data:
+  source: *data_sources
+  start_datetime: '2018-01-01T18:00:00'
+  end_datetime: '2019-01-01T18:00:00'
+  timestep: 6h
+  history_len: 1
+  forecast_len: 1
+# ---- Preprocessing blocks ----
+preblocks:
+  per_step:
+    fill_vals:
+      type: fill_values
+      args:
+        rules:
+        - search: nan
+          fill: 0.0
+        variables: []
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+        data_types: [input, target]
+        variables: []
+        scaler_type: standard
+        scaler_params:
+          channels_last: false
+        method: transform
+    concat:
+      type: concat
+# ---- Postprocessing blocks ----
+postblocks:
+  per_step:
+    reconstruct:
+      type: reconstruct
+      args:
+        detach: false
+    scaler:
+      type: bridgescaler_transform
+      args:
+        scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+        variables: []
+        method: inverse_transform
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: y
+        out_key: y_target_processed
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+        variables: []
+        method: inverse_transform
+        key: y_target_processed
+# ---- Model architecture ----
+model:
+  type: wxformer
+  frames: 1
+  image_height: 121
+  image_width: 240
+  levels: 2
+  channels: 2
+  surface_channels: 2
+  input_only_channels: 3
+  output_only_channels: 0
+  patch_height: 1
+  patch_width: 1
+  dim: [32, 64, 128, 256]
+  depth: [1, 1, 2, 1]
+  global_window_size: [8, 4, 2, 1]
+  local_window_size: 4
+  cross_embed_kernel_sizes:
+  - [4, 8, 16, 32]
+  - [2, 4]
+  - [2, 4]
+  - [2, 4]
+  cross_embed_strides: [2, 2, 2, 2]
+  interp: true
+  use_spectral_norm: true
+  upsample_with_ps: true
+  padding_conf:
+    activate: true
+    mode: earth
+    pad_lat: [3, 4]
+    pad_lon: [8, 8]
+# ---- Training loss ----
+loss:
+  type: base
+  args:
+    training_loss: mse
+    var_weighting: inverse_variance
+    scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+    normalize_weights: true
+    include_computed_diagnostics: false
+    use_latitude_weights: false
+# ---- Evaluation metrics ----
+metrics:
+  type: combined
+  args:
+    metrics:
+      rmse: {}
+      r2score: {}
+      bias: {}
+    var_weighting: inverse_variance
+    scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+    normalize_weights: true
+# ---- Trainer and optimization ----
+trainer:
+  type: gen2
+  parallelism:
+    data: none
+    tensor: 1
+    domain: 1
+  activation_checkpoint: true
+  load_weights: false
+  load_optimizer: false
+  load_scaler: false
+  load_scheduler: false
+  learning_rate: 0.001
+  weight_decay: 0
+  train_batch_size: 2
+  valid_batch_size: 2
+  batches_per_epoch: 4
+  valid_batches_per_epoch: 1
+  start_epoch: 0
+  num_epoch: 3
+  epochs: 3
+  use_tensorboard: true
+  use_ema: true
+  ema_decay: 0.7   # smaller for speed; 0.9999 for accuracy.
+  use_scheduler: true
+  scheduler:
+    scheduler_type: linear-warmup-cosine
+    warmup_steps: 2
+    total_steps: 12
+    min_lr: 1.0e-05
+  thread_workers: 4
+  amp: false
+# ---- Inference and rollout ----
+inference:
+  run_mode: single
+  mode: none
+  save_forecast: ${CREDIT_CI_DIR}/tiny_w2/rollout
+  postblocks:
+    per_step:
+      reconstruct:
+        type: reconstruct
+      scaler:
+        type: bridgescaler_transform
+        args:
+          scaler_path: ${CREDIT_CI_DIR}/tiny_w2/standard_scaler.json
+          variables: []
+          method: inverse_transform
+  batch_forecast:
+    forecast_length: 10d
+    first_init_date: '2018-01-01T18:00:00'
+    last_init_date: '2019-01-01T18:00:00'
+    init_interval: 6h
+  single_forecast:
+    forecast_length: 10d
+    start_datetime: '2018-01-01T18:00:00'
+  output:
+    format: netcdf
+    output_interval: null
+    group_by: day
+    variables: null
+    metadata: null
+    encoding:
+      dtype: float32
+      zlib: true
+      complevel: 4

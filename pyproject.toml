@@ -128,6 +128,8 @@ convention = "google"
 
 [tool.pytest.ini_options]
 addopts = "--continue-on-collection-errors"
-# tests/manual holds HPC/multi-GPU/MPI tests that CI runners can't run; never collect them.
-norecursedirs = ["tests/manual"]
-
+# pytest tests which should not be collected by default:
+norecursedirs = [
+    "tests/manual",  # HPC/multi-GPU/MPI tests that CI runners can't run
+    "tests/CI_GH_HOSTED",  # Uses artifacts made during ci-gh-hosted.yml
+]
