@@ -364,7 +364,7 @@ def test_synthetic_step_leaves_a_fresh_optimizer_without_state():
 
 
 def test_synthetic_step_restores_weights_after_non_finite_gradients():
-    """lr 0 alone does not protect the weights: Adam's update is then 0 * NaN = NaN."""
+    """Non-finite gradients turn the step's update into NaN weights; restoring the parameters undoes it."""
     import torch
 
     from credit.trainers.preflight import synthetic_step
@@ -411,3 +411,50 @@ def test_synthetic_step_restores_grads_of_parameters_outside_the_optimizer():
     assert all(p.grad is None for p in model[0].parameters())
     assert model[3].weight.grad is None
     assert torch.equal(model[3].bias.grad, existing)
+
+
+def test_synthetic_step_reports_a_failed_restore(monkeypatch):
+    import torch
+
+    from credit.trainers.preflight import PreflightRestoreError, synthetic_step
+
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+    def broken_load_state_dict(state_dict):
+        raise RuntimeError("restore failed")
+
+    monkeypatch.setattr(optimizer, "load_state_dict", broken_load_state_dict)
+    with pytest.raises(PreflightRestoreError, match="restore failed"):
+        synthetic_step(model, optimizer, torch.zeros(16, 4))
+
+
+@pytest.mark.parametrize(
+    "error, propagates",
+    [(RuntimeError("CUDA out of memory"), False), (None, True)],  # None: a PreflightRestoreError
+    ids=["measurement-fails", "restore-fails"],
+)
+def test_check_model_gpu_memory_skips_a_failed_measurement_but_not_a_failed_restore(monkeypatch, error, propagates):
+    """A failed measurement only skips the check; a failed restore would leave training on a corrupted state."""
+    import torch
+
+    from credit.trainers import preflight
+
+    if error is None:
+        error = preflight.PreflightRestoreError("restore failed")
+
+    def failing_step(model, optimizer, x):
+        raise error
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device=None: None)
+    monkeypatch.setattr(preflight, "synthetic_step", failing_step)
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    conf = {"model": {"surface_channels": 4, "image_height": 2, "image_width": 2}}
+
+    if propagates:
+        with pytest.raises(preflight.PreflightRestoreError):
+            preflight.check_model_gpu_memory(conf, model, optimizer, rank=0)
+    else:
+        preflight.check_model_gpu_memory(conf, model, optimizer, rank=0)  # logs a warning and returns

@@ -247,6 +247,14 @@ def check_dataloader_startup(
 # ---------------------------------------------------------------------------
 
 
+class PreflightRestoreError(RuntimeError):
+    """:func:`synthetic_step` could not put the model or optimizer back as it found them.
+
+    Unlike a failed measurement, this is not safe to skip: training would go on from
+    a partly restored state.
+    """
+
+
 def _cpu_copy(obj: Any) -> Any:
     """A deep copy of a (nested) state dict with every tensor cloned to the CPU."""
     import torch
@@ -280,6 +288,10 @@ def synthetic_step(model: torch.nn.Module, optimizer: torch.optim.Optimizer, x: 
     gradient of ``mean(model(zeros))``; with the scheduler past its warmup, the
     next real steps followed that bogus direction at full learning rate and
     training diverged right after every resume.
+
+    Raises:
+        PreflightRestoreError: if putting the state back fails. Any error from
+            the step itself (out of memory, say) propagates as it is.
     """
     import torch
 
@@ -294,15 +306,20 @@ def synthetic_step(model: torch.nn.Module, optimizer: torch.optim.Optimizer, x: 
         model(x).mean().backward()
         optimizer.step()
     finally:
-        optimizer.load_state_dict(saved_optimizer)  # drops state the step created, restores the rest
-        with torch.no_grad():
-            for p, saved in zip(params, saved_params):
-                p.copy_(saved)
-            for name, buf in model.named_buffers():
-                if name in saved_buffers:
-                    buf.copy_(saved_buffers[name])
-        for p, grad in zip(params, saved_grads):
-            p.grad = grad
+        try:
+            optimizer.load_state_dict(saved_optimizer)  # drops state the step created, restores the rest
+            with torch.no_grad():
+                for p, saved in zip(params, saved_params):
+                    p.copy_(saved)
+                for name, buf in model.named_buffers():
+                    if name in saved_buffers:
+                        buf.copy_(saved_buffers[name])
+            for p, grad in zip(params, saved_grads):
+                p.grad = grad
+        except Exception as e:
+            raise PreflightRestoreError(
+                f"synthetic_step could not restore the model and optimizer after the synthetic step: {e}"
+            ) from e
 
 
 def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
@@ -320,11 +337,17 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
       - rank != 0 (only report from rank 0)
       - CUDA is not available
       - input channels cannot be inferred (returns 0)
-      - any exception occurs during the synthetic pass
+      - the synthetic pass fails (out of memory, say); the model and optimizer
+        have been restored by then
+
+    A failure to restore the model or optimizer is not skipped: the
+    :class:`PreflightRestoreError` propagates, so training does not go on from
+    a partly restored state.
 
     Args:
         conf:      Full training config dict.
-        model:     The model (possibly DDP/FSDP wrapped).
+        model:     The unwrapped model. The trainer skips this check for
+                   DDP/FSDP-wrapped and sharded models (see ``base_trainer.py``).
         optimizer: The optimizer (used to test a full optimizer step).
         rank:      Global rank. Check only runs on rank 0.
     """
@@ -355,9 +378,7 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
         device = next(model.parameters()).device
         torch.cuda.reset_peak_memory_stats(device)
 
-        # Unwrap DDP/FSDP so the synthetic pass runs on the inner module directly.
-        # This avoids triggering NCCL collectives that non-zero ranks never join.
-        synthetic_step(getattr(model, "module", model), optimizer, torch.zeros(B, C_in, H, W, device=device))
+        synthetic_step(model, optimizer, torch.zeros(B, C_in, H, W, device=device))
 
         peak_mib = torch.cuda.max_memory_allocated(device) / 2**20
         total_mib = torch.cuda.get_device_properties(device).total_memory / 2**20
@@ -374,5 +395,7 @@ def check_model_gpu_memory(conf: dict, model, optimizer, rank: int = 0) -> None:
 
         torch.cuda.empty_cache()
 
+    except PreflightRestoreError:
+        raise
     except Exception as e:
         logger.warning("check_model_gpu_memory: synthetic GPU pass failed (%s); skipping.", e)
