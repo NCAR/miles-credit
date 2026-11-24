@@ -287,3 +287,174 @@ class TestCheckDataloaderStartup:
             check_dataloader_startup(_conf(), _SlowLoader(), rank=0, timeout_s=0.5)
         elapsed = time.monotonic() - t0
         assert elapsed < 5.0, f"Timeout took too long: {elapsed:.1f}s"
+
+
+# ---------------------------------------------------------------------------
+# synthetic_step: the GPU memory preflight's pass must leave no trace
+# ---------------------------------------------------------------------------
+
+
+def _tiny_model():
+    import torch
+
+    torch.manual_seed(0)
+    return torch.nn.Sequential(
+        torch.nn.utils.spectral_norm(torch.nn.Linear(4, 8)),  # weight_u / weight_v buffers
+        torch.nn.BatchNorm1d(8),  # running statistics
+        torch.nn.ReLU(),
+        torch.nn.Linear(8, 4),
+    )
+
+
+def _snapshot(model, optimizer):
+    from credit.trainers.preflight import _cpu_copy
+
+    return (
+        {k: v.detach().clone() for k, v in model.state_dict().items()},
+        _cpu_copy(optimizer.state_dict()),
+        [g["lr"] for g in optimizer.param_groups],
+        model.training,
+    )
+
+
+def _assert_same(a, b):
+    import torch
+
+    def same(x, y):
+        if isinstance(x, torch.Tensor):
+            return torch.equal(x, y)
+        if isinstance(x, dict):
+            return x.keys() == y.keys() and all(same(x[k], y[k]) for k in x)
+        if isinstance(x, (list, tuple)):
+            return len(x) == len(y) and all(same(i, j) for i, j in zip(x, y))
+        return x == y
+
+    assert same(a, b)
+
+
+@pytest.mark.parametrize("training", [True, False])
+def test_synthetic_step_restores_weights_buffers_optimizer_and_mode(training):
+    """A resumed job's Adam moments, step count and spectral-norm vectors must survive the preflight."""
+    import torch
+
+    from credit.trainers.preflight import synthetic_step
+
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2, weight_decay=0.1)
+    for _ in range(3):  # real steps: Adam state exists, as after a resume
+        model(torch.randn(16, 4)).pow(2).mean().backward()
+        optimizer.step()
+        optimizer.zero_grad()
+    model.train(training)
+    before = _snapshot(model, optimizer)
+    synthetic_step(model, optimizer, torch.zeros(16, 4))
+    _assert_same(_snapshot(model, optimizer), before)
+    assert all(p.grad is None for p in model.parameters())
+
+
+def test_synthetic_step_leaves_a_fresh_optimizer_without_state():
+    import torch
+
+    from credit.trainers.preflight import synthetic_step
+
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    synthetic_step(model, optimizer, torch.zeros(16, 4))
+    assert optimizer.state_dict()["state"] == {}
+
+
+def test_synthetic_step_restores_weights_after_non_finite_gradients():
+    """Non-finite gradients turn the step's update into NaN weights; restoring the parameters undoes it."""
+    import torch
+
+    from credit.trainers.preflight import synthetic_step
+
+    class UnitNorm(torch.nn.Module):
+        """x / |x|: on the all-zero preflight batch this divides by zero, so the gradients are NaN."""
+
+        def forward(self, x):
+            return x / x.norm(dim=-1, keepdim=True)
+
+    model = torch.nn.Sequential(UnitNorm(), torch.nn.Linear(4, 4))  # sees the all-zero batch directly
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    before = _snapshot(model, optimizer)
+    synthetic_step(model, optimizer, torch.zeros(8, 4))
+    assert all(torch.isfinite(p).all() for p in model.parameters())
+    _assert_same(_snapshot(model, optimizer), before)
+
+
+def test_synthetic_step_leaves_each_submodule_in_its_own_mode():
+    """A deliberately frozen submodule (an eval-mode BatchNorm while fine-tuning) stays in eval mode."""
+    import torch
+
+    from credit.trainers.preflight import synthetic_step
+
+    model = _tiny_model().train()
+    model[1].eval()  # the BatchNorm1d, frozen
+    modes = {name: m.training for name, m in model.named_modules()}
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    synthetic_step(model, optimizer, torch.zeros(16, 4))
+    assert {name: m.training for name, m in model.named_modules()} == modes
+
+
+def test_synthetic_step_restores_grads_of_parameters_outside_the_optimizer():
+    """Parameters the optimizer does not hold get no synthetic .grad, and existing grads are kept as they were."""
+    import torch
+
+    from credit.trainers.preflight import synthetic_step
+
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model[3].parameters(), lr=1e-2)  # only the last layer is optimized
+    existing = torch.full_like(model[3].bias, 0.5)
+    model[3].bias.grad = existing.clone()
+    synthetic_step(model, optimizer, torch.zeros(16, 4))
+    assert all(p.grad is None for p in model[0].parameters())
+    assert model[3].weight.grad is None
+    assert torch.equal(model[3].bias.grad, existing)
+
+
+def test_synthetic_step_reports_a_failed_restore(monkeypatch):
+    import torch
+
+    from credit.trainers.preflight import PreflightRestoreError, synthetic_step
+
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+    def broken_load_state_dict(state_dict):
+        raise RuntimeError("restore failed")
+
+    monkeypatch.setattr(optimizer, "load_state_dict", broken_load_state_dict)
+    with pytest.raises(PreflightRestoreError, match="restore failed"):
+        synthetic_step(model, optimizer, torch.zeros(16, 4))
+
+
+@pytest.mark.parametrize(
+    "error, propagates",
+    [(RuntimeError("CUDA out of memory"), False), (None, True)],  # None: a PreflightRestoreError
+    ids=["measurement-fails", "restore-fails"],
+)
+def test_check_model_gpu_memory_skips_a_failed_measurement_but_not_a_failed_restore(monkeypatch, error, propagates):
+    """A failed measurement only skips the check; a failed restore would leave training on a corrupted state."""
+    import torch
+
+    from credit.trainers import preflight
+
+    if error is None:
+        error = preflight.PreflightRestoreError("restore failed")
+
+    def failing_step(model, optimizer, x):
+        raise error
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "reset_peak_memory_stats", lambda device=None: None)
+    monkeypatch.setattr(preflight, "synthetic_step", failing_step)
+    model = _tiny_model()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-2)
+    conf = {"model": {"surface_channels": 4, "image_height": 2, "image_width": 2}}
+
+    if propagates:
+        with pytest.raises(preflight.PreflightRestoreError):
+            preflight.check_model_gpu_memory(conf, model, optimizer, rank=0)
+    else:
+        preflight.check_model_gpu_memory(conf, model, optimizer, rank=0)  # logs a warning and returns
