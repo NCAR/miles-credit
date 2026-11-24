@@ -8,8 +8,7 @@ from ._utils import (
     _parse_variable_selection,
     _flatten_spatial_tensors,
     _unflatten_spatial_tensors,
-    _any_mps,
-    _to_cpu,
+    _to_cpu_if_any_mps,
 )
 
 _SCALER_REGISTRY = {
@@ -51,10 +50,7 @@ def fit_physical_target_stats(
         return accumulated
     variables = _parse_variable_selection(unit_block.variables, batch, ["target"])
     fit_batch, _ = _flatten_spatial_tensors({"target": batch["target"]}, spatial_variables or [])
-    if _any_mps(fit_batch):
-        # bridgescaler accumulates stats in float64, which MPS (e.g., on macOS system)
-        # doesn't support, so move to CPU. For more details see issue #548.
-        fit_batch = _to_cpu(fit_batch)
+    fit_batch = _to_cpu_if_any_mps(fit_batch)
     fitted = scale_var_dict(fit_batch, DStandardScalerTensor(channels_last=False), "fit", variables)
     fitted = {"target": {src: v for src, v in fitted.get("target", {}).items() if v}}
     if not fitted["target"]:
@@ -242,11 +238,13 @@ class BridgeScalerTransform(BasePreblock):
             # the input is already scaled but the target still needs to be scaled.
             sub_batch = {dt: batch[dt] for dt in self.data_types if dt in batch}
             sub_batch, spatial_shapes = _flatten_spatial_tensors(sub_batch, self.spatial_variables)
+            sub_batch = _to_cpu_if_any_mps(sub_batch)
             scaled = scale_var_dict(sub_batch, self.scaler, self.method, self.variables)
             scaled = _unflatten_spatial_tensors(scaled, spatial_shapes)
             batch.update(scaled)  # write the scaled data types back into the full batch
             return batch
         batch, spatial_shapes = _flatten_spatial_tensors(batch, self.spatial_variables)
+        batch = _to_cpu_if_any_mps(batch)
         scaled = scale_var_dict(batch, self.scaler, self.method, self.variables)
         return _unflatten_spatial_tensors(scaled, spatial_shapes)
 
@@ -272,6 +270,7 @@ class BridgeScalerTransform(BasePreblock):
         # Fit only the requested data types; if data_types is None, fit the full batch.
         fit_batch = {dt: batch[dt] for dt in self.data_types if dt in batch} if self.data_types is not None else batch
         fit_batch, _ = _flatten_spatial_tensors(fit_batch, self.spatial_variables)
+        fit_batch = _to_cpu_if_any_mps(fit_batch)
         fitted = scale_var_dict(fit_batch, self.scaler_template, "fit", self.variables)
         # Merge this batch's fit into the running accumulation (running average of
         # the scaler statistics across batches).
