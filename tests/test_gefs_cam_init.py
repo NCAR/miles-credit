@@ -6,7 +6,7 @@ import pytest
 import xarray as xr
 
 import credit.gefs as gefs
-from credit.gefs import download_gefs_run, load_member_tiles, unstagger_winds
+from credit.gefs import download_gefs_run, load_member_tiles, regrid_member, unstagger_winds
 
 INIT = "2026-11-19 0000"
 
@@ -122,3 +122,51 @@ def test_download_gefs_run_fetches_full_remote_paths_and_resumes(tmp_path, monke
     download_gefs_run(INIT, str(tmp_path), n_pert_members=0)
     assert fake.got == [f"{remote}/gfs_data.tile1.nc"]
     assert (local / "gfs_data.tile1.nc").read_bytes() == b"0123456789"
+
+
+def _tile_average_weights(path, n_lat=2, n_lon=2):
+    """ESMF-style weights mapping each of the 6 tiles to one destination point (the tile mean), on a 2 x 3 grid."""
+    per_tile = n_lat * n_lon
+    rows, cols = np.repeat(np.arange(6), per_tile) + 1, np.arange(6 * per_tile) + 1
+    lat, lon = np.array([-45.0, 45.0]), np.array([0.0, 120.0, 240.0])
+    xr.Dataset(
+        {
+            "S": ("n_s", np.full(rows.size, 1.0 / per_tile)),
+            "row": ("n_s", rows),
+            "col": ("n_s", cols),
+            "dst_grid_dims": ("dst_grid_rank", np.array([lon.size, lat.size])),
+            "xc_b": ("n_b", np.tile(lon, lat.size)),
+            "yc_b": ("n_b", np.repeat(lat, lon.size)),
+            "xc_a": ("n_a", np.zeros(6 * per_tile)),
+        }
+    ).to_netcdf(path)
+    return path
+
+
+def test_regrid_member_fills_every_interface_level(tmp_path):
+    n_lev, n_lat, n_lon = 3, 2, 2
+    tiles = [
+        xr.Dataset(
+            {
+                "t": (("lev", "lat", "lon"), np.full((n_lev, n_lat, n_lon), 250.0 + tile)),
+                "zh": (
+                    ("levp", "lat", "lon"),
+                    np.broadcast_to(
+                        (10.0 * np.arange(n_lev + 1))[:, None, None] + tile, (n_lev + 1, n_lat, n_lon)
+                    ).copy(),
+                ),
+                "ps": (("lat", "lon"), np.full((n_lat, n_lon), 1.0e5)),
+            },
+            coords={
+                "lev": np.arange(n_lev),
+                "levp": np.arange(n_lev + 1),
+                "lat": np.arange(n_lat),
+                "lon": np.arange(n_lon),
+            },
+        )
+        for tile in range(6)
+    ]
+    out = regrid_member(tiles, str(_tile_average_weights(tmp_path / "weights.nc")))
+    expected_zh = 10.0 * np.arange(n_lev + 1)[:, None] + np.arange(6)[None, :]  # (levp, destination point)
+    np.testing.assert_allclose(out["zh"].values.reshape(n_lev + 1, -1), expected_zh)
+    np.testing.assert_allclose(out["ps"].values, 1.0e5)

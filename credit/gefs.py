@@ -246,7 +246,7 @@ def regrid_member(member_tiles, regrid_weights_file):
                     coords=dict(levp=levp, lat=lat, lon=lon),
                     name=variable,
                 )
-                for lev_index in np.arange(tiles_combined["lev"].size):
+                for lev_index in np.arange(tiles_combined["levp"].size):
                     regrid_ds[variable][lev_index] = (
                         regrid_weights @ tiles_combined[variable][lev_index].values
                     ).reshape(sfc_var_dim)
