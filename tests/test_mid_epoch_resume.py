@@ -429,3 +429,22 @@ def test_fit_killed_mid_epoch_resumes_to_same_result(tmp_path):
     torch.testing.assert_close(model.w, ref_model.w)
     assert list(log["epoch"]) == [0, 1]
     np.testing.assert_allclose(log["train_loss"], ref_log["train_loss"], rtol=1e-6)
+
+
+@pytest.mark.parametrize(
+    "scheduler",
+    [
+        {
+            "scheduler_type": "cosine-annealing-restarts",
+            "first_cycle_steps": 20,
+            "max_lr": 1e-3,
+            "min_lr": 1e-6,
+            "warmup_steps": 4,
+        },
+        {"scheduler_type": "cosine-annealing", "T_max": 20},
+    ],
+    ids=lambda s: s["scheduler_type"],
+)
+def test_resume_with_cosine_schedulers_matches_uninterrupted(tmp_path, scheduler):
+    """Resume restores the LR in effect at the save (needs get_last_lr() to work on each scheduler)."""
+    _assert_resume_matches(tmp_path, scheduler=scheduler)

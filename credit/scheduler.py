@@ -158,6 +158,7 @@ class CosineAnnealingWarmupRestarts(LRScheduler):
         for param_group in self.optimizer.param_groups:
             param_group["lr"] = self.min_lr
             self.base_lrs.append(self.min_lr)
+        self._last_lr = list(self.base_lrs)
 
     def get_lr(self):
         if self.step_in_cycle == -1:
@@ -215,6 +216,8 @@ class CosineAnnealingWarmupRestarts(LRScheduler):
         self.last_epoch = math.floor(epoch)
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group["lr"] = lr
+        # This step() replaces LRScheduler.step(), so record _last_lr for get_last_lr() as torch's does.
+        self._last_lr = [group["lr"] for group in self.optimizer.param_groups]
 
 
 def annealed_probability(epoch, max_epochs=100, min_probability=0.01, max_probability=1.0):
