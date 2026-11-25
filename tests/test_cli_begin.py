@@ -280,6 +280,8 @@ def test_perlmutter_typed_account_is_written(monkeypatch):
         ("derecho7", "derecho"),
         ("dec0123.hsn.de.hpc.ucar.edu", "ncar"),
         ("casper-login1", "casper"),
+        ("crlogin3", "casper"),
+        ("crhtc07", "casper"),
         ("nid001234", "perlmutter"),
         ("decode-box.local", "local"),
         ("unidata.ucar.edu", "local"),
