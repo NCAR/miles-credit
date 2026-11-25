@@ -555,3 +555,47 @@ reload_epoch: True   # auto-detects next epoch from checkpoint
 
 `reload_epoch: True` causes the trainer to read the epoch from the checkpoint and set
 `start_epoch = checkpoint_epoch + 1`, so the epoch counter is always continuous.
+
+### Mid-epoch checkpoints (gen2 only)
+
+If one epoch takes hours, a job killed by walltime or preemption can lose most of an
+epoch's work. Set `checkpoints_per_epoch` to also save during the epoch:
+
+```yaml
+trainer:
+  checkpoints_per_epoch: 4   # save at 1/4, 1/2, 3/4 and the end of each epoch
+```
+
+The default, `0`, saves only at the end of each epoch. This option works with the gen2
+trainer (`trainer.type: gen2`); other trainers ignore it, and it can't be used with
+legacy FSDP (`trainer.mode: fsdp`) — use `parallelism.data: fsdp2` instead.
+`credit check` flags both cases.
+
+To pick up where a killed job left off, resubmit with `--reload` (see "Restarting a
+failed chain" above):
+
+```bash
+credit submit --cluster derecho -c config.yml --reload --chain 5
+```
+
+Training continues from the last saved point in the epoch and produces the same result
+as a run that was never interrupted: the same samples in the same order, the same
+learning rate, and an epoch row in `training_log.csv` that covers the whole epoch.
+
+Things to know:
+
+- **Disk space.** While a checkpoint is being written, the previous one is kept until
+  the new one is complete, so you briefly need room for two copies.
+- **Save cost.** Each save pauses training. With `data: fsdp2` it also gathers the full
+  model onto one GPU, so keep `checkpoints_per_epoch` low for large models.
+- **Gradient accumulation.** With `grad_accum_every > 1`, saves happen only after an
+  optimizer step, so the spacing may be slightly wider than `1/checkpoints_per_epoch`.
+- **Changing GPUs or batch size.** If you resume with a different GPU count or
+  `train_batch_size`, training skips the samples already seen, but the rest of that
+  epoch's order won't match an uninterrupted run. A warning is logged.
+- **Weights-only reload.** With `load_weights: True` but not `load_optimizer` and
+  `load_scheduler`, a mid-epoch checkpoint restarts its epoch from the beginning, using
+  the saved weights.
+- **Custom datasets with randomness.** If your own dataset draws random numbers inside
+  DataLoader workers (`num_workers > 0`), those draws differ after a resume. The
+  built-in gen2 datasets are not affected.

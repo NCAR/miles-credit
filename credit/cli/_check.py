@@ -1081,6 +1081,29 @@ def _check_trainer(conf: dict, rep: _Report) -> None:
             "their ratio and would submit a single job.",
         )
 
+    num_checkpts = _get(conf, "trainer", "checkpoints_per_epoch", default=0) or 0
+    if not isinstance(num_checkpts, int) or isinstance(num_checkpts, bool) or num_checkpts < 0:
+        rep.error("trainer.checkpoints_per_epoch", f"Expected a non-negative integer, got {num_checkpts!r}.")
+    elif num_checkpts > 0:
+        from credit.trainers import _TRAINER_REGISTRY
+
+        trainer_type = _get(conf, "trainer", "type")
+        trainer_conf = conf.get("trainer") or {}
+        # Unknown/custom types are left alone: a custom subclass of the gen2 trainer supports it.
+        trainer_cls = (_TRAINER_REGISTRY.get(trainer_type) or (None, None))[1]
+        if trainer_cls not in (None, "TrainerERA5Gen2"):
+            rep.warn(
+                "trainer.checkpoints_per_epoch",
+                f"Mid-epoch checkpoints are gen2-only; trainer.type '{trainer_type}' ignores this setting and "
+                "saves at the end of each epoch.",
+            )
+        elif "parallelism" not in trainer_conf and trainer_conf.get("mode") == "fsdp":
+            rep.error(
+                "trainer.checkpoints_per_epoch",
+                "Not supported with legacy FSDP (trainer.mode: fsdp); training would refuse to start.",
+                fix="trainer:\n  parallelism:\n    data: fsdp2\n# or: checkpoints_per_epoch: 0",
+            )
+
 
 def _check_paths(conf: dict, rep: _Report) -> None:
     """Existence checks for every file the config names."""

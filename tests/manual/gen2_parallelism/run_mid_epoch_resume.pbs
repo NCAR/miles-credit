@@ -1,0 +1,123 @@
+#!/bin/bash -l
+#PBS -A NAML0001
+#PBS -N mid_epoch_resume
+#PBS -l walltime=01:00:00
+#PBS -l select=1:ncpus=64:ngpus=4:mem=440GB
+#PBS -q develop@desched1
+#PBS -j oe
+#PBS -k eod
+#
+# Manual multi-rank check for trainer.checkpoints_per_epoch (mid-epoch
+# checkpoint + exact resume). NOT run by GitHub CI. Needs a multi-GPU Derecho
+# node and the credit-main-derecho conda env.
+#
+#   qsub -A <account> tests/manual/gen2_parallelism/run_mid_epoch_resume.pbs   (from the repo root)
+#
+# Per mode (ddp, fsdp2; 2 ranks each), three torchrun launches of the smoke
+# config (1 epoch / 5 batches):
+#   1. ref:     uninterrupted epoch, no mid-epoch checkpoints
+#   2. killed:  checkpoints_per_epoch: 5 (a save after every batch), every rank
+#               hard-exits right after the batch-3 checkpoint
+#               (kill_after_mid_epoch_save.py)
+#   3. resumed: reload_epoch + load_* on the killed run's save_loc; must resume
+#               at batch 3 and finish the epoch
+# check_mid_epoch_resume.py then compares train_loss, lr and final weights of
+# ref vs resumed (relative tolerance; GPU kernels aren't bit-reproducible).
+
+set -u -o pipefail
+module --force purge
+module load ncarenv/24.12 nvhpc cuda/12.3.2 cray-mpich conda
+
+# The checkout under test: the directory qsub was run from (submit from the repo root).
+REPO=${REPO:-$PBS_O_WORKDIR}
+ENV_BIN=${ENV_BIN:-/glade/work/schreck/conda-envs/credit-main-derecho/bin}
+TORCHRUN=$ENV_BIN/torchrun
+PYCHK=$ENV_BIN/python
+WORKDIR=${WORKDIR:-/glade/derecho/scratch/$USER/tmp/mid_epoch_resume}
+KILL_AFTER=3
+RTOL=${RTOL:-1e-3}
+mkdir -p "$WORKDIR"
+
+cd "$REPO"
+# $REPO first, so `credit` imports from this checkout rather than the conda env's install.
+export PYTHONPATH="$REPO:$REPO/applications:${PYTHONPATH:-}"
+export LOGLEVEL=INFO
+export NCCL_DEBUG=WARN
+export NCCL_SOCKET_IFNAME=lo
+export CUDA_VISIBLE_DEVICES=0,1
+export MPICH_GPU_MANAGED_MEMORY_SUPPORT_ENABLED=1
+
+CFGDIR=tests/manual/gen2_parallelism/configs
+HERE=tests/manual/gen2_parallelism
+SUMMARY="$WORKDIR/SUMMARY.txt"
+: > "$SUMMARY"
+
+# Write a copy of $1 to $2 with save_loc=$3 and the given trainer overrides (JSON).
+make_cfg() {
+  $PYCHK - "$1" "$2" "$3" "$4" <<'PYEOF'
+import json
+import sys
+
+import yaml
+
+src, dst, save_loc, overrides = sys.argv[1:]
+conf = yaml.safe_load(open(src))
+conf["save_loc"] = save_loc
+conf["trainer"].update(json.loads(overrides))
+yaml.safe_dump(conf, open(dst, "w"), sort_keys=False)
+PYEOF
+}
+
+run() {  # run <log> <script> [args...]
+  local log=$1; shift
+  timeout 720 ${TORCHRUN} --nnodes=1 --nproc-per-node=2 \
+    --rdzv-backend=c10d --rdzv-endpoint="localhost:${PORT}" "$@" > "$log" 2>&1
+  local rc=$?
+  PORT=$((PORT+1))
+  return $rc
+}
+
+FRESH='{"epochs": 1, "num_epoch": 1, "load_weights": false, "reload_epoch": false}'
+KILLED='{"epochs": 1, "num_epoch": 1, "checkpoints_per_epoch": 5, "load_weights": false, "reload_epoch": false}'
+RESUME='{"epochs": 1, "num_epoch": 1, "checkpoints_per_epoch": 5, "load_weights": true, "load_optimizer": true,
+         "load_scaler": true, "load_scheduler": true, "reload_epoch": true}'
+
+PORT=29600
+for entry in "ddp:smoke_v2parallel_ddp_derecho.yml" "fsdp2:smoke_v2parallel_fsdp2_derecho.yml"; do
+  name="${entry%%:*}"; cfg="$CFGDIR/${entry#*:}"
+  ref="$WORKDIR/${name}_ref"; resumed="$WORKDIR/${name}_resumed"
+  rm -rf "$ref" "$resumed"
+  echo "===================================================================="
+  echo ">>> [$name]"
+
+  make_cfg "$cfg" "$WORKDIR/${name}_ref.yml" "$ref" "$FRESH"
+  make_cfg "$cfg" "$WORKDIR/${name}_killed.yml" "$resumed" "$KILLED"
+  make_cfg "$cfg" "$WORKDIR/${name}_resumed.yml" "$resumed" "$RESUME"
+
+  if ! run "$WORKDIR/${name}_ref.log" applications/train_gen2.py -c "$WORKDIR/${name}_ref.yml"; then
+    echo "FAIL  $name ref run — see $WORKDIR/${name}_ref.log" | tee -a "$SUMMARY"; continue
+  fi
+  run "$WORKDIR/${name}_killed.log" "$HERE/kill_after_mid_epoch_save.py" \
+    --kill-after-batch "$KILL_AFTER" -c "$WORKDIR/${name}_killed.yml"
+  batch=$($PYCHK -c "import torch,sys; print(torch.load(sys.argv[1], map_location='cpu', weights_only=False).get('batch_in_epoch'))" \
+    "$resumed/checkpoint.pt" 2>/dev/null)
+  if [ "$batch" != "$KILL_AFTER" ]; then
+    echo "FAIL  $name killed run left batch_in_epoch=$batch (want $KILL_AFTER) — see $WORKDIR/${name}_killed.log" \
+      | tee -a "$SUMMARY"; continue
+  fi
+  if ! run "$WORKDIR/${name}_resumed.log" applications/train_gen2.py -c "$WORKDIR/${name}_resumed.yml"; then
+    echo "FAIL  $name resumed run — see $WORKDIR/${name}_resumed.log" | tee -a "$SUMMARY"; continue
+  fi
+  if ! grep -q "Resuming epoch 0 at batch $KILL_AFTER" "$WORKDIR/${name}_resumed.log"; then
+    echo "FAIL  $name resumed run did not resume at batch $KILL_AFTER" | tee -a "$SUMMARY"; continue
+  fi
+  if $PYCHK "$HERE/check_mid_epoch_resume.py" "$ref" "$resumed" --rtol "$RTOL" | tee "$WORKDIR/${name}_check.txt"; then
+    echo "PASS  $name (killed after batch $KILL_AFTER, resumed == uninterrupted)" | tee -a "$SUMMARY"
+  else
+    echo "FAIL  $name resumed != uninterrupted — see $WORKDIR/${name}_check.txt" | tee -a "$SUMMARY"
+  fi
+done
+
+echo "===================================================================="
+echo "SUMMARY:"
+cat "$SUMMARY"
