@@ -223,3 +223,26 @@ postblocks:
         - ERA5/prognostic/2d/Z500
         - ERA5/prognostic/2d/Q500
         method: inverse_transform
+    reconstruct_target:
+      type: reconstruct
+      args:
+        in_key: y
+        out_key: y_target_processed
+    scaler_target:
+      type: bridgescaler_transform
+      args:
+        scaler_path: /glade/campaign/cisl/aiml/credit/bridgescaler/wxformer_025deg_gen2_pre_scaler.json
+        variables:
+        - ERA5/prognostic/3d/U
+        - ERA5/prognostic/3d/V
+        - ERA5/prognostic/3d/T
+        - ERA5/prognostic/3d/Q
+        - ERA5/prognostic/2d/SP
+        - ERA5/prognostic/2d/t2m
+        - ERA5/prognostic/2d/V500
+        - ERA5/prognostic/2d/U500
+        - ERA5/prognostic/2d/T500
+        - ERA5/prognostic/2d/Z500
+        - ERA5/prognostic/2d/Q500
+        method: inverse_transform
+        key: y_target_processed
