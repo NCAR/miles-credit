@@ -859,6 +859,22 @@ def _check_channel_counts(conf: dict, rep: _Report) -> None:
             )
 
 
+def _check_plot_denorm_ready(conf: dict, rep: _Report) -> None:
+    """Warn when ``credit plot --denorm`` would have nothing to denormalize with.
+
+    ``--denorm`` needs an inverse ``bridgescaler_transform`` acting on ``y_processed``; the rule
+    lives in ``credit.cli._plot._denorm_block_confs`` so the two cannot drift apart.
+    """
+    from ._plot import _denorm_block_confs
+
+    try:
+        _denorm_block_confs(conf)
+    except ValueError as exc:
+        rep.warn(
+            "postblocks.per_step", "`credit plot --denorm` cannot convert model output to physical units.", fix=str(exc)
+        )
+
+
 def _check_loss_pipeline(conf: dict, rep: _Report) -> None:
     """Check the postblock chain against what BaseLoss needs to score.
 
@@ -1616,6 +1632,7 @@ def _run_checks(conf: dict, rep: _Report, deep: bool = False) -> None:
             _check_channel_counts,
             _check_model_geometry,
             _check_loss_pipeline,
+            _check_plot_denorm_ready,
             _check_transformed_variance_weights,
             _check_trainer,
             _check_channel_schema,
