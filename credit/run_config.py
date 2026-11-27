@@ -33,7 +33,15 @@ def _git(save_loc: str, *args: str, identity: bool = False) -> subprocess.Comple
     cmd = ["git", "-c", "commit.gpgsign=false"]
     if identity:
         cmd += ["-c", "user.name=credit", "-c", "user.email=credit@localhost"]
-    return subprocess.run(cmd + list(args), cwd=save_loc, capture_output=True, text=True, timeout=60)
+    # LC_ALL=C keeps git's messages in English so we can recognize specific failures (e.g. "dubious ownership").
+    return subprocess.run(
+        cmd + list(args),
+        cwd=save_loc,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env={**os.environ, "LC_ALL": "C"},
+    )
 
 
 def _git_commit_model_yml(save_loc: str, message: str) -> str | None:
@@ -110,12 +118,19 @@ def sync_run_config(config_path: str, save_loc: str) -> str:
                 with open(os.path.join(save_loc, ".gitignore"), "w") as f:
                     f.write(_GIT_IGNORE)
             marker = _git(save_loc, "config", "--local", "--get", _GIT_MARKER)
-            if "dubious ownership" in marker.stderr:
-                # save_loc is owned by another user (e.g. a shared run directory): git refuses to work there.
+            if marker.returncode not in (0, 1):
+                # Exit 1 just means the key is unset; anything else means git could not use the repo. `git config`
+                # reports an unusable repo vaguely ("not inside a git repository"), so probe with rev-parse, which
+                # names the real cause.
+                probe = _git(save_loc, "rev-parse", "--git-dir")
+                if "dubious ownership" not in marker.stderr + probe.stderr:
+                    raise RuntimeError(f"`git config` failed: {marker.stderr.strip() or probe.stderr.strip()}")
+                # git refuses to touch a repo owned by another user (e.g. a shared run dir). Moving save_loc would
+                # not help here, so point at the actual fix.
                 logger.warning(
-                    'git refuses to use %s because it is owned by another user ("dubious ownership"); '
-                    "model.yml was still copied but its history is NOT being recorded. To enable tracking, run "
-                    "`git config --global --add safe.directory %s`.",
+                    "%s is a git repository owned by another user, so git refuses to use it; config history is "
+                    "NOT being recorded there. model.yml was still copied. To enable tracking, run: "
+                    "git config --global --add safe.directory %s",
                     save_loc,
                     save_loc,
                 )
